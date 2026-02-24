@@ -53,6 +53,8 @@ func main() {
 		cmdUpdate()
 	case "refresh":
 		cmdRefresh()
+	case "statusline":
+		cmdStatusline()
 	case "version":
 		fmt.Println("stratus v" + Version)
 	default:
@@ -72,6 +74,7 @@ Commands:
   init        Initialize stratus in the current project (--force to re-run)
   update      Update stratus binary and refresh project files
   refresh     Refresh agents, skills, and rules from the current binary
+  statusline  Emit ANSI status bar (invoked by Claude Code via settings.json)
   version     Print version`)
 }
 
@@ -226,7 +229,9 @@ Rules written to .claude/rules/:
 
 Hooks registered in .claude/settings.json:
   PreToolUse  phase_guard       — blocks write tools during review/verify
-  PreToolUse  delegation_guard  — requires active workflow for delivery agents`)
+  PreToolUse  delegation_guard  — requires active workflow for delivery agents
+
+Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar`)
 }
 
 // writeSkills extracts embedded SKILL.md files into <project>/.claude/skills/.
@@ -449,6 +454,15 @@ func writeHooks(projectRoot string) error {
 	}
 
 	settings["hooks"] = hooksSection
+
+	// Register statusLine non-destructively (preserve user customisation).
+	if _, ok := settings["statusLine"]; !ok {
+		settings["statusLine"] = map[string]any{
+			"type":    "command",
+			"command": `bash -c 'input=$(cat); echo "$input" | stratus statusline'`,
+		}
+	}
+
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
