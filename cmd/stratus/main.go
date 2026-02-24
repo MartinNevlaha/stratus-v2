@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -184,6 +185,11 @@ func cmdInit() {
 		log.Printf("warning: could not write rules: %v", err)
 	}
 
+	// Register hooks in .claude/settings.json
+	if err := writeHooks(wd); err != nil {
+		log.Printf("warning: could not register hooks: %v", err)
+	}
+
 	// Run initial Vexor index (best-effort — skip if vexor not installed)
 	vexorIndex(wd)
 
@@ -210,15 +216,9 @@ Rules written to .claude/rules/:
   tdd-requirements       — test-driven development
   error-handling         — consistent error patterns
 
-Add hooks to .claude/settings.json:
-{
-  "hooks": {
-    "PreToolUse": [
-      {"command": "stratus hook phase_guard"},
-      {"command": "stratus hook delegation_guard"}
-    ]
-  }
-}`)
+Hooks registered in .claude/settings.json:
+  PreToolUse  phase_guard       — blocks write tools during review/verify
+  PreToolUse  delegation_guard  — requires active workflow for delivery agents`)
 }
 
 // writeSkills extracts embedded SKILL.md files into <project>/.claude/skills/.
@@ -341,8 +341,95 @@ func cmdRefresh() {
 	if err := writeRules(wd); err != nil {
 		log.Printf("warning: could not write rules: %v", err)
 	}
+	if err := writeHooks(wd); err != nil {
+		log.Printf("warning: could not register hooks: %v", err)
+	}
 
-	fmt.Println("stratus refreshed — agents, skills, and rules updated to latest version.")
+	fmt.Println("stratus refreshed — agents, skills, rules, and hooks updated to latest version.")
+}
+
+// writeHooks registers stratus hooks in <project>/.claude/settings.json.
+// It reads the existing file (if any), merges the stratus hooks without
+// disturbing user-defined hooks, then writes the result back.
+func writeHooks(projectRoot string) error {
+	claudeDir := filepath.Join(projectRoot, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return err
+	}
+
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+
+	// Read existing settings (best-effort; start with empty map on miss).
+	var settings map[string]any
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		_ = json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = map[string]any{}
+	}
+
+	// Extract or create the top-level "hooks" object.
+	hooksSection, _ := settings["hooks"].(map[string]any)
+	if hooksSection == nil {
+		hooksSection = map[string]any{}
+	}
+
+	// Stratus hooks: {event → [{matcher, command}]}.
+	type hookDef struct{ matcher, command string }
+	defs := []struct {
+		event string
+		hooks []hookDef
+	}{
+		{
+			event: "PreToolUse",
+			hooks: []hookDef{
+				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
+				{"Task", "stratus hook delegation_guard"},
+			},
+		},
+	}
+
+	for _, d := range defs {
+		groups, _ := hooksSection[d.event].([]any)
+		for _, h := range d.hooks {
+			if hasStratusHook(groups, h.command) {
+				continue // already registered
+			}
+			groups = append(groups, map[string]any{
+				"matcher": h.matcher,
+				"hooks":   []any{map[string]any{"type": "command", "command": h.command}},
+			})
+		}
+		hooksSection[d.event] = groups
+	}
+
+	settings["hooks"] = hooksSection
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
+}
+
+// hasStratusHook returns true when command is already present in the hook groups slice.
+func hasStratusHook(groups []any, command string) bool {
+	for _, g := range groups {
+		group, ok := g.(map[string]any)
+		if !ok {
+			continue
+		}
+		hooks, _ := group["hooks"].([]any)
+		for _, h := range hooks {
+			entry, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if cmd, _ := entry["command"].(string); cmd == command {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // vexorIndex runs `vexor index` in the project root directory.
