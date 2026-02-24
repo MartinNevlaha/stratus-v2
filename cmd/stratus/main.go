@@ -69,7 +69,7 @@ Commands:
   serve       Start HTTP API server + dashboard
   mcp-serve   Start MCP stdio server
   hook <name> Run a Claude Code hook handler
-  init        Initialize stratus in the current project
+  init        Initialize stratus in the current project (--force to re-run)
   update      Update stratus binary and refresh project files
   refresh     Refresh agents, skills, and rules from the current binary
   version     Print version`)
@@ -134,11 +134,12 @@ func cmdHook() {
 }
 
 func cmdInit() {
+	force := len(os.Args) > 2 && os.Args[2] == "--force"
 	wd, _ := os.Getwd()
 	cfgPath := filepath.Join(wd, ".stratus.json")
 
-	if _, err := os.Stat(cfgPath); err == nil {
-		fmt.Println("stratus already initialized (.stratus.json exists)")
+	if _, err := os.Stat(cfgPath); err == nil && !force {
+		fmt.Println("stratus already initialized (.stratus.json exists) — use --force to re-run")
 		return
 	}
 
