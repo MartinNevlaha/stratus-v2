@@ -70,8 +70,11 @@ Route to the appropriate delivery agent based on task type:
 |-----------|-------|
 | API, backend, handlers | `delivery-backend-engineer` |
 | UI, components, pages | `delivery-frontend-engineer` |
+| UI/UX design, design system | `delivery-ux-designer` |
 | Migrations, schema | `delivery-database-engineer` |
 | Infra, CI/CD | `delivery-devops-engineer` |
+| Mobile, React Native, iOS/Android | `delivery-mobile-engineer` |
+| Architecture, system design, ADRs | `delivery-system-architect` |
 | Tests | `delivery-qa-engineer` |
 | General/unclear | `delivery-implementation-expert` |
 

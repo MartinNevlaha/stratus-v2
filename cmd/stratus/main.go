@@ -189,23 +189,32 @@ func cmdInit() {
 	fmt.Println(`stratus initialized!
 
 Skills written to .claude/skills/:
-  /spec            — spec-driven development
-  /bug             — bug-fixing workflow
-  /learn           — pattern learning
-  /sync-stratus    — installation health check
-  /vexor-cli       — semantic file discovery
-  /governance-db   — query governance docs and ADRs
-  /run-tests       — auto-detect and run test suite
-  /code-review     — structured code review (PASS/FAIL)
-  /find-bugs       — systematic bug diagnosis (read-only)
-  /security-review — security audit (OWASP, secrets, injection)
+  /spec                      — spec-driven development
+  /spec-complex              — complex spec (discovery→design→plan→implement→verify→learn)
+  /bug                       — bug-fixing workflow
+  /learn                     — pattern learning
+  /sync-stratus              — installation health check
+  /vexor-cli                 — semantic file discovery
+  /governance-db             — query governance docs and ADRs
+  /create-architecture       — design ADRs, component diagrams, interfaces
+  /explain-architecture      — read-only architecture explanation
+  /run-tests                 — auto-detect and run test suite
+  /code-review               — structured code review (PASS/FAIL)
+  /find-bugs                 — systematic bug diagnosis (read-only)
+  /security-review           — security audit (OWASP, secrets, injection)
+  /frontend-design           — distinctive UI design guidance
+  /react-native-best-practices — React Native / Expo performance patterns
 
 Agents written to .claude/agents/:
   delivery-implementation-expert  — general-purpose implementation
   delivery-backend-engineer       — API, services, handlers
   delivery-frontend-engineer      — UI, components, pages
+  delivery-ux-designer            — UI/UX design specs and design systems
   delivery-database-engineer      — schema, migrations, queries
   delivery-devops-engineer        — CI/CD, Docker, infrastructure
+  delivery-mobile-engineer        — React Native / Expo (iOS + Android)
+  delivery-system-architect       — component designs, API contracts (read-only)
+  delivery-strategic-architect    — ADRs, technology selection (read-only)
   delivery-qa-engineer            — tests, coverage, lint
   delivery-code-reviewer          — code quality + security review
   delivery-debugger               — root cause diagnosis

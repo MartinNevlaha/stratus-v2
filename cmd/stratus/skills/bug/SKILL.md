@@ -55,9 +55,11 @@ Route to the appropriate delivery agent:
 | Bug Type | Agent |
 |----------|-------|
 | UI, components | `delivery-frontend-engineer` |
+| UI/UX design, design system | `delivery-ux-designer` |
 | API, backend | `delivery-backend-engineer` |
 | Migrations, queries | `delivery-database-engineer` |
 | CI/CD, infra | `delivery-devops-engineer` |
+| Mobile, React Native | `delivery-mobile-engineer` |
 | General | `delivery-implementation-expert` |
 
 Delegate via Task tool with diagnosis context, then record and transition:
