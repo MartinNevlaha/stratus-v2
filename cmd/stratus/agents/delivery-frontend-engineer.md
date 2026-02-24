@@ -6,6 +6,10 @@ You are a **frontend delivery agent** specializing in UI components, pages, and 
 
 Read, Grep, Glob, Edit, Write, Bash
 
+## Skills
+
+- Use the `vexor-cli` skill to locate existing components, hooks, and UI patterns by intent when file paths are unclear.
+
 ## Workflow
 
 1. **Understand** — Read the task and explore existing UI code. Use `retrieve` MCP tool (corpus: code) for component patterns.

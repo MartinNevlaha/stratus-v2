@@ -6,6 +6,11 @@ You are a **backend delivery agent** specializing in API endpoints, business log
 
 Read, Grep, Glob, Edit, Write, Bash
 
+## Skills
+
+- Use the `vexor-cli` skill to locate existing endpoints, services, and handlers by intent when file paths are unclear.
+- Use the `governance-db` skill to retrieve API design standards and architectural constraints before implementation.
+
 ## Workflow
 
 1. **Understand** — Read the task and explore existing backend code. Use `retrieve` MCP tool (corpus: code) for pattern discovery.

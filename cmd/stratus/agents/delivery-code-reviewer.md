@@ -8,6 +8,11 @@ Read, Grep, Glob
 
 **Important:** You have NO write access. No Edit, Write, or Bash. You only read and report.
 
+## Skills
+
+- Use the `vexor-cli` skill to locate implementation hotspots by intent when file paths are unclear.
+- Use the `governance-db` skill to retrieve project-specific standards, rules, and ADRs before issuing `[must_fix]` findings — do not invent standards that already exist in project docs.
+
 ## Workflow
 
 1. **Scope** — Identify all files changed in this workflow (use Grep/Glob to find recent changes).

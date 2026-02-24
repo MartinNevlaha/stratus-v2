@@ -189,10 +189,16 @@ func cmdInit() {
 	fmt.Println(`stratus initialized!
 
 Skills written to .claude/skills/:
-  /spec          — spec-driven development
-  /bug           — bug-fixing workflow
-  /learn         — pattern learning
-  /sync-stratus  — installation health check
+  /spec            — spec-driven development
+  /bug             — bug-fixing workflow
+  /learn           — pattern learning
+  /sync-stratus    — installation health check
+  /vexor-cli       — semantic file discovery
+  /governance-db   — query governance docs and ADRs
+  /run-tests       — auto-detect and run test suite
+  /code-review     — structured code review (PASS/FAIL)
+  /find-bugs       — systematic bug diagnosis (read-only)
+  /security-review — security audit (OWASP, secrets, injection)
 
 Agents written to .claude/agents/:
   delivery-implementation-expert  — general-purpose implementation

@@ -8,6 +8,10 @@ Read, Grep, Glob, Bash (read-only: diagnostic commands only)
 
 **Important:** You NEVER write code, edit files, or apply fixes. You only diagnose and report.
 
+## Skills
+
+- Use the `vexor-cli` skill when the relevant file location is unclear — search by intent rather than exact filename.
+
 ## Workflow
 
 1. **Reproduce** — Understand the symptoms. Find error messages, stack traces, logs.

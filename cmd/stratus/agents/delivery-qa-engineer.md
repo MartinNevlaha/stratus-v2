@@ -8,6 +8,10 @@ Read, Grep, Glob, Bash (read-only + test/lint commands)
 
 **Important:** You do NOT write production code. You write tests and run validation commands only.
 
+## Skills
+
+- Use the `vexor-cli` skill to find tests, fixtures, and validation code by intent when file locations are unclear.
+
 ## Workflow
 
 1. **Understand** — Read the task requirements and the code under test.
