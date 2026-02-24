@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
@@ -19,6 +21,7 @@ type Server struct {
 	terminal    *terminal.Manager
 	projectRoot string
 	sttEndpoint string
+	staticFiles fs.FS
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -30,6 +33,7 @@ func NewServer(
 	termMgr *terminal.Manager,
 	projectRoot string,
 	sttEndpoint string,
+	staticFiles fs.FS,
 ) *Server {
 	return &Server{
 		db:          database,
@@ -39,6 +43,7 @@ func NewServer(
 		terminal:    termMgr,
 		projectRoot: projectRoot,
 		sttEndpoint: sttEndpoint,
+		staticFiles: staticFiles,
 	}
 }
 
@@ -93,8 +98,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/ws", s.hub.ServeWS)
 	mux.HandleFunc("/api/terminal/ws", s.terminal.ServeWS)
 
-	// Static files (embedded frontend)
-	mux.Handle("/", http.FileServer(http.FS(staticFS())))
+	// Static files (embedded Svelte SPA) with SPA fallback to index.html
+	mux.Handle("/", s.spaHandler())
 
 	return corsMiddleware(mux)
 }
@@ -103,6 +108,28 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) ListenAndServe(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	return http.ListenAndServe(addr, s.Handler())
+}
+
+// spaHandler serves the embedded Svelte frontend. For any path that doesn't
+// correspond to a real file (e.g. /memory, /retrieval), it falls back to
+// index.html so the client-side router can take over.
+func (s *Server) spaHandler() http.Handler {
+	fileServer := http.FileServer(http.FS(s.staticFiles))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Strip leading slash for fs.Stat
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+		if _, err := fs.Stat(s.staticFiles, path); err != nil {
+			// File not found — serve index.html for SPA routing
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/"
+			fileServer.ServeHTTP(w, r2)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

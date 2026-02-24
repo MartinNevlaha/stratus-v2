@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../static',
+    outDir: '../cmd/stratus/static',
     emptyOutDir: true,
   },
   server: {

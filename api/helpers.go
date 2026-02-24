@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io/fs"
 	"net/http"
 	"strconv"
 )
@@ -44,20 +43,3 @@ func queryStr(r *http.Request, key string) string {
 	return r.URL.Query().Get(key)
 }
 
-// staticFS returns a fake empty FS when no frontend is embedded.
-// Replaced by the real embed.go in production builds.
-var staticFSImpl fs.FS
-
-func staticFS() fs.FS {
-	if staticFSImpl != nil {
-		return staticFSImpl
-	}
-	// Return empty FS (no frontend built yet)
-	return emptyFS{}
-}
-
-type emptyFS struct{}
-
-func (emptyFS) Open(name string) (fs.File, error) {
-	return nil, fs.ErrNotExist
-}

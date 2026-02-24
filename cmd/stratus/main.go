@@ -30,6 +30,9 @@ var agentsFS embed.FS
 //go:embed rules
 var rulesFS embed.FS
 
+//go:embed static
+var staticFiles embed.FS
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -88,7 +91,13 @@ func cmdServe() {
 	hub := api.NewHub()
 	termMgr := terminal.NewManager()
 
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint)
+	// Strip the "static/" prefix so the FS root is the build output directory.
+	staticFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		log.Fatalf("static fs: %v", err)
+	}
+
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, staticFS)
 
 	log.Printf("stratus serving on http://localhost:%d", cfg.Port)
 	if err := srv.ListenAndServe(cfg.Port); err != nil {
