@@ -158,17 +158,9 @@ func cmdInit() {
 		log.Fatalf("write .stratus.json: %v", err)
 	}
 
-	mcpJSON := `{
-  "mcpServers": {
-    "stratus": {
-      "type": "stdio",
-      "command": "stratus",
-      "args": ["mcp-serve"]
-    }
-  }
-}
-`
-	_ = os.WriteFile(filepath.Join(wd, ".mcp.json"), []byte(mcpJSON), 0o644)
+	if err := writeMCP(wd); err != nil {
+		log.Printf("warning: could not write .mcp.json: %v", err)
+	}
 
 	// Write coordinator skills to .claude/skills/
 	if err := writeSkills(wd); err != nil {
@@ -346,6 +338,43 @@ func cmdRefresh() {
 	}
 
 	fmt.Println("stratus refreshed — agents, skills, rules, and hooks updated to latest version.")
+}
+
+// writeMCP merges the stratus MCP server entry into <project>/.mcp.json.
+// If the file already contains other MCP servers they are preserved.
+func writeMCP(projectRoot string) error {
+	mcpPath := filepath.Join(projectRoot, ".mcp.json")
+
+	// Read existing config (best-effort).
+	var existing map[string]any
+	if data, err := os.ReadFile(mcpPath); err == nil {
+		_ = json.Unmarshal(data, &existing)
+	}
+	if existing == nil {
+		existing = map[string]any{}
+	}
+
+	// Get or create "mcpServers" object.
+	servers, _ := existing["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+
+	// Only add stratus if not already present.
+	if _, ok := servers["stratus"]; !ok {
+		servers["stratus"] = map[string]any{
+			"type":    "stdio",
+			"command": "stratus",
+			"args":    []string{"mcp-serve"},
+		}
+	}
+
+	existing["mcpServers"] = servers
+	out, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(mcpPath, append(out, '\n'), 0o644)
 }
 
 // writeHooks registers stratus hooks in <project>/.claude/settings.json.
