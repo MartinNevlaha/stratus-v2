@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { appState, initStore } from '$lib/store'
+  import { appState, initStore, startUpdate } from '$lib/store'
   import Overview from './routes/Overview.svelte'
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'
@@ -44,6 +44,12 @@
         </button>
       {/each}
     </nav>
+
+    {#if appState.version?.update_available}
+      <button class="update-btn" onclick={startUpdate} disabled={appState.updateInProgress}>
+        {appState.updateInProgress ? 'Updating…' : `↑ v${appState.version.latest}`}
+      </button>
+    {/if}
 
     <div class="status-dot" class:connected={appState.connected} title={appState.connected ? 'Live' : 'Reconnecting…'}></div>
   </header>
@@ -130,6 +136,21 @@
     min-width: 16px;
     text-align: center;
   }
+
+  .update-btn {
+    padding: 4px 10px;
+    background: #9e6a03;
+    color: #ffa657;
+    border: 1px solid #d29922;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+    white-space: nowrap;
+  }
+  .update-btn:hover:not(:disabled) { background: #bb8009; }
+  .update-btn:disabled { opacity: 0.6; cursor: default; }
 
   .status-dot {
     width: 8px;

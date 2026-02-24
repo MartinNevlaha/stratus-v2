@@ -6,6 +6,7 @@
   let recentEvents = $derived(appState.dashboard?.recent_events ?? [])
   let vexorOk = $derived(appState.dashboard?.vexor_available ?? false)
   let govStats = $derived(appState.dashboard?.governance)
+  let showUpdatePanel = $derived(appState.updateInProgress || appState.updateLog.length > 0)
 </script>
 
 <div class="overview">
@@ -19,6 +20,23 @@
     {/if}
     <span class="badge ok">WS {appState.connected ? 'live' : 'offline'}</span>
   </div>
+
+  <!-- Update progress panel -->
+  {#if showUpdatePanel}
+    <div class="update-panel">
+      <div class="update-header">
+        {appState.updateInProgress ? '⟳ Updating stratus…' : '✓ Update complete'}
+      </div>
+      <div class="update-log">
+        {#each appState.updateLog as line}
+          <div class="log-line">{line}</div>
+        {/each}
+      </div>
+      {#if !appState.updateInProgress && appState.updateLog.length > 0}
+        <div class="restart-notice">Restart stratus server to apply the new version.</div>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Active workflows -->
   {#if workflows.length === 0}
@@ -129,6 +147,20 @@
   .phase-agents { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .phase-label { font-size: 12px; color: #8b949e; }
   .agent-chip { font-size: 11px; background: #21262d; color: #c9d1d9; padding: 2px 8px; border-radius: 12px; }
+
+  .update-panel {
+    background: #1c1700;
+    border: 1px solid #9e6a03;
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .update-header { font-size: 13px; font-weight: 600; color: #ffa657; }
+  .update-log { display: flex; flex-direction: column; gap: 2px; }
+  .log-line { font-size: 12px; color: #d29922; font-family: monospace; }
+  .restart-notice { font-size: 12px; color: #3fb950; font-weight: 600; margin-top: 4px; }
 
   .section-title { font-size: 13px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
 

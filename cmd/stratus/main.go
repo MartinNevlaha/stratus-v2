@@ -54,7 +54,7 @@ func main() {
 	case "refresh":
 		cmdRefresh()
 	case "version":
-		fmt.Println("stratus v2.0.0")
+		fmt.Println("stratus v" + Version)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -98,7 +98,7 @@ func cmdServe() {
 		log.Fatalf("static fs: %v", err)
 	}
 
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, staticFS)
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, staticFS, Version)
 
 	log.Printf("stratus serving on http://localhost:%d", cfg.Port)
 	if err := srv.ListenAndServe(cfg.Port); err != nil {

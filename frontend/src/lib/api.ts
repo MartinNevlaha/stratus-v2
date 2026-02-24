@@ -1,4 +1,4 @@
-import type { DashboardState, Event, SearchResult, WorkflowState, Candidate, Proposal } from './types'
+import type { DashboardState, Event, SearchResult, WorkflowState, Candidate, Proposal, VersionInfo } from './types'
 
 const BASE = '/api'
 
@@ -90,6 +90,10 @@ export const listProposals = (status?: string) =>
 
 export const decideProposal = (id: string, decision: string) =>
   post<{ status: string }>(`/learning/proposals/${id}/decide`, { decision })
+
+// System
+export const getVersion = () => get<VersionInfo>('/system/version')
+export const triggerUpdate = () => post<{ accepted: boolean }>('/system/update', {})
 
 // STT
 export const getSttStatus = () => get<{ available: boolean; endpoint: string }>('/stt/status')

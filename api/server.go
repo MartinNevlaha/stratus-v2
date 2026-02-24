@@ -22,6 +22,7 @@ type Server struct {
 	projectRoot string
 	sttEndpoint string
 	staticFiles fs.FS
+	version     string
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -34,6 +35,7 @@ func NewServer(
 	projectRoot string,
 	sttEndpoint string,
 	staticFiles fs.FS,
+	version string,
 ) *Server {
 	return &Server{
 		db:          database,
@@ -44,6 +46,7 @@ func NewServer(
 		projectRoot: projectRoot,
 		sttEndpoint: sttEndpoint,
 		staticFiles: staticFiles,
+		version:     version,
 	}
 }
 
@@ -89,6 +92,10 @@ func (s *Server) Handler() http.Handler {
 
 	// Dashboard
 	mux.HandleFunc("GET /api/dashboard/state", s.handleDashboardState)
+
+	// System
+	mux.HandleFunc("GET /api/system/version", s.handleVersion)
+	mux.HandleFunc("POST /api/system/update", s.handleUpdate)
 
 	// STT
 	mux.HandleFunc("POST /api/stt/transcribe", s.handleSTTTranscribe)

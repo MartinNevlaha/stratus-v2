@@ -86,3 +86,11 @@ export interface WsMessage {
   type: string
   payload?: unknown
 }
+
+export interface VersionInfo {
+  current: string
+  latest: string
+  update_available: boolean
+  release_url: string
+  release_notes: string
+}
