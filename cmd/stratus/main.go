@@ -45,6 +45,10 @@ func main() {
 		cmdHook()
 	case "init":
 		cmdInit()
+	case "update":
+		cmdUpdate()
+	case "refresh":
+		cmdRefresh()
 	case "version":
 		fmt.Println("stratus v2.0.0")
 	default:
@@ -62,6 +66,8 @@ Commands:
   mcp-serve   Start MCP stdio server
   hook <name> Run a Claude Code hook handler
   init        Initialize stratus in the current project
+  update      Update stratus binary and refresh project files
+  refresh     Refresh agents, skills, and rules from the current binary
   version     Print version`)
 }
 
@@ -267,6 +273,67 @@ func writeRules(projectRoot string) error {
 		}
 		return os.WriteFile(dest, data, 0o644)
 	})
+}
+
+// cmdUpdate updates the stratus binary via `go install`, then re-execs the new
+// binary with `stratus refresh` to update project files from the latest embedded content.
+func cmdUpdate() {
+	if _, err := exec.LookPath("go"); err != nil {
+		fmt.Fprintln(os.Stderr, "error: 'go' not found in PATH — install Go or update manually:")
+		fmt.Fprintln(os.Stderr, "  go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@latest")
+		os.Exit(1)
+	}
+
+	fmt.Println("Updating stratus binary…")
+	cmd := exec.Command("go", "install", "github.com/MartinNevlaha/stratus-v2/cmd/stratus@latest")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("update failed: %v", err)
+	}
+	fmt.Println("Binary updated.")
+
+	// Locate the newly installed binary and re-exec it with `refresh`
+	// so project files are written from the new binary's embedded content.
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		home, _ := os.UserHomeDir()
+		gopath = filepath.Join(home, "go")
+	}
+	newBin := filepath.Join(gopath, "bin", "stratus")
+
+	wd, _ := os.Getwd()
+	refresh := exec.Command(newBin, "refresh")
+	refresh.Dir = wd
+	refresh.Stdout = os.Stdout
+	refresh.Stderr = os.Stderr
+	if err := refresh.Run(); err != nil {
+		log.Fatalf("refresh failed: %v", err)
+	}
+}
+
+// cmdRefresh re-writes agents, skills, and rules from the current binary's
+// embedded content. Safe to run on an already-initialized project — never
+// touches .stratus.json or .mcp.json.
+func cmdRefresh() {
+	wd, _ := os.Getwd()
+
+	if _, err := os.Stat(filepath.Join(wd, ".stratus.json")); err != nil {
+		fmt.Fprintln(os.Stderr, "error: stratus not initialized here (no .stratus.json) — run `stratus init` first")
+		os.Exit(1)
+	}
+
+	if err := writeSkills(wd); err != nil {
+		log.Printf("warning: could not write skills: %v", err)
+	}
+	if err := writeAgents(wd); err != nil {
+		log.Printf("warning: could not write agents: %v", err)
+	}
+	if err := writeRules(wd); err != nil {
+		log.Printf("warning: could not write rules: %v", err)
+	}
+
+	fmt.Println("stratus refreshed — agents, skills, and rules updated to latest version.")
 }
 
 // vexorIndex runs `vexor index` in the project root directory.
