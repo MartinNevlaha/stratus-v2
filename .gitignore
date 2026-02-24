@@ -1,0 +1,16 @@
+# Compiled binaries
+/stratus
+/stratus-v2-bin
+/stratus-linux-*
+/stratus-darwin-*
+/stratus-windows-*
+
+# Data directory
+.stratus/
+
+# Node
+frontend/node_modules/
+frontend/.vite/
+
+# OS
+.DS_Store
