@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -168,6 +169,9 @@ func cmdInit() {
 		log.Printf("warning: could not write rules: %v", err)
 	}
 
+	// Run initial Vexor index (best-effort — skip if vexor not installed)
+	vexorIndex(wd)
+
 	fmt.Println(`stratus initialized!
 
 Skills written to .claude/skills/:
@@ -263,6 +267,25 @@ func writeRules(projectRoot string) error {
 		}
 		return os.WriteFile(dest, data, 0o644)
 	})
+}
+
+// vexorIndex runs `vexor index` in the project root directory.
+// Best-effort: skipped silently if the vexor binary is not installed.
+func vexorIndex(projectRoot string) {
+	if _, err := exec.LookPath("vexor"); err != nil {
+		fmt.Println("vexor not found — skipping code index (install vexor to enable semantic code search)")
+		return
+	}
+	fmt.Print("Indexing codebase with vexor… ")
+	cmd := exec.Command("vexor", "index")
+	cmd.Dir = projectRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("warning: vexor index failed: %v\n", err)
+		return
+	}
+	fmt.Println("done.")
 }
 
 func mustOpenDB(cfg config.Config) *db.DB {
