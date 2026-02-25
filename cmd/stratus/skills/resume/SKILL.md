@@ -73,6 +73,31 @@ Then continue with the implement flow below.
 
 ---
 
+### spec — `discovery` phase (complex workflow)
+Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis, constraints, technology landscape.
+Record delegation. Transition to design:
+```bash
+curl -sS -X PUT $BASE/api/workflows/<id>/phase \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "design"}'
+```
+Then continue with the design phase below.
+
+---
+
+### spec — `design` phase (complex workflow)
+Delegate to `delivery-system-architect` (Task tool) — component design, API contracts, data models.
+Produce / update a Technical Design Document at `docs/plans/<id>-design.md`.
+Record delegation. Transition to plan:
+```bash
+curl -sS -X PUT $BASE/api/workflows/<id>/phase \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "plan"}'
+```
+Then continue with the plan phase below.
+
+---
+
 ### spec — `implement` phase
 Find the first task with status `"pending"` or `"in_progress"`. That is the next task to work on.
 

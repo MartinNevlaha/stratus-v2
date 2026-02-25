@@ -1,15 +1,21 @@
 <script lang="ts">
   interface Props {
     type: 'spec' | 'bug'
+    complexity?: 'simple' | 'complex'
     currentPhase: string
   }
 
-  let { type, currentPhase }: Props = $props()
+  let { type, complexity = 'simple', currentPhase }: Props = $props()
 
-  const specPhases = ['plan', 'implement', 'verify', 'learn', 'complete']
-  const bugPhases = ['analyze', 'fix', 'review', 'complete']
+  const specSimplePhases  = ['plan', 'implement', 'verify', 'learn', 'complete']
+  const specComplexPhases = ['discovery', 'design', 'plan', 'implement', 'verify', 'learn', 'complete']
+  const bugPhases         = ['analyze', 'fix', 'review', 'complete']
 
-  let phases = $derived(type === 'bug' ? bugPhases : specPhases)
+  let phases = $derived(
+    type === 'bug' ? bugPhases :
+    complexity === 'complex' ? specComplexPhases :
+    specSimplePhases
+  )
 
   function phaseStatus(phase: string): 'done' | 'current' | 'pending' {
     const idx = phases.indexOf(phase)
