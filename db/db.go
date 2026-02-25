@@ -19,11 +19,14 @@ func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	conn, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)")
+	conn, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	conn.SetMaxOpenConns(1) // SQLite: single writer
+	// WAL mode supports concurrent readers; allow a small pool so long-running
+	// operations (e.g. IndexGovernance on startup) don't starve HTTP handlers.
+	// busy_timeout above ensures writers retry instead of returning SQLITE_BUSY.
+	conn.SetMaxOpenConns(4)
 	db := &DB{sql: conn}
 	if err := db.migrate(); err != nil {
 		conn.Close()
