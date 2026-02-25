@@ -16,7 +16,7 @@ func PhaseGuard(event HookEvent) Decision {
 		return Decision{Continue: true}
 	}
 
-	state := fetchActiveWorkflow()
+	state := fetchActiveWorkflow(event.SessionID)
 	if state == nil {
 		return Decision{Continue: true} // no active workflow
 	}
@@ -49,7 +49,7 @@ func DelegationGuard(event HookEvent) Decision {
 		return Decision{Continue: true} // system or read-only agent, always OK
 	}
 
-	state := fetchActiveWorkflow()
+	state := fetchActiveWorkflow(event.SessionID)
 	if state == nil {
 		return Decision{
 			Continue: false,
@@ -88,7 +88,9 @@ func isDeliveryAgent() bool {
 }
 
 // fetchActiveWorkflow queries the local Stratus API for the active workflow state.
-func fetchActiveWorkflow() map[string]any {
+// If sessionID is non-empty, returns the first workflow whose session_id matches.
+// If sessionID is empty, returns the first workflow (backward-compatible fallback).
+func fetchActiveWorkflow(sessionID string) map[string]any {
 	port := getPort()
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://localhost:" + port + "/api/dashboard/state")
@@ -103,10 +105,18 @@ func fetchActiveWorkflow() map[string]any {
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 		return nil
 	}
-	if len(state.Workflows) == 0 {
-		return nil
+	for _, wf := range state.Workflows {
+		if wf == nil {
+			continue
+		}
+		if sessionID == "" {
+			return wf // no session filter → return first
+		}
+		if wfSession, _ := wf["session_id"].(string); wfSession == sessionID {
+			return wf
+		}
 	}
-	return state.Workflows[0]
+	return nil
 }
 
 func getPort() string {
