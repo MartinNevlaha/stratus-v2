@@ -117,7 +117,7 @@
         {#if wf.title}
           <div class="wf-title">{wf.title}</div>
         {/if}
-        <PhaseTimeline type={wf.type} complexity={wf.complexity} currentPhase={wf.phase} />
+        <PhaseTimeline type={wf.type} currentPhase={wf.phase} />
 
         <!-- Resume buttons -->
         <div class="resume-row">
