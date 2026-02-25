@@ -74,6 +74,16 @@ Typically: delegate to `delivery-system-architect` (always), + `delivery-strateg
 
 - Produce a Technical Design Document at `docs/plans/<slug>-design.md`.
 - Record delegation for each agent used.
+- Delegate to `delivery-governance-checker` (Task tool) with prompt: "Review design document at docs/plans/<slug>-design.md for governance compliance."
+- Record delegation:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+- If checker returns `[must_update]` findings → address them in the design doc before transitioning to plan.
 - Transition to plan:
 
 ```bash
@@ -157,9 +167,25 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 ## Phase 5: Verify
 
 - Delegate to `delivery-code-reviewer` (Task tool) — spec compliance, code quality, security, test adequacy.
-- Record delegation.
-- If reviewer finds `must_fix` issues → fix loop: transition back to implement, fix, re-verify (max 5 loops).
-- On pass, transition to learn:
+- Record delegation:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-code-reviewer"}'
+```
+
+- Also delegate to `delivery-governance-checker` (Task tool) with prompt: "Review implementation for governance compliance."
+- Record delegation:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+- If **either** reviewer returns `[must_fix]` issues → fix loop: transition back to implement, fix, re-verify (max 5 loops).
+- On pass from both, transition to learn:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \

@@ -224,6 +224,7 @@ Agents written to .claude/agents/:
   delivery-strategic-architect    — ADRs, technology selection (read-only)
   delivery-qa-engineer            — tests, coverage, lint
   delivery-code-reviewer          — code quality + security review
+  delivery-governance-checker     — governance & ADR compliance (plan, design, implementation)
   delivery-debugger               — root cause diagnosis
 
 Rules written to .claude/rules/:

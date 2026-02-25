@@ -32,6 +32,16 @@ curl -sS -X POST $BASE/api/workflows \
 - Explore with Read, Grep, Glob — do NOT write code.
 - Delegate to specialized Task agents to draft the plan and task breakdown.
 - Write the plan to `docs/plans/<slug>.md`.
+- Delegate to `delivery-governance-checker` (Task tool) with prompt: "Review plan at docs/plans/<slug>.md for governance compliance."
+- Record delegation:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+- If checker returns `[must_update]` findings → update the plan accordingly before proceeding.
 - Set tasks once finalized:
 
 ```bash
@@ -114,8 +124,17 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -d '{"agent_id": "delivery-code-reviewer"}'
 ```
 
-- If reviewer finds `must_fix` issues → fix loop: transition back to implement, fix, re-verify.
-- On pass, transition to learn:
+- Also delegate to `delivery-governance-checker` (Task tool) with prompt: "Review implementation for governance compliance."
+- Record delegation:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+- If **either** reviewer returns `[must_fix]` issues → fix loop: transition back to implement, fix, re-verify.
+- On pass from both, transition to learn:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \

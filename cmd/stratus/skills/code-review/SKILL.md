@@ -43,6 +43,11 @@ Focused on correctness, maintainability, and project standards.
 - No deeply nested conditionals (max 3 levels)
 - Comments explain WHY, not WHAT
 
+### 6. Governance
+- Retrieve project rules: `retrieve(query="<relevant topic>", corpus="governance")`
+- Check implementation against project rules (`.claude/rules/`), ADRs, and CLAUDE.md standards
+- Flag violations with the source rule/ADR cited explicitly
+
 ## Output Format
 
 ```
@@ -61,6 +66,7 @@ Focused on correctness, maintainability, and project standards.
 - [x] Standards: PASS
 - [x] Security: PASS
 - [x] Maintainability: PASS
+- [x] Governance: PASS
 ```
 
 `[must_fix]` → FAIL verdict. `[should_fix]` → warning only. `[suggestion]` → optional.
