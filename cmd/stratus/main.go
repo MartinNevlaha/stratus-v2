@@ -40,6 +40,15 @@ var skillsFS embed.FS
 //go:embed agents
 var agentsFS embed.FS
 
+//go:embed agents-opencode
+var agentsOpenCodeFS embed.FS
+
+//go:embed commands-opencode
+var commandsOpenCodeFS embed.FS
+
+//go:embed plugins-opencode
+var pluginsOpenCodeFS embed.FS
+
 //go:embed rules
 var rulesFS embed.FS
 
@@ -77,15 +86,17 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, `stratus - Claude Code extension framework
+	fmt.Fprintln(os.Stderr, `stratus - Claude Code / OpenCode extension framework
 
 Commands:
   serve       Start HTTP API server + dashboard
   mcp-serve   Start MCP stdio server
   hook <name> Run a Claude Code hook handler
-  init        Initialize stratus in the current project (--force to re-run)
+  init        Initialize stratus in the current project
+              Flags: --force (re-run), --target [claude-code|opencode|both]
   update      Update stratus binary and refresh project files
   refresh     Refresh agents, skills, and rules from the current binary
+              Flags: --target [claude-code|opencode|both]
   statusline  Emit ANSI status bar (invoked by Claude Code via settings.json)
   version     Print version`)
 }
@@ -276,8 +287,28 @@ func cmdHook() {
 	hooks.Run(hookName, handlers)
 }
 
+func parseInitFlags() (force bool, target string) {
+	target = "claude-code"
+	for i := 2; i < len(os.Args); i++ {
+		switch {
+		case os.Args[i] == "--force":
+			force = true
+		case os.Args[i] == "--target" && i+1 < len(os.Args):
+			target = os.Args[i+1]
+			i++
+		case strings.HasPrefix(os.Args[i], "--target="):
+			target = strings.TrimPrefix(os.Args[i], "--target=")
+		}
+	}
+	return
+}
+
 func cmdInit() {
-	force := len(os.Args) > 2 && os.Args[2] == "--force"
+	force, target := parseInitFlags()
+	if target != "claude-code" && target != "opencode" && target != "both" {
+		fmt.Fprintf(os.Stderr, "warning: unknown --target %q, defaulting to 'claude-code'\n", target)
+		target = "claude-code"
+	}
 	wd, _ := os.Getwd()
 	cfgPath := filepath.Join(wd, ".stratus.json")
 
@@ -302,40 +333,18 @@ func cmdInit() {
 		log.Fatalf("write .stratus.json: %v", err)
 	}
 
-	if err := writeMCP(wd); err != nil {
-		log.Printf("warning: could not write .mcp.json: %v", err)
-	}
-
-	// Write skills, agents, and rules (force mode — always write on init).
-	skillsResult, err := writeAssetsFS(skillsFS, "skills", "skills", wd, nil)
-	if err != nil {
-		log.Printf("warning: could not write skills: %v", err)
-	}
-	agentsResult, err := writeAssetsFS(agentsFS, "agents", "agents", wd, nil)
-	if err != nil {
-		log.Printf("warning: could not write agents: %v", err)
-	}
-	rulesResult, err := writeAssetsFS(rulesFS, "rules", "rules", wd, nil)
-	if err != nil {
-		log.Printf("warning: could not write rules: %v", err)
-	}
-
-	// Register hooks in .claude/settings.json
-	if err := writeHooks(wd); err != nil {
-		log.Printf("warning: could not register hooks: %v", err)
+	allHashes := make(map[string]string)
+	switch target {
+	case "opencode":
+		initOpenCode(wd, allHashes)
+	case "both":
+		initClaudeCode(wd, allHashes)
+		initOpenCode(wd, allHashes)
+	default: // "claude-code"
+		initClaudeCode(wd, allHashes)
 	}
 
 	// Record sync state so future refreshes can detect user customizations.
-	allHashes := make(map[string]string)
-	for k, v := range skillsResult.hashes {
-		allHashes[k] = v
-	}
-	for k, v := range agentsResult.hashes {
-		allHashes[k] = v
-	}
-	for k, v := range rulesResult.hashes {
-		allHashes[k] = v
-	}
 	initCfg := config.Load()
 	initCfg.SyncState = &config.SyncState{
 		SyncedVersion: Version,
@@ -354,26 +363,102 @@ func cmdInit() {
 	// Index governance docs into the DB (best-effort)
 	governanceIndex(wd)
 
-	fmt.Println(`stratus initialized!
+	printInitSummary(target)
+}
 
-Skills written to .claude/skills/:
-  /spec                      — spec-driven development
-  /spec-complex              — complex spec (discovery→design→plan→implement→verify→learn)
-  /bug                       — bug-fixing workflow
-  /learn                     — pattern learning
-  /sync-stratus              — installation health check
-  /vexor-cli                 — semantic file discovery
-  /governance-db             — query governance docs and ADRs
-  /create-architecture       — design ADRs, component diagrams, interfaces
-  /explain-architecture      — read-only architecture explanation
-  /run-tests                 — auto-detect and run test suite
-  /code-review               — structured code review (PASS/FAIL)
-  /find-bugs                 — systematic bug diagnosis (read-only)
-  /security-review           — security audit (OWASP, secrets, injection)
-  /frontend-design           — distinctive UI design guidance
-  /react-native-best-practices — React Native / Expo performance patterns
+// initClaudeCode writes all Claude Code integration files: .mcp.json,
+// .claude/skills|agents|rules, and registers hooks in .claude/settings.json.
+func initClaudeCode(wd string, allHashes map[string]string) {
+	if err := writeMCP(wd); err != nil {
+		log.Printf("warning: could not write .mcp.json: %v", err)
+	}
+	for _, spec := range []struct {
+		fsys   embed.FS
+		root   string
+		subdir string
+	}{
+		{skillsFS, "skills", "skills"},
+		{agentsFS, "agents", "agents"},
+		{rulesFS, "rules", "rules"},
+	} {
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, nil)
+		if err != nil {
+			log.Printf("warning: could not write %s: %v", spec.root, err)
+		}
+		for k, v := range res.hashes {
+			allHashes[k] = v
+		}
+	}
+	if err := writeHooks(wd); err != nil {
+		log.Printf("warning: could not register hooks: %v", err)
+	}
+}
 
-Agents written to .claude/agents/:
+// initOpenCode writes all OpenCode integration files: opencode.json (MCP + plugin),
+// .opencode/agents|commands|plugin, and .claude/skills|rules (shared with Claude Code).
+func initOpenCode(wd string, allHashes map[string]string) {
+	if err := writeOpenCodeConfig(wd); err != nil {
+		log.Printf("warning: could not write opencode.json: %v", err)
+	}
+	openCodeDir := filepath.Join(wd, ".opencode")
+
+	// Shared assets: skills and rules go to .claude/ (OpenCode reads .claude/skills/ natively).
+	for _, spec := range []struct {
+		fsys   embed.FS
+		root   string
+		subdir string
+	}{
+		{skillsFS, "skills", "skills"},
+		{rulesFS, "rules", "rules"},
+	} {
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, nil)
+		if err != nil {
+			log.Printf("warning: could not write %s: %v", spec.root, err)
+		}
+		for k, v := range res.hashes {
+			allHashes[k] = v
+		}
+	}
+
+	// OpenCode-specific assets.
+	for _, spec := range []struct {
+		fsys    embed.FS
+		root    string
+		destDir string
+	}{
+		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
+		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
+		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
+	} {
+		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, nil)
+		if err != nil {
+			log.Printf("warning: could not write %s: %v", spec.root, err)
+		}
+		for k, v := range res.hashes {
+			allHashes[k] = v
+		}
+	}
+}
+
+func printInitSummary(target string) {
+	const skills = `Skills written to .claude/skills/:
+  /spec                        — spec-driven development
+  /spec-complex                — complex spec (discovery→design→plan→implement→verify→learn)
+  /bug                         — bug-fixing workflow
+  /learn                       — pattern learning
+  /sync-stratus                — installation health check
+  /vexor-cli                   — semantic file discovery
+  /governance-db               — query governance docs and ADRs
+  /create-architecture         — design ADRs, component diagrams, interfaces
+  /explain-architecture        — read-only architecture explanation
+  /run-tests                   — auto-detect and run test suite
+  /code-review                 — structured code review (PASS/FAIL)
+  /find-bugs                   — systematic bug diagnosis (read-only)
+  /security-review             — security audit (OWASP, secrets, injection)
+  /frontend-design             — distinctive UI design guidance
+  /react-native-best-practices — React Native / Expo performance patterns`
+
+	const ccAgents = `Agents written to .claude/agents/:
   delivery-implementation-expert  — general-purpose implementation
   delivery-backend-engineer       — API, services, handlers
   delivery-frontend-engineer      — UI, components, pages
@@ -385,22 +470,87 @@ Agents written to .claude/agents/:
   delivery-strategic-architect    — ADRs, technology selection (read-only)
   delivery-qa-engineer            — tests, coverage, lint
   delivery-code-reviewer          — code quality + security review
-  delivery-governance-checker     — governance & ADR compliance (plan, design, implementation)
-  delivery-debugger               — root cause diagnosis
+  delivery-governance-checker     — governance & ADR compliance
+  delivery-debugger               — root cause diagnosis`
 
-Rules written to .claude/rules/:
-  review-verdict-format  — structured PASS/FAIL verdicts
-  tdd-requirements       — test-driven development
-  error-handling         — consistent error patterns
+	const ocAgents = `Agents written to .opencode/agents/:
+  delivery-implementation-expert  — general-purpose implementation
+  delivery-backend-engineer       — API, services, handlers
+  delivery-frontend-engineer      — UI, components, pages
+  delivery-ux-designer            — UI/UX design specs and design systems
+  delivery-database-engineer      — schema, migrations, queries
+  delivery-devops-engineer        — CI/CD, Docker, infrastructure
+  delivery-mobile-engineer        — React Native / Expo (iOS + Android)
+  delivery-system-architect       — component designs, API contracts (read-only)
+  delivery-strategic-architect    — ADRs, technology selection (read-only)
+  delivery-qa-engineer            — tests, coverage, lint
+  delivery-code-reviewer          — code quality + security review (read-only)
+  delivery-governance-checker     — governance & ADR compliance (read-only)
+  delivery-debugger               — root cause diagnosis (read-only)`
 
-Hooks registered in .claude/settings.json:
+	const ocCommands = `Commands written to .opencode/commands/:
+  /spec          — spec-driven development
+  /spec-complex  — complex spec workflow
+  /bug           — bug-fixing workflow
+  /learn         — pattern learning
+  /sync-stratus  — installation health check
+  /team          — parallel delivery`
+
+	const ocPlugin = `Plugin written to .opencode/plugin/stratus.ts:
+  phase_guard — blocks write tools during verify/review phases
+  watcher     — queues modified files for vexor reindexing`
+
+	const rules = `Rules written to .claude/rules/:
+  review-verdict-format — structured PASS/FAIL verdicts
+  tdd-requirements      — test-driven development
+  error-handling        — consistent error patterns`
+
+	const ccHooks = `Hooks registered in .claude/settings.json:
   PreToolUse  phase_guard       — blocks write tools during review/verify
   PreToolUse  delegation_guard  — requires active workflow for delivery agents
   PostToolUse watcher           — queues modified files for vexor reindexing
 
-Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar
+Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar`
 
-Governance docs indexed into DB (CLAUDE.md, rules, skills, agents, ADRs)`)
+	fmt.Println("stratus initialized!")
+	fmt.Println()
+	fmt.Println(skills)
+	fmt.Println()
+
+	switch target {
+	case "opencode":
+		fmt.Println(ocAgents)
+		fmt.Println()
+		fmt.Println(ocCommands)
+		fmt.Println()
+		fmt.Println(ocPlugin)
+		fmt.Println()
+		fmt.Println(rules)
+		fmt.Println()
+		fmt.Println("MCP server registered in opencode.json")
+	case "both":
+		fmt.Println(ccAgents)
+		fmt.Println()
+		fmt.Println(ocAgents)
+		fmt.Println()
+		fmt.Println(ocCommands)
+		fmt.Println()
+		fmt.Println(ocPlugin)
+		fmt.Println()
+		fmt.Println(rules)
+		fmt.Println()
+		fmt.Println(ccHooks)
+		fmt.Println()
+		fmt.Println("MCP server registered in .mcp.json (Claude Code) and opencode.json (OpenCode)")
+	default: // "claude-code"
+		fmt.Println(ccAgents)
+		fmt.Println()
+		fmt.Println(rules)
+		fmt.Println()
+		fmt.Println(ccHooks)
+		fmt.Println()
+		fmt.Println("Governance docs indexed into DB (CLAUDE.md, rules, skills, agents, ADRs)")
+	}
 }
 
 // sha256hex returns the hex-encoded SHA-256 digest of data.
@@ -425,17 +575,17 @@ type assetWriteResult struct {
 	skipped []string          // embedded paths skipped (user-customized)
 }
 
-// writeAssetsFS walks fsys starting at fsRoot, writing each file under
-// <projectRoot>/.claude/<claudeSubdir>/.  When storedHashes is nil (force
-// mode, used by init) every file is written unconditionally.  In smart mode
-// (storedHashes != nil) the 3-way comparison is applied:
+// writeAssetsTo walks fsys starting at fsRoot, writing each file under destDir.
+// When storedHashes is nil (force mode, used by init) every file is written
+// unconditionally.  In smart mode (storedHashes != nil) the 3-way comparison is
+// applied:
 //
 //   - stored hash == ""       → first-time, write and record hash
 //   - embedded == stored      → unchanged in new version, skip write
 //   - embedded != stored AND disk == stored  → user hasn't touched, safe to overwrite
 //   - embedded != stored AND disk != stored  → user customized, skip and report
-func writeAssetsFS(
-	fsys embed.FS, fsRoot, claudeSubdir, projectRoot string,
+func writeAssetsTo(
+	fsys embed.FS, fsRoot, destDir string,
 	storedHashes map[string]string,
 ) (assetWriteResult, error) {
 	result := assetWriteResult{hashes: make(map[string]string)}
@@ -448,7 +598,7 @@ func writeAssetsFS(
 			return err
 		}
 		rel, _ := filepath.Rel(fsRoot, path)
-		dest := filepath.Join(projectRoot, ".claude", claudeSubdir, rel)
+		dest := filepath.Join(destDir, rel)
 
 		embeddedHash := sha256hex(data)
 
@@ -480,6 +630,15 @@ func writeAssetsFS(
 		return nil
 	})
 	return result, err
+}
+
+// writeAssetsFS is a convenience wrapper around writeAssetsTo that writes to
+// <projectRoot>/.claude/<claudeSubdir>/.
+func writeAssetsFS(
+	fsys embed.FS, fsRoot, claudeSubdir, projectRoot string,
+	storedHashes map[string]string,
+) (assetWriteResult, error) {
+	return writeAssetsTo(fsys, fsRoot, filepath.Join(projectRoot, ".claude", claudeSubdir), storedHashes)
 }
 
 // cmdUpdate updates the stratus binary via `go install`, then re-execs the new
@@ -521,12 +680,19 @@ func cmdUpdate() {
 
 // cmdRefresh re-writes agents, skills, and rules from the current binary's
 // embedded content. Safe to run on an already-initialized project — never
-// touches .stratus.json or .mcp.json.
+// touches .stratus.json or .mcp.json / opencode.json.
 //
 // Smart mode: if sync_state.asset_hashes is present in .stratus.json, files
 // that the user has customized (disk hash differs from stored hash) are skipped
 // rather than overwritten.
+//
+// Flags: --target [claude-code|opencode|both]
 func cmdRefresh() {
+	_, target := parseInitFlags() // reuse flag parser; force is ignored for refresh
+	if target != "claude-code" && target != "opencode" && target != "both" {
+		fmt.Fprintf(os.Stderr, "warning: unknown --target %q, defaulting to 'claude-code'\n", target)
+		target = "claude-code"
+	}
 	wd, _ := os.Getwd()
 	cfgPath := filepath.Join(wd, ".stratus.json")
 
@@ -544,27 +710,18 @@ func cmdRefresh() {
 	allHashes := make(map[string]string)
 	var allSkipped []string
 
-	for _, spec := range []struct {
-		fsys    embed.FS
-		root    string
-		subdir  string
-	}{
-		{skillsFS, "skills", "skills"},
-		{agentsFS, "agents", "agents"},
-		{rulesFS, "rules", "rules"},
-	} {
-		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes)
-		if err != nil {
-			log.Printf("warning: %v", err)
-		}
-		for k, v := range res.hashes {
-			allHashes[k] = v
-		}
-		allSkipped = append(allSkipped, res.skipped...)
-	}
-
-	if err := writeHooks(wd); err != nil {
-		log.Printf("warning: could not register hooks: %v", err)
+	switch target {
+	case "opencode":
+		skipped := refreshOpenCode(wd, storedHashes, allHashes)
+		allSkipped = append(allSkipped, skipped...)
+	case "both":
+		skipped := refreshClaudeCode(wd, storedHashes, allHashes)
+		allSkipped = append(allSkipped, skipped...)
+		skipped = refreshOpenCode(wd, storedHashes, allHashes)
+		allSkipped = append(allSkipped, skipped...)
+	default: // "claude-code"
+		skipped := refreshClaudeCode(wd, storedHashes, allHashes)
+		allSkipped = append(allSkipped, skipped...)
 	}
 
 	// Persist updated sync state.
@@ -585,10 +742,84 @@ func cmdRefresh() {
 		for _, f := range allSkipped {
 			fmt.Printf("  ⚠ skipped: %s\n", f)
 		}
-		fmt.Println("Run /sync-stratus in Claude to review the new asset versions.")
+		fmt.Println("Run /sync-stratus to review the new asset versions.")
 	} else {
 		fmt.Println("stratus refreshed — agents, skills, rules, and hooks updated to latest version.")
 	}
+}
+
+// refreshClaudeCode refreshes Claude Code assets (skills, agents, rules, hooks).
+func refreshClaudeCode(wd string, storedHashes map[string]string, allHashes map[string]string) []string {
+	var allSkipped []string
+	for _, spec := range []struct {
+		fsys   embed.FS
+		root   string
+		subdir string
+	}{
+		{skillsFS, "skills", "skills"},
+		{agentsFS, "agents", "agents"},
+		{rulesFS, "rules", "rules"},
+	} {
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes)
+		if err != nil {
+			log.Printf("warning: %v", err)
+		}
+		for k, v := range res.hashes {
+			allHashes[k] = v
+		}
+		allSkipped = append(allSkipped, res.skipped...)
+	}
+	if err := writeHooks(wd); err != nil {
+		log.Printf("warning: could not register hooks: %v", err)
+	}
+	return allSkipped
+}
+
+// refreshOpenCode refreshes OpenCode assets (skills, rules to .claude/; agents,
+// commands, plugin to .opencode/).
+func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[string]string) []string {
+	var allSkipped []string
+	openCodeDir := filepath.Join(wd, ".opencode")
+
+	// Shared assets.
+	for _, spec := range []struct {
+		fsys   embed.FS
+		root   string
+		subdir string
+	}{
+		{skillsFS, "skills", "skills"},
+		{rulesFS, "rules", "rules"},
+	} {
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes)
+		if err != nil {
+			log.Printf("warning: %v", err)
+		}
+		for k, v := range res.hashes {
+			allHashes[k] = v
+		}
+		allSkipped = append(allSkipped, res.skipped...)
+	}
+
+	// OpenCode-specific.
+	for _, spec := range []struct {
+		fsys    embed.FS
+		root    string
+		destDir string
+	}{
+		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
+		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
+		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
+	} {
+		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, storedHashes)
+		if err != nil {
+			log.Printf("warning: %v", err)
+		}
+		for k, v := range res.hashes {
+			allHashes[k] = v
+		}
+		allSkipped = append(allSkipped, res.skipped...)
+	}
+	return allSkipped
 }
 
 // writeMCP merges the stratus MCP server entry into <project>/.mcp.json.
@@ -626,6 +857,56 @@ func writeMCP(projectRoot string) error {
 		return err
 	}
 	return os.WriteFile(mcpPath, append(out, '\n'), 0o644)
+}
+
+// writeOpenCodeConfig merges the stratus MCP server and plugin entries into
+// <project>/opencode.json. If the file already contains other configuration it
+// is preserved — only "mcp.stratus" and "plugins.stratus" are added/updated.
+func writeOpenCodeConfig(projectRoot string) error {
+	ocPath := filepath.Join(projectRoot, "opencode.json")
+
+	// Read existing config (best-effort).
+	var existing map[string]any
+	if data, err := os.ReadFile(ocPath); err == nil {
+		_ = json.Unmarshal(data, &existing)
+	}
+	if existing == nil {
+		existing = map[string]any{
+			"$schema": "https://opencode.ai/config.json",
+		}
+	}
+
+	// Get or create "mcp" object.
+	mcpSection, _ := existing["mcp"].(map[string]any)
+	if mcpSection == nil {
+		mcpSection = map[string]any{}
+	}
+	if _, ok := mcpSection["stratus"]; !ok {
+		mcpSection["stratus"] = map[string]any{
+			"type":    "local",
+			"command": []string{"stratus", "mcp-serve"},
+			"enabled": true,
+		}
+	}
+	existing["mcp"] = mcpSection
+
+	// Get or create "plugins" object.
+	pluginsSection, _ := existing["plugins"].(map[string]any)
+	if pluginsSection == nil {
+		pluginsSection = map[string]any{}
+	}
+	if _, ok := pluginsSection["stratus"]; !ok {
+		pluginsSection["stratus"] = map[string]any{
+			"enabled": true,
+		}
+	}
+	existing["plugins"] = pluginsSection
+
+	out, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(ocPath, append(out, '\n'), 0o644)
 }
 
 // writeHooks registers stratus hooks in <project>/.claude/settings.json.
