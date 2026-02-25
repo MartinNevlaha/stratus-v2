@@ -33,9 +33,10 @@
     fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(container)
-    // Delay initial fit so the flex layout has settled and the container
-    // has its final pixel dimensions before xterm calculates rows/cols.
-    requestAnimationFrame(() => fitAddon.fit())
+    // Double rAF: first frame lets the browser finish the current render
+    // cycle, second frame ensures the flex layout has fully settled and the
+    // container has its final pixel dimensions before xterm calculates cols.
+    requestAnimationFrame(() => requestAnimationFrame(() => fitAddon.fit()))
 
     // Track user scroll position: disable auto-scroll when they scroll up,
     // re-enable when they reach the bottom again.
