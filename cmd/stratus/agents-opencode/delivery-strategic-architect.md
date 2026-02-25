@@ -1,55 +1,8 @@
 ---
-description: >-
-  Strategic architecture delivery agent for technology selection, ADRs, and
-  high-level architectural decisions. Read-only — produces ADRs and diagrams,
-  never writes source code. Use when a decision needs formal evaluation of
-  alternatives and trade-offs.
-
-
-  **Examples:**
-
-
-  <example>
-
-  Context: The user needs to choose between technologies.
-
-  user: "Should we use PostgreSQL or MongoDB for the new analytics service?"
-
-  assistant: "I'm going to use the Task tool to launch the
-  delivery-strategic-architect agent to evaluate both options and produce an
-  ADR."
-
-  <commentary>
-
-  Technology selection requires formal evaluation of alternatives with
-  trade-offs, so use the delivery-strategic-architect agent which produces
-  structured ADRs.
-
-  </commentary>
-
-  </example>
-
-
-  <example>
-
-  Context: The user needs a high-level architecture decision.
-
-  user: "Design the overall architecture for real-time event processing"
-
-  assistant: "I'll use the Task tool to launch the delivery-strategic-architect
-  agent to evaluate approaches and document the decision."
-
-  <commentary>
-
-  High-level architectural decisions need formal ADRs with alternatives
-  considered, so the delivery-strategic-architect agent is the right choice.
-
-  </commentary>
-
-  </example>
+description: Strategic architecture delivery agent for technology selection, ADRs, and architectural decisions
 mode: subagent
 tools:
-  todowrite: false
+  todo: false
   edit: false
   write: false
 ---

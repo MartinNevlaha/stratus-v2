@@ -1,53 +1,8 @@
 ---
-description: >-
-  General-purpose delivery agent for implementation tasks that don't fit a more
-  specialized agent. Use this when the task spans multiple domains or doesn't
-  clearly belong to backend, frontend, mobile, or database work.
-
-
-  **Examples:**
-
-
-  <example>
-
-  Context: The user needs to implement a feature that touches multiple layers.
-
-  user: "Add a user preferences system with API endpoint and settings page"
-
-  assistant: "I'm going to use the Task tool to launch the
-  delivery-implementation-expert agent to handle this cross-cutting feature."
-
-  <commentary>
-
-  Since this task spans multiple domains and doesn't fit a single specialized
-  agent, use the delivery-implementation-expert agent.
-
-  </commentary>
-
-  </example>
-
-
-  <example>
-
-  Context: The user needs to add a utility or helper that doesn't belong to a
-  specific domain.
-
-  user: "Create a retry wrapper for our HTTP client"
-
-  assistant: "I'll use the Task tool to launch the
-  delivery-implementation-expert agent to implement this utility."
-
-  <commentary>
-
-  A generic utility doesn't fit backend, frontend, or other specialized agents,
-  so the implementation expert is the right choice.
-
-  </commentary>
-
-  </example>
+description: General-purpose delivery agent for implementation tasks that span multiple domains
 mode: subagent
 tools:
-  todowrite: false
+  todo: false
 ---
 
 # Implementation Expert

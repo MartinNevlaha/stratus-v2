@@ -1,53 +1,8 @@
 ---
-description: >-
-  UX design delivery agent that produces design specifications, component
-  hierarchies, and design tokens. Does not write source code — produces specs
-  for frontend engineers to implement.
-
-
-  **Examples:**
-
-
-  <example>
-
-  Context: The user needs a design for a new feature.
-
-  user: "Design the UI for a project dashboard with status cards and charts"
-
-  assistant: "I'm going to use the Task tool to launch the delivery-ux-designer
-  agent to produce a design spec with component hierarchy and design tokens."
-
-  <commentary>
-
-  Since this needs a design specification before implementation, use the
-  delivery-ux-designer agent which produces detailed specs with tokens, states,
-  and accessibility requirements.
-
-  </commentary>
-
-  </example>
-
-
-  <example>
-
-  Context: The user wants to improve existing UI.
-
-  user: "The settings page feels cluttered, redesign the layout"
-
-  assistant: "I'll use the Task tool to launch the delivery-ux-designer agent
-  to audit the current design and produce an improved spec."
-
-  <commentary>
-
-  UI redesign requires design thinking and a structured spec, so the
-  delivery-ux-designer agent is the right choice.
-
-  </commentary>
-
-  </example>
+description: UX design delivery agent for design specifications, component hierarchies, and design tokens
 mode: subagent
 tools:
-  todowrite: false
+  todo: false
   bash: false
 ---
 

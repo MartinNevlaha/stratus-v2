@@ -395,7 +395,7 @@ func initClaudeCode(wd string, allHashes map[string]string) {
 }
 
 // initOpenCode writes all OpenCode integration files: opencode.json (MCP + plugin),
-// .opencode/agent|commands|plugin, and .claude/skills|rules (shared with Claude Code).
+// .opencode/agents|commands|plugin, and .claude/skills|rules (shared with Claude Code).
 func initOpenCode(wd string, allHashes map[string]string) {
 	if err := writeOpenCodeConfig(wd); err != nil {
 		log.Printf("warning: could not write opencode.json: %v", err)
@@ -426,7 +426,7 @@ func initOpenCode(wd string, allHashes map[string]string) {
 		root    string
 		destDir string
 	}{
-		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agent")},
+		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
 		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
 	} {
@@ -473,7 +473,7 @@ func printInitSummary(target string) {
   delivery-governance-checker     — governance & ADR compliance
   delivery-debugger               — root cause diagnosis`
 
-	const ocAgents = `Agents written to .opencode/agent/:
+	const ocAgents = `Agents written to .opencode/agents/:
   delivery-implementation-expert  — general-purpose implementation
   delivery-backend-engineer       — API, services, handlers
   delivery-frontend-engineer      — UI, components, pages
@@ -806,7 +806,7 @@ func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[st
 		root    string
 		destDir string
 	}{
-		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agent")},
+		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
 		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
 	} {

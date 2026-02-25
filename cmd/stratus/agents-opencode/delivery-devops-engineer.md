@@ -1,53 +1,8 @@
 ---
-description: >-
-  DevOps delivery agent for CI/CD pipelines, Docker, infrastructure-as-code, and
-  deployment configuration. Use for Dockerfiles, GitHub Actions workflows,
-  Terraform/Pulumi configs, and deployment scripts.
-
-
-  **Examples:**
-
-
-  <example>
-
-  Context: The user needs a CI pipeline.
-
-  user: "Set up GitHub Actions to run tests and build on every PR"
-
-  assistant: "I'm going to use the Task tool to launch the
-  delivery-devops-engineer agent to create the CI pipeline."
-
-  <commentary>
-
-  CI/CD pipeline configuration is DevOps work, so use the
-  delivery-devops-engineer agent which follows best practices for caching,
-  fast feedback, and pinned versions.
-
-  </commentary>
-
-  </example>
-
-
-  <example>
-
-  Context: The user needs to containerize a service.
-
-  user: "Create a Dockerfile for the API server"
-
-  assistant: "I'll use the Task tool to launch the delivery-devops-engineer
-  agent to write the Dockerfile with multi-stage build."
-
-  <commentary>
-
-  Docker configuration is DevOps work, so the delivery-devops-engineer agent is
-  the right choice.
-
-  </commentary>
-
-  </example>
+description: DevOps delivery agent for CI/CD pipelines, Docker, infrastructure-as-code, and deployment
 mode: subagent
 tools:
-  todowrite: false
+  todo: false
 ---
 
 # DevOps Engineer

@@ -1,53 +1,8 @@
 ---
-description: >-
-  Backend delivery agent for API endpoints, handlers, services, and business
-  logic. Use for any server-side implementation task including REST/gRPC
-  endpoints, middleware, authentication, data processing, and business rules.
-
-
-  **Examples:**
-
-
-  <example>
-
-  Context: The user needs a new API endpoint.
-
-  user: "Add a POST /api/projects endpoint that creates a new project"
-
-  assistant: "I'm going to use the Task tool to launch the
-  delivery-backend-engineer agent to implement this API endpoint with proper
-  validation and tests."
-
-  <commentary>
-
-  Since this is a server-side API endpoint, use the delivery-backend-engineer
-  agent which follows TDD practices and handles input validation.
-
-  </commentary>
-
-  </example>
-
-
-  <example>
-
-  Context: The user needs to fix a bug in business logic.
-
-  user: "The permission check in the update handler allows non-admins to edit"
-
-  assistant: "I'll use the Task tool to launch the delivery-backend-engineer
-  agent to fix this authorization bug."
-
-  <commentary>
-
-  Server-side authorization logic is backend work, so the
-  delivery-backend-engineer agent is the right choice.
-
-  </commentary>
-
-  </example>
+description: Backend delivery agent for API endpoints, handlers, services, and business logic
 mode: subagent
 tools:
-  todowrite: false
+  todo: false
 ---
 
 # Backend Engineer
