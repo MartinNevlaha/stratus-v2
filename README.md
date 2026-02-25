@@ -235,6 +235,38 @@ npm run dev      # hot-reload dev server on :5173 (proxies API to :41777)
 npm run build    # builds to ../cmd/stratus/static/ (required before go build)
 ```
 
+## Publishing a Release
+
+The frontend is committed to the repo as pre-built static files so that `go install` works without Node.js on the user's machine. Every release must follow this exact order:
+
+```bash
+# 1. Make your changes (Go, Svelte, agents, skills, …)
+
+# 2. Build frontend and install binary locally to test
+make install
+
+# 3. Test the changes
+stratus serve   # smoke-test at http://localhost:41777
+
+# 4. Commit everything — including the built static files
+git add cmd/stratus/static/ <other changed files>
+git commit -m "feat: your message"
+
+# 5. Tag the release (semver — go install @latest picks the highest tag)
+git tag v0.X.Y
+
+# 6. Push branch + tag
+git push origin main --tags
+```
+
+> **Why commit `cmd/stratus/static/`?**
+> `go install` only runs `go build` — it never runs `npm`. The frontend must be
+> pre-built and committed so the embedded `go:embed static` picks it up at compile time.
+
+> **Why tag?**
+> Without a semver tag, the Go module proxy serves a cached pseudo-version.
+> A new tag guarantees `go install @latest` resolves to the new release immediately.
+
 ## MCP Tools
 
 Register in `.mcp.json` (created by `stratus init`):
