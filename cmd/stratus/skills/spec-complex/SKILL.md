@@ -40,6 +40,14 @@ curl -sS -X POST $BASE/api/workflows \
   -d '{"id": "<kebab-slug>", "type": "spec", "complexity": "complex", "title": "<title from $ARGUMENTS>", "session_id": "${CLAUDE_SESSION_ID}"}'
 ```
 
+- Transition to discovery first:
+
+```bash
+curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "discovery"}'
+```
+
 - Explore the codebase with Read, Grep, Glob — do NOT write code.
 - Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis, constraints, technology landscape.
 - Record delegation:
