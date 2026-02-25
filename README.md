@@ -24,10 +24,10 @@ Single binary (~15 MB), zero runtime dependencies.
 - **Retrieval** — Dual-backend: Vexor (code embeddings) + FTS5 governance docs, auto-routed
 - **Orchestration** — Pure state machine for spec and bug workflows with task tracking
 - **Learning** — Pattern candidate detection → proposals → accept/reject decisions
-- **Terminal** — Embedded PTY terminal in the dashboard via xterm.js + WebSocket
-- **STT** — Web Speech API in dashboard + Whisper proxy endpoint
+- **Terminal** — PTY terminal embedded side-by-side with Overview (50/50 split) via xterm.js + WebSocket
+- **STT** — Microphone button in terminal header; records audio → Whisper transcription → text injected into terminal input. Powered by [speaches](https://github.com/speaches-ai/speaches) (faster-whisper, Docker). Container lifecycle managed automatically by `stratus serve`.
 - **MCP** — 7 tools: `search`, `timeline`, `get_observations`, `save_memory`, `retrieve`, `index_status`, `delivery_dispatch`
-- **Hooks** — `phase_guard`, `delegation_guard`, `workflow_enforcer`
+- **Hooks** — `phase_guard`, `delegation_guard`, `workflow_enforcer`, `watcher` (auto-reindex on file write)
 
 ## Install
 
@@ -40,10 +40,19 @@ Or build from source:
 ```bash
 git clone https://github.com/MartinNevlaha/stratus-v2
 cd stratus-v2
-go build -o stratus ./cmd/stratus
+make install     # builds frontend + Go binary → GOPATH/bin
 ```
 
-Cross-compile:
+Available `make` targets:
+
+| Target | Description |
+|--------|-------------|
+| `make install` | Build frontend + Go binary, install to `GOPATH/bin` |
+| `make build` | Build frontend + Go binary, output `./stratus` |
+| `make dev` | Run Vite dev server on `:5173` (hot-reload UI) |
+| `make clean` | Remove `./stratus` build artifact |
+
+Cross-compile (after `npm run build` in `frontend/`):
 
 ```bash
 GOOS=linux  GOARCH=amd64 go build -o stratus-linux-amd64  ./cmd/stratus
@@ -52,30 +61,26 @@ GOOS=darwin GOARCH=arm64 go build -o stratus-darwin-arm64 ./cmd/stratus
 
 ## Quick Start
 
+**Requirements:** Go 1.21+, Docker (for STT voice input)
+
 ```bash
-# 1. Initialize project (writes .stratus.json, .mcp.json, .claude/skills/)
+# 1. Initialize project
+#    Writes .stratus.json, .mcp.json, .claude/{skills,agents,rules,settings.json}
+#    Pulls speaches Docker image for STT (~700 MB, one-time)
 cd your-project
 stratus init
 
-# 2. Start server (dashboard + API on :41777)
+# 2. Start server
+#    Dashboard + API on :41777
+#    Starts speaches STT container automatically (port 8011)
+#    Ctrl+C stops server and STT container
 stratus serve
 
 # 3. Open dashboard
 open http://localhost:41777
 ```
 
-Add hooks to `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      { "command": "stratus hook phase_guard" },
-      { "command": "stratus hook delegation_guard" }
-    ]
-  }
-}
-```
+Hooks are registered automatically by `stratus init` — no manual `.claude/settings.json` edits needed.
 
 ## Skills
 
@@ -156,10 +161,19 @@ WS     /api/terminal/ws         PTY terminal I/O
     "timeout_sec": 15
   },
   "stt": {
-    "endpoint": "http://localhost:8765"
+    "endpoint": "http://localhost:8011",
+    "model": "Systran/faster-whisper-small"
   }
 }
 ```
+
+`stt.model` controls which faster-whisper model the speaches container loads. Larger models are more accurate but slower to start:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| `Systran/faster-whisper-small` | ~244 MB | Default, fast |
+| `Systran/faster-whisper-medium` | ~769 MB | Better accuracy |
+| `Systran/faster-whisper-large-v3` | ~3 GB | Best accuracy |
 
 Environment overrides: `STRATUS_PORT`, `STRATUS_DATA_DIR`.
 
@@ -191,13 +205,34 @@ frontend/           Svelte 5 dashboard
 | `proposals`  | Learning proposals           |
 | `workflows`  | Orchestration state          |
 
+## STT (Voice Input)
+
+`stratus serve` automatically manages a [speaches](https://github.com/speaches-ai/speaches) Docker container that runs faster-whisper locally. No cloud API keys required.
+
+- Click the microphone button in the terminal header to record
+- Recording stops on second click → audio transcribed → text inserted at the terminal cursor
+- The container (`stratus-stt`) is stopped and removed when `stratus serve` exits
+
+**Manual container management** (if needed):
+
+```bash
+# Start manually
+docker run -d --name stratus-stt -p 8011:8000 \
+  -e WHISPER__MODEL=Systran/faster-whisper-small \
+  -v stratus-whisper-cache:/root/.cache/huggingface \
+  ghcr.io/speaches-ai/speaches:latest-cpu
+
+# Stop
+docker stop stratus-stt && docker rm stratus-stt
+```
+
 ## Frontend Development
 
 ```bash
 cd frontend
 npm install
-npm run dev      # dev server on :5173
-npm run build    # builds to ../static/
+npm run dev      # hot-reload dev server on :5173 (proxies API to :41777)
+npm run build    # builds to ../cmd/stratus/static/ (required before go build)
 ```
 
 ## MCP Tools
