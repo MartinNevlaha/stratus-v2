@@ -178,7 +178,7 @@ func (c *Coordinator) Abort(id string) (*WorkflowState, error) {
 
 // ListActive returns all non-completed, non-aborted workflows.
 func (c *Coordinator) ListActive() ([]*WorkflowState, error) {
-	rows, err := c.db.SQL().Query(`SELECT id FROM workflows WHERE JSON_EXTRACT(state_json, '$.aborted') IS NOT 1 AND phase != 'complete' ORDER BY updated_at DESC LIMIT 10`)
+	rows, err := c.db.SQL().Query(`SELECT id, type, phase, complexity, state_json, created_at, updated_at FROM workflows WHERE JSON_EXTRACT(state_json, '$.aborted') IS NOT 1 AND phase != 'complete' ORDER BY updated_at DESC LIMIT 10`)
 	if err != nil {
 		return nil, err
 	}
@@ -186,14 +186,27 @@ func (c *Coordinator) ListActive() ([]*WorkflowState, error) {
 
 	var states []*WorkflowState
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, wtype, phase, complexity, stateJSON, createdAt, updatedAt string
+		if err := rows.Scan(&id, &wtype, &phase, &complexity, &stateJSON, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		s, err := c.Get(id)
-		if err == nil {
-			states = append(states, s)
+		var state WorkflowState
+		if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+			continue
 		}
+		state.ID = id
+		state.Type = WorkflowType(wtype)
+		state.Phase = Phase(phase)
+		state.Complexity = Complexity(complexity)
+		state.CreatedAt = createdAt
+		state.UpdatedAt = updatedAt
+		if state.Delegated == nil {
+			state.Delegated = map[string][]string{}
+		}
+		if state.Tasks == nil {
+			state.Tasks = []Task{}
+		}
+		states = append(states, &state)
 	}
 	return states, rows.Err()
 }
