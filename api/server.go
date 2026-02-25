@@ -24,6 +24,7 @@ type Server struct {
 	terminal    *terminal.Manager
 	projectRoot string
 	sttEndpoint string
+	sttModel    string
 	staticFiles fs.FS
 	version     string
 
@@ -41,6 +42,7 @@ func NewServer(
 	termMgr *terminal.Manager,
 	projectRoot string,
 	sttEndpoint string,
+	sttModel string,
 	staticFiles fs.FS,
 	version string,
 ) *Server {
@@ -52,6 +54,7 @@ func NewServer(
 		terminal:    termMgr,
 		projectRoot: projectRoot,
 		sttEndpoint: sttEndpoint,
+		sttModel:    sttModel,
 		staticFiles: staticFiles,
 		version:     version,
 		dirtyFiles:  make(map[string]struct{}),

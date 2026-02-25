@@ -1,6 +1,9 @@
 package api
 
 import (
+	"bytes"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"runtime"
 	"time"
@@ -57,14 +60,45 @@ func (s *Server) handleSTTTranscribe(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusServiceUnavailable, "STT not configured")
 		return
 	}
-	// Proxy the multipart audio form to the STT endpoint
-	// Use stdlib net/http as a simple proxy
-	proxyReq, err := newProxyRequest(r, s.sttEndpoint+"/v1/audio/transcriptions")
+
+	// Parse the incoming multipart to extract the audio file, then rebuild
+	// it with the correct model name from config (speaches requires the exact
+	// HuggingFace model ID, not the generic "whisper-1" from the frontend).
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid multipart: "+err.Error())
+		return
+	}
+	audioFile, audioHeader, err := r.FormFile("file")
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "missing audio file: "+err.Error())
+		return
+	}
+	defer audioFile.Close()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", audioHeader.Filename)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	resp, err := http.DefaultClient.Do(proxyReq)
+	if _, err := io.Copy(fw, audioFile); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = mw.WriteField("model", s.sttModel)
+	mw.Close()
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+		s.sttEndpoint+"/v1/audio/transcriptions", &buf)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		jsonErr(w, http.StatusBadGateway, "STT endpoint unavailable: "+err.Error())
 		return
@@ -85,5 +119,5 @@ func (s *Server) handleSTTStatus(w http.ResponseWriter, r *http.Request) {
 			available = resp.StatusCode == http.StatusOK
 		}
 	}
-	json200(w, map[string]any{"available": available, "endpoint": s.sttEndpoint})
+	json200(w, map[string]any{"available": available, "endpoint": s.sttEndpoint, "model": s.sttModel})
 }

@@ -110,7 +110,7 @@ func cmdServe() {
 		log.Fatalf("static fs: %v", err)
 	}
 
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, staticFS, Version)
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version)
 
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)
