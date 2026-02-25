@@ -1,19 +1,34 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { searchEvents, getTimeline } from '$lib/api'
   import type { Event } from '$lib/types'
   import SttButton from '../components/SttButton.svelte'
 
   let query = $state('')
   let results = $state<Event[]>([])
+  let isRecent = $state(true)
   let timeline = $state<Event[]>([])
   let selectedId = $state<number | null>(null)
   let loading = $state(false)
   let error = $state<string | null>(null)
 
+  onMount(async () => {
+    loading = true
+    try {
+      const res = await searchEvents('', { limit: '5' })
+      results = res.results
+    } catch {
+      // ignore — empty state is fine
+    } finally {
+      loading = false
+    }
+  })
+
   async function search() {
     if (!query.trim()) return
     loading = true
     error = null
+    isRecent = false
     try {
       const res = await searchEvents(query)
       results = res.results
@@ -57,7 +72,9 @@
   <div class="results-layout">
     <div class="results-list">
       {#if results.length === 0 && !loading}
-        <div class="empty">Search memory events above</div>
+        <div class="empty">No memory events found</div>
+      {:else if results.length > 0}
+        <div class="results-label">{isRecent ? 'Recent memories' : `Results (${results.length})`}</div>
       {/if}
       {#each results as event}
         <div
@@ -117,6 +134,7 @@
   .results-layout { display: grid; grid-template-columns: 1fr auto; gap: 16px; }
 
   .results-list { display: flex; flex-direction: column; gap: 8px; }
+  .results-label { font-size: 12px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 4px; }
 
   .event-card { padding: 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; transition: border-color 0.15s; }
   .event-card:hover, .event-card.selected { border-color: #58a6ff; }
