@@ -107,6 +107,23 @@ type SearchEventsInput struct {
 	Offset    int
 }
 
+// buildFTS5Query converts a raw user query into a safe FTS5 MATCH expression.
+// Each whitespace-separated term is quoted (escaping internal quotes) and given
+// a trailing '*' so that partial-word / prefix matching works.
+// E.g. "auth error" → `"auth"* "error"*`
+func buildFTS5Query(raw string) string {
+	terms := strings.Fields(strings.TrimSpace(raw))
+	if len(terms) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(terms))
+	for _, t := range terms {
+		t = strings.ReplaceAll(t, `"`, `""`) // escape internal double-quotes
+		parts = append(parts, `"`+t+`"*`)
+	}
+	return strings.Join(parts, " ")
+}
+
 // SearchEvents searches events using FTS5.
 func (d *DB) SearchEvents(in SearchEventsInput) ([]Event, error) {
 	if in.Limit <= 0 {
@@ -117,6 +134,7 @@ func (d *DB) SearchEvents(in SearchEventsInput) ([]Event, error) {
 	var err error
 
 	if in.Query != "" {
+		ftsQuery := buildFTS5Query(in.Query)
 		// FTS5 search
 		rows, err = d.sql.Query(`
 			SELECT e.id, e.ts, e.actor, e.scope, e.type, e.text, e.title,
@@ -131,7 +149,7 @@ func (d *DB) SearchEvents(in SearchEventsInput) ([]Event, error) {
 			  AND (? = '' OR e.ts <= ?)
 			ORDER BY rank
 			LIMIT ? OFFSET ?`,
-			in.Query,
+			ftsQuery,
 			in.Type, in.Type,
 			in.Scope, in.Scope,
 			in.Project, in.Project,
