@@ -31,9 +31,20 @@ Single binary (~15 MB), zero runtime dependencies.
 
 ## Install
 
+**Requirements:** Go 1.21+, Docker
+
 ```bash
 go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@latest
 ```
+
+> If `@latest` installs an old version (Go module proxy cache), bypass it with:
+> ```bash
+> GOPROXY=direct go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@latest
+> ```
+> Or pin a specific version:
+> ```bash
+> go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@v0.3.3
+> ```
 
 Or build from source:
 
