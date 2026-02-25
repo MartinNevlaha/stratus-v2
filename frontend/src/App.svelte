@@ -18,7 +18,6 @@
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
     { id: 'learning' as const, label: 'Learning' },
-    { id: 'terminal' as const, label: 'Terminal' },
   ]
 
   let pendingProposals = $derived(appState.dashboard?.pending_proposals?.length ?? 0)
@@ -58,17 +57,21 @@
     {#if appState.loading && !appState.dashboard}
       <div class="loading">Connecting to stratus…</div>
     {:else if activeTab === 'overview'}
-      <Overview />
+      <div class="split-view">
+        <div class="split-pane">
+          <Overview />
+        </div>
+        <div class="split-divider"></div>
+        <div class="split-pane terminal-pane">
+          <Terminal />
+        </div>
+      </div>
     {:else if activeTab === 'memory'}
       <Memory />
     {:else if activeTab === 'retrieval'}
       <Retrieval />
     {:else if activeTab === 'learning'}
       <Learning />
-    {:else if activeTab === 'terminal'}
-      <div class="terminal-page">
-        <Terminal />
-      </div>
     {/if}
   </main>
 </div>
@@ -163,12 +166,41 @@
 
   main {
     flex: 1;
-    overflow-y: auto;
-    padding: 20px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
-  .terminal-page {
-    height: calc(100vh - 48px - 40px);
+  main :global(> *:not(.split-view)) {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .split-view {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    overflow: hidden;
+    height: 100%;
+  }
+
+  .split-pane {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    min-width: 0;
+  }
+
+  .split-divider {
+    width: 1px;
+    background: #30363d;
+    flex-shrink: 0;
+  }
+
+  .terminal-pane {
+    padding: 0;
+    overflow: hidden;
   }
 
   .loading {
