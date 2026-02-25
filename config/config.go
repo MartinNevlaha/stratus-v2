@@ -43,7 +43,7 @@ func Default() Config {
 			TimeoutSec: 15,
 		},
 		STT: STTConfig{
-			Endpoint: "http://localhost:8765",
+			Endpoint: "http://localhost:8011",
 			Model:    "whisper-1",
 		},
 	}

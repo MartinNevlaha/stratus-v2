@@ -59,7 +59,7 @@ func (s *Server) handleSTTTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	// Proxy the multipart audio form to the STT endpoint
 	// Use stdlib net/http as a simple proxy
-	proxyReq, err := newProxyRequest(r, s.sttEndpoint+"/transcribe")
+	proxyReq, err := newProxyRequest(r, s.sttEndpoint+"/v1/audio/transcriptions")
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return

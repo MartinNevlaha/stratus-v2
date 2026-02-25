@@ -100,7 +100,8 @@ export const getSttStatus = () => get<{ available: boolean; endpoint: string }>(
 
 export async function transcribeAudio(blob: Blob): Promise<{ text: string }> {
   const form = new FormData()
-  form.append('audio', blob, 'recording.webm')
+  form.append('file', blob, 'recording.webm')
+  form.append('model', 'whisper-1')
   const res = await fetch(BASE + '/stt/transcribe', { method: 'POST', body: form })
   if (!res.ok) throw new Error(`STT error: ${res.status}`)
   return res.json()
