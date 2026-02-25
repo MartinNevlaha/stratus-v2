@@ -270,6 +270,8 @@ func cmdHook() {
 		"delegation_guard":  hooks.DelegationGuard,
 		"workflow_enforcer": hooks.WorkflowEnforcer,
 		"watcher":           hooks.Watcher,
+		"teammate_idle":     hooks.TeammateIdle,
+		"task_completed":    hooks.TaskCompleted,
 	}
 	hooks.Run(hookName, handlers)
 }
@@ -671,6 +673,18 @@ func writeHooks(projectRoot string) error {
 				{"Write|Edit|MultiEdit|NotebookEdit", "stratus hook watcher"},
 			},
 		},
+		{
+			event: "TeammateIdle",
+			hooks: []hookDef{
+				{"", "stratus hook teammate_idle"},
+			},
+		},
+		{
+			event: "TaskCompleted",
+			hooks: []hookDef{
+				{"", "stratus hook task_completed"},
+			},
+		},
 	}
 
 	for _, d := range defs {
@@ -688,6 +702,16 @@ func writeHooks(projectRoot string) error {
 	}
 
 	settings["hooks"] = hooksSection
+
+	// Register env non-destructively (preserve user customisation).
+	envSection, _ := settings["env"].(map[string]any)
+	if envSection == nil {
+		envSection = map[string]any{}
+	}
+	if _, ok := envSection["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]; !ok {
+		envSection["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+	}
+	settings["env"] = envSection
 
 	// Register statusLine non-destructively (preserve user customisation).
 	if _, ok := settings["statusLine"]; !ok {

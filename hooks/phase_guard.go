@@ -141,3 +141,15 @@ func mustGetwd() string {
 	wd, _ := os.Getwd()
 	return wd
 }
+
+// TeammateIdle is called when a CC Agent Teams teammate goes idle.
+// Trial version: always allow. Future: check assigned Stratus tasks.
+func TeammateIdle(_ HookEvent) Decision {
+	return Decision{Continue: true}
+}
+
+// TaskCompleted is called when a CC native task is marked complete.
+// Trial version: always allow. Future: verify deliverables.
+func TaskCompleted(_ HookEvent) Decision {
+	return Decision{Continue: true}
+}
