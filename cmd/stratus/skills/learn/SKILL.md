@@ -44,41 +44,40 @@ curl -sS -X POST $BASE/api/learning/candidates \
 
 ### 3. Generate proposals
 
-For high-confidence candidates, generate proposals:
+For each high-confidence candidate, generate a proposal with the **full file content** and target path.
+The server will automatically write the file when the user accepts it in the dashboard.
+
+Path conventions by type:
+- **rule** → `.claude/rules/<slug>.md`
+- **template** → `.claude/templates/<slug>.md`
+- **adr** → `docs/decisions/<slug>.md`
+- **skill** → `.claude/skills/<slug>/SKILL.md`
 
 ```bash
-curl -sS -X POST $BASE/api/events \
+curl -sS -X POST $BASE/api/learning/proposals \
   -H 'Content-Type: application/json' \
   -d '{
-    "type": "learning_update",
-    "title": "Proposal: <title>",
-    "text": "<detailed description of the proposed rule/template/ADR>",
-    "tags": ["proposal", "rule|template|adr"],
-    "importance": 0.7
+    "candidate_id": "<id from step 2>",
+    "type": "rule|skill|adr|template",
+    "title": "Short human-readable title",
+    "description": "Why this pattern matters and what problem it solves",
+    "proposed_content": "# Full content of the file to be written\n\n...",
+    "proposed_path": ".claude/rules/<slug>.md",
+    "confidence": 0.8
   }'
 ```
+
+**Important:** `proposed_content` and `proposed_path` are required for auto-apply to work.
+Without them, accepting the proposal in the dashboard will only mark it as decided — no file is written.
 
 ### 4. Review pending proposals
 
 ```bash
-curl -sS $BASE/api/learning/proposals
+curl -sS $BASE/api/learning/proposals?status=pending
 ```
 
-Present proposals to the user. For each, the user can decide via the Learning tab in the dashboard or via:
-
-```bash
-curl -sS -X POST $BASE/api/learning/proposals/<id>/decide \
-  -H 'Content-Type: application/json' \
-  -d '{"decision": "accept|reject|ignore|snooze"}'
-```
-
-### 5. Apply accepted proposals
-
-For accepted proposals:
-- **rule** → write to `.claude/rules/<name>.md`
-- **template** → write to `.claude/templates/<name>.md`
-- **adr** → write to `docs/decisions/<name>.md`
-- **skill** → write to `.claude/skills/<name>/SKILL.md`
+Tell the user proposals are ready in the **Learning tab** of the dashboard.
+They can accept/reject/snooze each one there; accepting automatically writes the file and re-indexes governance.
 
 ---
 

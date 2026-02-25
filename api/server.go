@@ -33,6 +33,8 @@ type Server struct {
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
 	dirtyCh    chan struct{} // buffered(1) signal channel
+
+	updateMu sync.Mutex // guards runUpdate — prevents concurrent update runs
 }
 
 // NewServer creates the HTTP server with all routes wired up.

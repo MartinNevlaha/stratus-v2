@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { appState } from '$lib/store'
+  import { appState, dismissUpdate } from '$lib/store'
   import { listWorkflows, deleteWorkflow } from '$lib/api'
   import PhaseTimeline from '../components/PhaseTimeline.svelte'
   import type { WorkflowState } from '$lib/types'
@@ -79,18 +79,26 @@
 
   <!-- Update progress panel -->
   {#if showUpdatePanel}
-    <div class="update-panel">
-      <div class="update-header">
-        {appState.updateInProgress ? '⟳ Updating stratus…' : '✓ Update complete'}
+    <div class="update-panel" class:error={!!appState.updateError}>
+      <div class="update-panel-header">
+        <span class="update-header">
+          {#if appState.updateInProgress}
+            ⟳ Updating stratus…
+          {:else if appState.updateError}
+            ✕ Update failed
+          {:else}
+            ✓ Update complete — server restarting
+          {/if}
+        </span>
+        {#if !appState.updateInProgress}
+          <button class="dismiss-btn" onclick={dismissUpdate} title="Dismiss">✕</button>
+        {/if}
       </div>
       <div class="update-log">
         {#each appState.updateLog as line}
-          <div class="log-line">{line}</div>
+          <div class="log-line" class:error-line={line.startsWith('Error:')}>{line}</div>
         {/each}
       </div>
-      {#if !appState.updateInProgress && appState.updateLog.length > 0}
-        <div class="restart-notice">Restart stratus server to apply the new version.</div>
-      {/if}
     </div>
   {/if}
 
@@ -292,10 +300,18 @@
     flex-direction: column;
     gap: 8px;
   }
+  .update-panel.error {
+    background: #2d1117;
+    border-color: #f85149;
+  }
+  .update-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .update-header { font-size: 13px; font-weight: 600; color: #ffa657; }
+  .update-panel.error .update-header { color: #f85149; }
+  .dismiss-btn { background: none; border: none; color: #8b949e; cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 4px; line-height: 1; }
+  .dismiss-btn:hover { color: #c9d1d9; background: #30363d; }
   .update-log { display: flex; flex-direction: column; gap: 2px; }
   .log-line { font-size: 12px; color: #d29922; font-family: monospace; }
-  .restart-notice { font-size: 12px; color: #3fb950; font-weight: 600; margin-top: 4px; }
+  .log-line.error-line { color: #f85149; }
 
   .section-title { font-size: 13px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
 

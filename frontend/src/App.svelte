@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { appState, initStore, startUpdate } from '$lib/store'
+  import { appState, initStore, startUpdate, dismissUpdate } from '$lib/store'
   import Overview from './routes/Overview.svelte'
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'

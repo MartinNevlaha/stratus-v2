@@ -98,7 +98,7 @@ export const listProposals = (status?: string) =>
   get<{ proposals: Proposal[]; count: number }>('/learning/proposals', status ? { status } : {})
 
 export const decideProposal = (id: string, decision: string) =>
-  post<{ status: string }>(`/learning/proposals/${id}/decide`, { decision })
+  post<{ status: string; applied: boolean }>(`/learning/proposals/${id}/decide`, { decision })
 
 // System
 export const getVersion = () => get<VersionInfo>('/system/version')

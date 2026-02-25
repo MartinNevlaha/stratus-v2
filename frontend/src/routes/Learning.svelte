@@ -8,6 +8,7 @@
   let tab = $state<'proposals' | 'candidates'>('proposals')
   let loading = $state(true)
   let decideError = $state<string | null>(null)
+  let decideWarn = $state<string | null>(null)
 
   onMount(async () => {
     await refresh()
@@ -26,9 +27,13 @@
 
   async function decide(id: string, decision: string) {
     decideError = null
+    decideWarn = null
     try {
-      await decideProposal(id, decision)
+      const res = await decideProposal(id, decision)
       proposals = proposals.filter(p => p.id !== id)
+      if (decision === 'accept' && !res.applied) {
+        decideWarn = 'Accepted, but no file was written — proposal was missing proposed_path or proposed_content.'
+      }
     } catch (e) {
       decideError = e instanceof Error ? e.message : 'Failed to save decision'
     }
@@ -51,6 +56,9 @@
 
   {#if decideError}
     <div class="error">{decideError}</div>
+  {/if}
+  {#if decideWarn}
+    <div class="warn">{decideWarn}</div>
   {/if}
 
   {#if loading}
@@ -123,6 +131,7 @@
   .refresh { margin-left: auto; }
 
   .error { color: #f85149; font-size: 13px; padding: 8px 12px; background: #2d1117; border-radius: 4px; }
+  .warn  { color: #d29922; font-size: 13px; padding: 8px 12px; background: #272115; border-radius: 4px; }
   .empty { color: #8b949e; text-align: center; padding: 32px; }
 
   .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }

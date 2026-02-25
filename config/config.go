@@ -59,13 +59,19 @@ func Default() Config {
 	}
 }
 
-// Save marshals the config to JSON and writes it to path.
+// Save marshals the config to JSON and atomically writes it to path.
+// It writes to a temp file first, then renames, so a crash mid-write never
+// produces a corrupted .stratus.json.
 func (c Config) Save(path string) error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // Load loads config from .stratus.json in the current directory, merging with defaults.

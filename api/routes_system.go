@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -17,6 +18,9 @@ import (
 // Strips pre-release/build suffixes (e.g. "1.2.3-rc1", "1.2.3+build.1") before comparing.
 // Any component that fails to parse is treated as 0.
 func semverGT(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
 	// Drop everything after the first '-' or '+' (pre-release / build metadata).
 	stripMeta := func(s string) string {
 		if i := strings.IndexAny(s, "-+"); i != -1 {
@@ -92,16 +96,22 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	ghResp, err := client.Do(req)
-	if err == nil {
+	if err == nil && ghResp.StatusCode == http.StatusOK {
 		defer ghResp.Body.Close()
-		body, _ := io.ReadAll(ghResp.Body)
+		// Cap body at 100 KB — release notes can be arbitrarily large.
+		body, _ := io.ReadAll(io.LimitReader(ghResp.Body, 100*1024))
 		var release githubRelease
 		if json.Unmarshal(body, &release) == nil && release.TagName != "" {
 			latest := strings.TrimPrefix(release.TagName, "v")
 			resp.Latest = latest
 			resp.UpdateAvailable = semverGT(latest, s.version)
 			resp.ReleaseURL = release.HTMLURL
-			resp.ReleaseNotes = release.Body
+			// Truncate notes sent to the client so the JSON payload stays small.
+			notes := release.Body
+			if len(notes) > 4096 {
+				notes = notes[:4096] + "…"
+			}
+			resp.ReleaseNotes = notes
 		}
 	}
 
@@ -110,7 +120,13 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUpdate triggers an async update and immediately returns 202 Accepted.
+// Returns 409 Conflict if an update is already running.
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if !s.updateMu.TryLock() {
+		jsonErr(w, http.StatusConflict, "update already in progress")
+		return
+	}
+	// updateMu is released inside runUpdate (via defer) once the goroutine finishes.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]bool{"accepted": true})
@@ -119,6 +135,8 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runUpdate() {
+	defer s.updateMu.Unlock()
+
 	progress := func(msg string) {
 		s.hub.BroadcastJSON("update_progress", map[string]string{"msg": msg})
 	}
@@ -134,14 +152,21 @@ func (s *Server) runUpdate() {
 		return
 	}
 
-	progress("Binary installed. Running stratus refresh…")
-
 	gopath := os.Getenv("GOPATH")
 	if gopath == "" {
 		home, _ := os.UserHomeDir()
 		gopath = filepath.Join(home, "go")
 	}
 	newBin := filepath.Join(gopath, "bin", "stratus")
+
+	// Verify the binary actually exists before proceeding — go install can
+	// succeed exit-0 while still failing to write the binary (permissions, etc.).
+	if _, err := os.Stat(newBin); err != nil {
+		fail(fmt.Sprintf("new binary not found at %s: %v", newBin, err))
+		return
+	}
+
+	progress("Binary installed. Running stratus refresh…")
 
 	refresh := exec.Command(newBin, "refresh")
 	refresh.Dir = s.projectRoot
@@ -150,5 +175,14 @@ func (s *Server) runUpdate() {
 		return
 	}
 
-	s.hub.BroadcastJSON("update_complete", map[string]string{"msg": "Restart stratus to apply."})
+	s.hub.BroadcastJSON("update_complete", map[string]string{"msg": "Restarting server with new binary…"})
+	// Give the WebSocket hub a moment to flush the message before replacing the process.
+	time.Sleep(500 * time.Millisecond)
+
+	// Replace this process with the new binary (same args, e.g. "stratus serve").
+	// syscall.Exec is a clean exec-replace: no gap in PID, SQLite WAL handles the
+	// brief file-descriptor handoff. The dashboard WebSocket will reconnect automatically.
+	if err := syscall.Exec(newBin, os.Args, os.Environ()); err != nil {
+		fail(fmt.Sprintf("restart failed: %v — restart manually with: stratus serve", err))
+	}
 }

@@ -10,6 +10,7 @@ interface AppState {
   version: VersionInfo | null
   updateInProgress: boolean
   updateLog: string[]
+  updateError: string | null  // set when update_failed, cleared on next attempt or success
 }
 
 // Svelte 5 reactive state — must live in .svelte.ts to use $state rune.
@@ -21,6 +22,7 @@ export const appState: AppState = $state({
   version: null,
   updateInProgress: false,
   updateLog: [],
+  updateError: null,
 })
 
 export async function refreshDashboard() {
@@ -37,14 +39,36 @@ export async function refreshDashboard() {
 export async function startUpdate() {
   appState.updateInProgress = true
   appState.updateLog = []
-  await triggerUpdate()
+  appState.updateError = null
+  try {
+    await triggerUpdate()
+  } catch (e) {
+    // POST /system/update itself failed (network error, 409 conflict, etc.)
+    appState.updateInProgress = false
+    appState.updateError = e instanceof Error ? e.message : 'Failed to start update'
+  }
+}
+
+export function dismissUpdate() {
+  appState.updateLog = []
+  appState.updateError = null
 }
 
 export function initStore() {
   wsClient.connect()
 
   wsClient.on('connected', () => {
+    const wasUpdating = appState.updateInProgress
     appState.connected = true
+    // If the WS reconnects while an update was in progress the server restarted
+    // (syscall.Exec replaced the process). Treat reconnect as update completion.
+    if (wasUpdating) {
+      appState.updateInProgress = false
+      appState.updateLog.push('Server restarted — update applied.')
+    } else {
+      // Refresh dashboard on every reconnect so stale data is never shown.
+      refreshDashboard()
+    }
   })
 
   wsClient.on('disconnected', () => {
@@ -64,12 +88,14 @@ export function initStore() {
   wsClient.on('update_complete', (msg) => {
     const data = msg.payload as { msg?: string } | undefined
     appState.updateInProgress = false
+    appState.updateError = null
     if (data?.msg) appState.updateLog.push(data.msg)
   })
 
   wsClient.on('update_failed', (msg) => {
     const data = msg.payload as { error?: string } | undefined
     appState.updateInProgress = false
+    appState.updateError = data?.error ?? 'Unknown error'
     if (data?.error) appState.updateLog.push(`Error: ${data.error}`)
   })
 
