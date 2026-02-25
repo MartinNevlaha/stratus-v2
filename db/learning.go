@@ -111,14 +111,49 @@ func (d *DB) SaveProposal(p Proposal) (string, error) {
 	return p.ID, nil
 }
 
+// GetProposal returns a single proposal by ID.
+func (d *DB) GetProposal(id string) (*Proposal, error) {
+	row := d.sql.QueryRow(`SELECT id, candidate_id, type, title, description, proposed_content, proposed_path, confidence, status, decision, decided_at, session_id, created_at FROM proposals WHERE id = ?`, id)
+	var p Proposal
+	var proposedPath, decision, decidedAt, sessionID sql.NullString
+	if err := row.Scan(&p.ID, &p.CandidateID, &p.Type, &p.Title, &p.Description,
+		&p.ProposedContent, &proposedPath, &p.Confidence, &p.Status,
+		&decision, &decidedAt, &sessionID, &p.CreatedAt); err != nil {
+		return nil, fmt.Errorf("get proposal %q: %w", id, err)
+	}
+	if proposedPath.Valid {
+		p.ProposedPath = &proposedPath.String
+	}
+	if decision.Valid {
+		p.Decision = &decision.String
+	}
+	if decidedAt.Valid {
+		p.DecidedAt = &decidedAt.String
+	}
+	if sessionID.Valid {
+		p.SessionID = &sessionID.String
+	}
+	return &p, nil
+}
+
 // ListProposals returns proposals filtered by status.
+// When status = "pending", also includes snoozed proposals older than 7 days
+// so they resurface for reconsideration.
 func (d *DB) ListProposals(status string, limit int) ([]Proposal, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	var rows *sql.Rows
 	var err error
-	if status != "" {
+	if status == "pending" {
+		rows, err = d.sql.Query(`
+			SELECT id, candidate_id, type, title, description, proposed_content, proposed_path,
+			       confidence, status, decision, decided_at, session_id, created_at
+			FROM proposals
+			WHERE status = 'pending'
+			   OR (status = 'snoozed' AND decided_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days'))
+			ORDER BY created_at DESC LIMIT ?`, limit)
+	} else if status != "" {
 		rows, err = d.sql.Query(`SELECT id, candidate_id, type, title, description, proposed_content, proposed_path, confidence, status, decision, decided_at, session_id, created_at FROM proposals WHERE status = ? ORDER BY created_at DESC LIMIT ?`, status, limit)
 	} else {
 		rows, err = d.sql.Query(`SELECT id, candidate_id, type, title, description, proposed_content, proposed_path, confidence, status, decision, decided_at, session_id, created_at FROM proposals ORDER BY created_at DESC LIMIT ?`, limit)

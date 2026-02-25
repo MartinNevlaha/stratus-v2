@@ -189,7 +189,8 @@ curl -sS -X POST $BASE/api/learning/proposals \
     "description": "Why this matters",
     "proposed_content": "Full content of the rule/ADR/template",
     "proposed_path": ".claude/rules/<name>.md",
-    "confidence": 0.85
+    "confidence": 0.85,
+    "session_id": "<workflow-slug>"
   }'
 ```
 
