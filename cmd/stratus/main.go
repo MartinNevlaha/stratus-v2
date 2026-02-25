@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/api"
@@ -20,6 +23,12 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
 	"github.com/MartinNevlaha/stratus-v2/vexor"
+)
+
+const (
+	sttContainerName = "stratus-stt"
+	sttImage         = "ghcr.io/speaches-ai/speaches:latest-cpu"
+	sttDefaultModel  = "Systran/faster-whisper-small"
 )
 
 //go:embed skills
@@ -103,10 +112,86 @@ func cmdServe() {
 
 	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, staticFS, Version)
 
+	// Start STT container (best-effort).
+	sttOwned := sttStart(cfg.STT.Model)
+
+	// Handle SIGINT/SIGTERM for graceful shutdown.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		log.Println("stratus shutting down…")
+		if sttOwned {
+			sttStop()
+		}
+		os.Exit(0)
+	}()
+
 	log.Printf("stratus serving on http://localhost:%d", cfg.Port)
 	if err := srv.ListenAndServe(cfg.Port); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+// sttStart starts the speaches STT container. Returns true if this process
+// owns the container (i.e. it started it) so it knows to stop it on exit.
+func sttStart(model string) bool {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return false
+	}
+	if model == "" {
+		model = sttDefaultModel
+	}
+
+	// Check existing container state.
+	out, _ := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", sttContainerName).Output()
+	switch strings.TrimSpace(string(out)) {
+	case "true":
+		log.Printf("STT: container %q already running", sttContainerName)
+		return false // not owned by us
+	case "false":
+		// Stale stopped container — remove so we can recreate with current config.
+		exec.Command("docker", "rm", sttContainerName).Run()
+	}
+
+	args := []string{
+		"run", "-d",
+		"--name", sttContainerName,
+		"-p", "8011:8000",
+		"-e", "WHISPER__MODEL=" + model,
+		"-v", "stratus-whisper-cache:/root/.cache/huggingface",
+		sttImage,
+	}
+	if err := exec.Command("docker", args...).Run(); err != nil {
+		log.Printf("STT: could not start container: %v", err)
+		return false
+	}
+	log.Printf("STT: container started (model: %s)", model)
+	return true
+}
+
+// sttStop stops and removes the speaches container.
+func sttStop() {
+	exec.Command("docker", "stop", sttContainerName).Run()
+	exec.Command("docker", "rm", sttContainerName).Run()
+	log.Println("STT: container stopped")
+}
+
+// sttPullImage pulls the speaches Docker image during init (best-effort).
+func sttPullImage() {
+	if _, err := exec.LookPath("docker"); err != nil {
+		fmt.Println("docker not found — skipping STT image pull (install Docker to enable voice input)")
+		return
+	}
+	fmt.Printf("Pulling STT image (%s)… \n", sttImage)
+	cmd := exec.Command("docker", "pull", sttImage)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("warning: docker pull failed: %v\n", err)
+		return
+	}
+	fmt.Println("STT image ready.")
 }
 
 func cmdMCPServe() {
@@ -155,7 +240,7 @@ func cmdInit() {
     "timeout_sec": 15
   },
   "stt": {
-    "endpoint": "http://localhost:8765"
+    "endpoint": "http://localhost:8011"
   }
 }
 `
@@ -186,6 +271,9 @@ func cmdInit() {
 	if err := writeHooks(wd); err != nil {
 		log.Printf("warning: could not register hooks: %v", err)
 	}
+
+	// Pull STT Docker image (best-effort — skip if docker not installed)
+	sttPullImage()
 
 	// Run initial Vexor index (best-effort — skip if vexor not installed)
 	vexorIndex(wd)
