@@ -88,8 +88,13 @@ func isDeliveryAgent() bool {
 }
 
 // fetchActiveWorkflow queries the local Stratus API for the active workflow state.
-// If sessionID is non-empty, returns the first workflow whose session_id matches.
-// If sessionID is empty, returns the first workflow (backward-compatible fallback).
+//
+// Matching priority:
+//  1. Exact session_id match          — preferred (multiple concurrent windows)
+//  2. Workflow with no session_id set — created before session tracking / CLAUDE_SESSION_ID
+//     was not available in the Bash environment; treated as a wildcard
+//  3. First active workflow           — last-resort fallback for resumed sessions whose
+//     session_id changed; DelegationGuard only needs to know *if* a workflow exists
 func fetchActiveWorkflow(sessionID string) map[string]any {
 	port := getPort()
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -105,18 +110,33 @@ func fetchActiveWorkflow(sessionID string) map[string]any {
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 		return nil
 	}
+
+	var untracked, first map[string]any
 	for _, wf := range state.Workflows {
 		if wf == nil {
 			continue
 		}
+		// Track first workflow for last-resort fallback.
+		if first == nil {
+			first = wf
+		}
 		if sessionID == "" {
 			return wf // no session filter → return first
 		}
-		if wfSession, _ := wf["session_id"].(string); wfSession == sessionID {
-			return wf
+		wfSession, _ := wf["session_id"].(string)
+		if wfSession == sessionID {
+			return wf // exact match — best case
+		}
+		if wfSession == "" && untracked == nil {
+			untracked = wf // workflow without session tracking
 		}
 	}
-	return nil
+	// Fall back: prefer an untracked workflow, then any workflow.
+	// This handles CLAUDE_SESSION_ID being unset during /spec and resumed sessions.
+	if untracked != nil {
+		return untracked
+	}
+	return first
 }
 
 func getPort() string {
