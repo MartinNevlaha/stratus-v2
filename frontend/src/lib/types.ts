@@ -26,6 +26,7 @@ export interface WorkflowState {
   total_tasks: number
   aborted: boolean
   title: string
+  session_id?: string
   created_at: string
   updated_at: string
 }

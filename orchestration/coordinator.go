@@ -3,11 +3,15 @@ package orchestration
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 )
+
+// ErrWorkflowNotFound is returned when a workflow ID does not exist in the database.
+var ErrWorkflowNotFound = errors.New("workflow not found")
 
 // WorkflowState is the full state of a workflow.
 type WorkflowState struct {
@@ -21,6 +25,7 @@ type WorkflowState struct {
 	TotalTasks  int              `json:"total_tasks"`
 	Aborted    bool              `json:"aborted"`
 	Title      string            `json:"title"`
+	SessionID  string            `json:"session_id,omitempty"` // Claude Code session that owns this workflow
 	CreatedAt  string            `json:"created_at"`
 	UpdatedAt  string            `json:"updated_at"`
 }
@@ -70,7 +75,7 @@ func (c *Coordinator) Get(id string) (*WorkflowState, error) {
 	err := c.db.SQL().QueryRow(`SELECT type, phase, complexity, state_json, created_at, updated_at FROM workflows WHERE id = ?`, id).
 		Scan(&wtype, &phase, &complexity, &stateJSON, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow %q not found", id)
+		return nil, fmt.Errorf("workflow %q: %w", id, ErrWorkflowNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get workflow: %w", err)
@@ -209,6 +214,81 @@ func (c *Coordinator) ListActive() ([]*WorkflowState, error) {
 		states = append(states, &state)
 	}
 	return states, rows.Err()
+}
+
+// SetSessionID records the Claude Code session ID for a workflow.
+// First-writer-wins: no-op if a session ID is already set.
+// Used when a workflow is first created via POST /api/workflows.
+func (c *Coordinator) SetSessionID(id, sessionID string) error {
+	state, err := c.Get(id)
+	if err != nil {
+		return err
+	}
+	if state.SessionID != "" {
+		return nil // already captured — don't overwrite
+	}
+	state.SessionID = sessionID
+	return c.save(state)
+}
+
+// UpdateSessionID sets (or replaces) the Claude Code session ID for a workflow.
+// Unlike SetSessionID, this always overwrites the existing value.
+// Used by the /resume skill via PATCH /api/workflows/{id}/session.
+func (c *Coordinator) UpdateSessionID(id, sessionID string) (*WorkflowState, error) {
+	state, err := c.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	state.SessionID = sessionID
+	return state, c.save(state)
+}
+
+// ListAll returns all workflows (including completed and aborted), newest first.
+func (c *Coordinator) ListAll() ([]*WorkflowState, error) {
+	rows, err := c.db.SQL().Query(`SELECT id, type, phase, complexity, state_json, created_at, updated_at FROM workflows ORDER BY updated_at DESC LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var states []*WorkflowState
+	for rows.Next() {
+		var id, wtype, phase, complexity, stateJSON, createdAt, updatedAt string
+		if err := rows.Scan(&id, &wtype, &phase, &complexity, &stateJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		var state WorkflowState
+		if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+			continue
+		}
+		state.ID = id
+		state.Type = WorkflowType(wtype)
+		state.Phase = Phase(phase)
+		state.Complexity = Complexity(complexity)
+		state.CreatedAt = createdAt
+		state.UpdatedAt = updatedAt
+		if state.Delegated == nil {
+			state.Delegated = map[string][]string{}
+		}
+		if state.Tasks == nil {
+			state.Tasks = []Task{}
+		}
+		states = append(states, &state)
+	}
+	return states, rows.Err()
+}
+
+// Delete permanently removes a workflow from the database.
+func (c *Coordinator) Delete(id string) error {
+	res, err := c.db.SQL().Exec(`DELETE FROM workflows WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("workflow %q: %w", id, ErrWorkflowNotFound)
+	}
+	return nil
 }
 
 func (c *Coordinator) save(state *WorkflowState) error {

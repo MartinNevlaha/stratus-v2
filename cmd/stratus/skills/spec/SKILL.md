@@ -25,7 +25,7 @@ Start the workflow and explore the codebase:
 ```bash
 curl -sS -X POST $BASE/api/workflows \
   -H 'Content-Type: application/json' \
-  -d '{"id": "<kebab-slug>", "type": "spec", "complexity": "simple", "title": "<title from $ARGUMENTS>"}'
+  -d "{\"id\": \"<kebab-slug>\", \"type\": \"spec\", \"complexity\": \"simple\", \"title\": \"<title from \$ARGUMENTS>\", \"session_id\": \"${CLAUDE_SESSION_ID}\"}"
 ```
 
 - Use `complexity: "complex"` for multi-service, auth, database, or cross-cutting concerns; `"simple"` for everything else.

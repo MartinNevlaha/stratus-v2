@@ -32,6 +32,12 @@ async function put<T>(path: string, body: unknown): Promise<T> {
   return res.json()
 }
 
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(BASE + path, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  return res.json()
+}
+
 // Dashboard
 export const getDashboardState = () => get<DashboardState>('/dashboard/state')
 
@@ -61,6 +67,9 @@ export const getRetrieveStatus = () =>
 export const triggerReIndex = () => post<{ status: string }>('/retrieve/index')
 
 // Workflows
+export const listWorkflows = () => get<WorkflowState[]>('/workflows')
+export const deleteWorkflow = (id: string) => del<{ deleted: boolean }>(`/workflows/${id}`)
+
 export const startWorkflow = (id: string, type: 'spec' | 'bug', title: string, complexity = 'simple') =>
   post<WorkflowState>('/workflows', { id, type, title, complexity })
 

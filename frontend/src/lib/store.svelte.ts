@@ -51,7 +51,7 @@ export function initStore() {
     appState.connected = false
   })
 
-  const updateTypes = ['workflow_updated', 'workflow_aborted', 'event_saved', 'learning_update', 'governance_indexed']
+  const updateTypes = ['workflow_updated', 'workflow_aborted', 'workflow_deleted', 'event_saved', 'learning_update', 'governance_indexed']
   for (const type of updateTypes) {
     wsClient.on(type, () => { refreshDashboard() })
   }

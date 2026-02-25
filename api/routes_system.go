@@ -14,10 +14,18 @@ import (
 )
 
 // semverGT returns true if version a is strictly greater than b.
-// Both must be in "X.Y.Z" form; any parse error treats a as not greater.
+// Strips pre-release/build suffixes (e.g. "1.2.3-rc1", "1.2.3+build.1") before comparing.
+// Any component that fails to parse is treated as 0.
 func semverGT(a, b string) bool {
+	// Drop everything after the first '-' or '+' (pre-release / build metadata).
+	stripMeta := func(s string) string {
+		if i := strings.IndexAny(s, "-+"); i != -1 {
+			return s[:i]
+		}
+		return s
+	}
 	parse := func(s string) [3]int {
-		parts := strings.SplitN(s, ".", 3)
+		parts := strings.SplitN(stripMeta(s), ".", 3)
 		var v [3]int
 		for i := 0; i < 3 && i < len(parts); i++ {
 			v[i], _ = strconv.Atoi(parts[i])

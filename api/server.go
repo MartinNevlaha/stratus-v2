@@ -153,6 +153,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/retrieve/dirty", s.handleMarkDirty)
 
 	// Orchestration
+	mux.HandleFunc("GET /api/workflows", s.handleListWorkflows)
 	mux.HandleFunc("POST /api/workflows", s.handleStartWorkflow)
 	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
 	mux.HandleFunc("PUT /api/workflows/{id}/phase", s.handleTransitionPhase)
@@ -160,7 +161,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflows/{id}/tasks", s.handleSetTasks)
 	mux.HandleFunc("POST /api/workflows/{id}/tasks/{index}/start", s.handleStartTask)
 	mux.HandleFunc("POST /api/workflows/{id}/tasks/{index}/complete", s.handleCompleteTask)
-	mux.HandleFunc("DELETE /api/workflows/{id}", s.handleAbortWorkflow)
+	mux.HandleFunc("DELETE /api/workflows/{id}", s.handleDeleteWorkflow)
+	mux.HandleFunc("PATCH /api/workflows/{id}/session", s.handleSetWorkflowSession)
 	mux.HandleFunc("GET /api/workflows/{id}/dispatch", s.handleDispatch)
 
 	// Learning

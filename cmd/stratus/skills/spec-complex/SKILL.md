@@ -37,7 +37,7 @@ Start the workflow:
 ```bash
 curl -sS -X POST $BASE/api/workflows \
   -H 'Content-Type: application/json' \
-  -d '{"id": "<kebab-slug>", "type": "spec", "complexity": "complex", "title": "<title from $ARGUMENTS>"}'
+  -d '{"id": "<kebab-slug>", "type": "spec", "complexity": "complex", "title": "<title from $ARGUMENTS>", "session_id": "${CLAUDE_SESSION_ID}"}'
 ```
 
 - Explore the codebase with Read, Grep, Glob — do NOT write code.

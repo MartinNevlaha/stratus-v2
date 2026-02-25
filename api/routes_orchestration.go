@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -13,6 +14,7 @@ func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 		Type       string `json:"type"`       // "spec" | "bug"
 		Complexity string `json:"complexity"` // "simple" | "complex"
 		Title      string `json:"title"`
+		SessionID  string `json:"session_id"` // Claude Code session — optional
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
@@ -34,6 +36,11 @@ func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if body.SessionID != "" {
+		if err2 := s.coordinator.SetSessionID(body.ID, body.SessionID); err2 == nil {
+			state.SessionID = body.SessionID
+		}
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
 	json200(w, state)
@@ -144,6 +151,57 @@ func (s *Server) handleAbortWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.BroadcastJSON("workflow_aborted", map[string]string{"id": id})
 	json200(w, state)
+}
+
+func (s *Server) handleSetWorkflowSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.SessionID == "" {
+		jsonErr(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	state, err := s.coordinator.UpdateSessionID(id, body.SessionID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, orchestration.ErrWorkflowNotFound) {
+			status = http.StatusNotFound
+		}
+		jsonErr(w, status, err.Error())
+		return
+	}
+	json200(w, state)
+}
+
+func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
+	workflows, err := s.coordinator.ListAll()
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if workflows == nil {
+		workflows = []*orchestration.WorkflowState{}
+	}
+	json200(w, workflows)
+}
+
+func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.coordinator.Delete(id); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, orchestration.ErrWorkflowNotFound) {
+			status = http.StatusNotFound
+		}
+		jsonErr(w, status, err.Error())
+		return
+	}
+	s.hub.BroadcastJSON("workflow_deleted", map[string]string{"id": id})
+	json200(w, map[string]bool{"deleted": true})
 }
 
 func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {

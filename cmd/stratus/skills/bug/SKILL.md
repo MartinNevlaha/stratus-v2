@@ -24,7 +24,7 @@ Start the bug workflow:
 SLUG=$(echo "$ARGUMENTS" | tr '[:upper:] ' '[:lower:]-' | sed 's/[^a-z0-9-]//g' | cut -c1-50)
 curl -sS -X POST $BASE/api/workflows \
   -H 'Content-Type: application/json' \
-  -d "{\"id\": \"bug-$SLUG\", \"type\": \"bug\", \"title\": \"$ARGUMENTS\"}"
+  -d "{\"id\": \"bug-$SLUG\", \"type\": \"bug\", \"title\": \"$ARGUMENTS\", \"session_id\": \"${CLAUDE_SESSION_ID}\"}"
 ```
 
 - Explore the codebase: Read error messages, stack traces, logs.
