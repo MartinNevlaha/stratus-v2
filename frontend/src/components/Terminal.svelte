@@ -13,6 +13,9 @@
   let connected = $state(false)
   let error = $state<string | null>(null)
 
+  // Auto-scroll: follow output unless the user has manually scrolled up.
+  let autoScroll = true
+
   onMount(() => {
     term = new Terminal({
       theme: {
@@ -34,6 +37,16 @@
     // has its final pixel dimensions before xterm calculates rows/cols.
     requestAnimationFrame(() => fitAddon.fit())
 
+    // Track user scroll position: disable auto-scroll when they scroll up,
+    // re-enable when they reach the bottom again.
+    const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null
+    const onViewportScroll = () => {
+      if (!viewport) return
+      const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+      autoScroll = distanceFromBottom < 32
+    }
+    viewport?.addEventListener('scroll', onViewportScroll, { passive: true })
+
     connectWS()
 
     // Resize handler
@@ -48,14 +61,19 @@
     })
     observer.observe(container)
 
-    // Send input to server
+    // Send input to server. Re-enable auto-scroll on user input so they
+    // always see the response to what they typed.
     term.onData((data) => {
       if (ws?.readyState === WebSocket.OPEN) {
+        autoScroll = true
         ws.send(JSON.stringify({ type: 'input', data: { id: sessionId, data } }))
       }
     })
 
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      viewport?.removeEventListener('scroll', onViewportScroll)
+    }
   })
 
   onDestroy(() => {
@@ -84,7 +102,7 @@
       const msg = JSON.parse(e.data)
       switch (msg.type) {
         case 'output':
-          term.write(msg.data as string)
+          term.write(msg.data as string, () => { if (autoScroll) term.scrollToBottom() })
           break
         case 'exit':
           term.writeln('\r\n\x1b[33m[session ended]\x1b[0m')

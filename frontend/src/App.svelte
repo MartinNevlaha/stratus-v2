@@ -95,10 +95,23 @@
   <main>
     {#if appState.loading && !appState.dashboard}
       <div class="loading">Connecting to stratus…</div>
-    {:else if activeTab === 'overview'}
-      <div class="split-view" class:dragging={isDragging} bind:this={splitView}>
+    {:else}
+      <!--
+        The split-view (and Terminal inside it) is ALWAYS mounted so the PTY
+        session and WebSocket survive tab switches. Visibility is toggled via
+        display:none / display:flex. Overview is conditionally rendered because
+        it is stateless and cheap to recreate.
+      -->
+      <div
+        class="split-view"
+        class:dragging={isDragging}
+        bind:this={splitView}
+        style:display={activeTab === 'overview' ? 'flex' : 'none'}
+      >
         <div class="split-pane" style="flex: 0 0 {splitRatio * 100}%; max-width: {splitRatio * 100}%;">
-          <Overview />
+          {#if activeTab === 'overview'}
+            <Overview />
+          {/if}
         </div>
         <div
           class="split-divider"
@@ -110,12 +123,14 @@
           <Terminal />
         </div>
       </div>
-    {:else if activeTab === 'memory'}
-      <Memory />
-    {:else if activeTab === 'retrieval'}
-      <Retrieval />
-    {:else if activeTab === 'learning'}
-      <Learning />
+
+      {#if activeTab === 'memory'}
+        <Memory />
+      {:else if activeTab === 'retrieval'}
+        <Retrieval />
+      {:else if activeTab === 'learning'}
+        <Learning />
+      {/if}
     {/if}
   </main>
 </div>
