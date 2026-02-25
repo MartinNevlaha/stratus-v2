@@ -93,4 +93,6 @@ export interface VersionInfo {
   update_available: boolean
   release_url: string
   release_notes: string
+  sync_required: boolean
+  skipped_files: string[]
 }

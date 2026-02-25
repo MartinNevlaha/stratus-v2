@@ -96,9 +96,19 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 3: Plan
 
-- Based on the design, break work into concrete tasks.
-- Delegate to `delivery-system-architect` (Task tool) if task estimates need design input.
-- Write the plan to `docs/plans/<slug>.md`.
+**Task planning — use the built-in Plan subagent:**
+
+Delegate to the `Plan` subagent via Task tool (`subagent_type: "Plan"`). Pass full context:
+- The design document from `docs/plans/<slug>-design.md`
+- The original requirement from `$ARGUMENTS`
+- Key files and architecture constraints surfaced during discovery and design phases
+
+The Plan agent will return a concrete, ordered implementation plan with individual tasks and critical files.
+
+Use the Plan output to:
+1. Write the plan to `docs/plans/<slug>.md`
+2. Extract the ordered task list
+
 - Set tasks:
 
 ```bash

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -111,7 +113,13 @@ func cmdServe() {
 		log.Fatalf("static fs: %v", err)
 	}
 
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version)
+	var syncedVersion string
+	var skippedFiles []string
+	if cfg.SyncState != nil {
+		syncedVersion = cfg.SyncState.SyncedVersion
+		skippedFiles = cfg.SyncState.SkippedFiles
+	}
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles)
 
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)
@@ -140,7 +148,8 @@ func sttStart(model string) bool {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return false
 	}
-	if model == "" {
+	// "whisper-1" is the OpenAI API alias; speaches needs the HuggingFace model ID.
+	if model == "" || model == "whisper-1" {
 		model = sttDefaultModel
 	}
 
@@ -191,14 +200,16 @@ func sttInstallModel(host, model string) {
 		time.Sleep(time.Second)
 	}
 
-	// POST /v1/models/{model_id} — triggers download if not already installed.
+	// POST /v1/models/{model_id} — triggers async download. Use a longer timeout
+	// since speaches may need time to start the download before responding.
+	installClient := &http.Client{Timeout: 120 * time.Second}
 	encoded := strings.ReplaceAll(model, "/", "%2F")
 	req, err := http.NewRequest(http.MethodPost, host+"/v1/models/"+encoded, nil)
 	if err != nil {
 		log.Printf("STT: model install request error: %v", err)
 		return
 	}
-	resp, err := client.Do(req)
+	resp, err := installClient.Do(req)
 	if err != nil {
 		log.Printf("STT: model install failed: %v", err)
 		return
@@ -293,24 +304,43 @@ func cmdInit() {
 		log.Printf("warning: could not write .mcp.json: %v", err)
 	}
 
-	// Write coordinator skills to .claude/skills/
-	if err := writeSkills(wd); err != nil {
+	// Write skills, agents, and rules (force mode — always write on init).
+	skillsResult, err := writeAssetsFS(skillsFS, "skills", "skills", wd, nil)
+	if err != nil {
 		log.Printf("warning: could not write skills: %v", err)
 	}
-
-	// Write delivery agents to .claude/agents/
-	if err := writeAgents(wd); err != nil {
+	agentsResult, err := writeAssetsFS(agentsFS, "agents", "agents", wd, nil)
+	if err != nil {
 		log.Printf("warning: could not write agents: %v", err)
 	}
-
-	// Write governance rules to .claude/rules/
-	if err := writeRules(wd); err != nil {
+	rulesResult, err := writeAssetsFS(rulesFS, "rules", "rules", wd, nil)
+	if err != nil {
 		log.Printf("warning: could not write rules: %v", err)
 	}
 
 	// Register hooks in .claude/settings.json
 	if err := writeHooks(wd); err != nil {
 		log.Printf("warning: could not register hooks: %v", err)
+	}
+
+	// Record sync state so future refreshes can detect user customizations.
+	allHashes := make(map[string]string)
+	for k, v := range skillsResult.hashes {
+		allHashes[k] = v
+	}
+	for k, v := range agentsResult.hashes {
+		allHashes[k] = v
+	}
+	for k, v := range rulesResult.hashes {
+		allHashes[k] = v
+	}
+	initCfg := config.Load()
+	initCfg.SyncState = &config.SyncState{
+		SyncedVersion: Version,
+		AssetHashes:   allHashes,
+	}
+	if err := initCfg.Save(cfgPath); err != nil {
+		log.Printf("warning: could not save sync state: %v", err)
 	}
 
 	// Pull STT Docker image (best-effort — skip if docker not installed)
@@ -371,67 +401,83 @@ Statusline registered in .claude/settings.json — workflow status visible in Cl
 Governance docs indexed into DB (CLAUDE.md, rules, skills, agents, ADRs)`)
 }
 
-// writeSkills extracts embedded SKILL.md files into <project>/.claude/skills/.
-func writeSkills(projectRoot string) error {
-	return fs.WalkDir(skillsFS, "skills", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		data, err := skillsFS.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		// path is like "skills/spec/SKILL.md"
-		// target is .claude/skills/spec/SKILL.md
-		rel, _ := filepath.Rel("skills", path)
-		dest := filepath.Join(projectRoot, ".claude", "skills", rel)
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(dest, data, 0o644)
-	})
+// sha256hex returns the hex-encoded SHA-256 digest of data.
+func sha256hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
-// writeAgents extracts embedded agent .md files into <project>/.claude/agents/.
-func writeAgents(projectRoot string) error {
-	return fs.WalkDir(agentsFS, "agents", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		data, err := agentsFS.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		// path is like "agents/delivery-backend-engineer.md"
-		// target is .claude/agents/delivery-backend-engineer.md
-		rel, _ := filepath.Rel("agents", path)
-		dest := filepath.Join(projectRoot, ".claude", "agents", rel)
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(dest, data, 0o644)
-	})
+// diskSHA256 returns the SHA-256 hex digest of the file at path, or "" if the
+// file cannot be read (does not exist, permission error, etc.).
+func diskSHA256(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return sha256hex(data)
 }
 
-// writeRules extracts embedded rule .md files into <project>/.claude/rules/.
-func writeRules(projectRoot string) error {
-	return fs.WalkDir(rulesFS, "rules", func(path string, d fs.DirEntry, err error) error {
+// assetWriteResult holds the outcome of a writeAssetsFS call.
+type assetWriteResult struct {
+	hashes  map[string]string // embedded path -> embedded hash (files written)
+	skipped []string          // embedded paths skipped (user-customized)
+}
+
+// writeAssetsFS walks fsys starting at fsRoot, writing each file under
+// <projectRoot>/.claude/<claudeSubdir>/.  When storedHashes is nil (force
+// mode, used by init) every file is written unconditionally.  In smart mode
+// (storedHashes != nil) the 3-way comparison is applied:
+//
+//   - stored hash == ""       → first-time, write and record hash
+//   - embedded == stored      → unchanged in new version, skip write
+//   - embedded != stored AND disk == stored  → user hasn't touched, safe to overwrite
+//   - embedded != stored AND disk != stored  → user customized, skip and report
+func writeAssetsFS(
+	fsys embed.FS, fsRoot, claudeSubdir, projectRoot string,
+	storedHashes map[string]string,
+) (assetWriteResult, error) {
+	result := assetWriteResult{hashes: make(map[string]string)}
+	err := fs.WalkDir(fsys, fsRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		data, err := rulesFS.ReadFile(path)
+		data, err := fsys.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		// path is like "rules/tdd-requirements.md"
-		// target is .claude/rules/tdd-requirements.md
-		rel, _ := filepath.Rel("rules", path)
-		dest := filepath.Join(projectRoot, ".claude", "rules", rel)
+		rel, _ := filepath.Rel(fsRoot, path)
+		dest := filepath.Join(projectRoot, ".claude", claudeSubdir, rel)
+
+		embeddedHash := sha256hex(data)
+
+		if storedHashes != nil {
+			storedHash := storedHashes[path]
+			if storedHash != "" {
+				if embeddedHash == storedHash {
+					// Content unchanged in new binary — no need to write.
+					return nil
+				}
+				// Content changed in new binary — check if user modified the disk file.
+				if diskSHA256(dest) != storedHash {
+					// Disk differs from what we last wrote → user customized it, skip.
+					result.skipped = append(result.skipped, path)
+					return nil
+				}
+				// Disk matches what we wrote → safe to overwrite with new content.
+			}
+			// storedHash == "" means this file is new in this version; write it.
+		}
+
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(dest, data, 0o644)
+		if err := os.WriteFile(dest, data, 0o644); err != nil {
+			return err
+		}
+		result.hashes[path] = embeddedHash
+		return nil
 	})
+	return result, err
 }
 
 // cmdUpdate updates the stratus binary via `go install`, then re-execs the new
@@ -474,28 +520,73 @@ func cmdUpdate() {
 // cmdRefresh re-writes agents, skills, and rules from the current binary's
 // embedded content. Safe to run on an already-initialized project — never
 // touches .stratus.json or .mcp.json.
+//
+// Smart mode: if sync_state.asset_hashes is present in .stratus.json, files
+// that the user has customized (disk hash differs from stored hash) are skipped
+// rather than overwritten.
 func cmdRefresh() {
 	wd, _ := os.Getwd()
+	cfgPath := filepath.Join(wd, ".stratus.json")
 
-	if _, err := os.Stat(filepath.Join(wd, ".stratus.json")); err != nil {
+	if _, err := os.Stat(cfgPath); err != nil {
 		fmt.Fprintln(os.Stderr, "error: stratus not initialized here (no .stratus.json) — run `stratus init` first")
 		os.Exit(1)
 	}
 
-	if err := writeSkills(wd); err != nil {
-		log.Printf("warning: could not write skills: %v", err)
+	cfg := config.Load()
+	var storedHashes map[string]string
+	if cfg.SyncState != nil {
+		storedHashes = cfg.SyncState.AssetHashes
 	}
-	if err := writeAgents(wd); err != nil {
-		log.Printf("warning: could not write agents: %v", err)
+
+	allHashes := make(map[string]string)
+	var allSkipped []string
+
+	for _, spec := range []struct {
+		fsys    embed.FS
+		root    string
+		subdir  string
+	}{
+		{skillsFS, "skills", "skills"},
+		{agentsFS, "agents", "agents"},
+		{rulesFS, "rules", "rules"},
+	} {
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes)
+		if err != nil {
+			log.Printf("warning: %v", err)
+		}
+		for k, v := range res.hashes {
+			allHashes[k] = v
+		}
+		allSkipped = append(allSkipped, res.skipped...)
 	}
-	if err := writeRules(wd); err != nil {
-		log.Printf("warning: could not write rules: %v", err)
-	}
+
 	if err := writeHooks(wd); err != nil {
 		log.Printf("warning: could not register hooks: %v", err)
 	}
 
-	fmt.Println("stratus refreshed — agents, skills, rules, and hooks updated to latest version.")
+	// Persist updated sync state.
+	if cfg.SyncState == nil {
+		cfg.SyncState = &config.SyncState{AssetHashes: make(map[string]string)}
+	}
+	for k, v := range allHashes {
+		cfg.SyncState.AssetHashes[k] = v
+	}
+	cfg.SyncState.SyncedVersion = Version
+	cfg.SyncState.SkippedFiles = allSkipped
+	if err := cfg.Save(cfgPath); err != nil {
+		log.Printf("warning: could not save sync state: %v", err)
+	}
+
+	if len(allSkipped) > 0 {
+		fmt.Printf("stratus refreshed — %d customized file(s) skipped (your changes preserved).\n", len(allSkipped))
+		for _, f := range allSkipped {
+			fmt.Printf("  ⚠ skipped: %s\n", f)
+		}
+		fmt.Println("Run /sync-stratus in Claude to review the new asset versions.")
+	} else {
+		fmt.Println("stratus refreshed — agents, skills, rules, and hooks updated to latest version.")
+	}
 }
 
 // writeMCP merges the stratus MCP server entry into <project>/.mcp.json.

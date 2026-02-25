@@ -30,8 +30,20 @@ curl -sS -X POST $BASE/api/workflows \
 
 - Use `complexity: "complex"` for multi-service, auth, database, or cross-cutting concerns; `"simple"` for everything else.
 - Explore with Read, Grep, Glob — do NOT write code.
-- Delegate to specialized Task agents to draft the plan and task breakdown.
-- Write the plan to `docs/plans/<slug>.md`.
+
+**Task planning — use the built-in Plan subagent:**
+
+Delegate to the `Plan` subagent via Task tool (`subagent_type: "Plan"`). Pass full context:
+- The requirement from `$ARGUMENTS`
+- Key files and directories discovered during exploration
+- Relevant architecture, patterns, and constraints found in the codebase
+
+The Plan agent will return a step-by-step implementation plan with individual tasks and critical files.
+
+Use the Plan output to:
+1. Write the plan to `docs/plans/<slug>.md`
+2. Extract the ordered task list
+
 - Delegate to `delivery-governance-checker` (Task tool) with prompt: "Review plan at docs/plans/<slug>.md for governance compliance."
 - Record delegation:
 

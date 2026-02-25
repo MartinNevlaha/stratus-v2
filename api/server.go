@@ -17,16 +17,18 @@ import (
 
 // Server holds all dependencies and the HTTP mux.
 type Server struct {
-	db          *db.DB
-	coordinator *orchestration.Coordinator
-	vexor       *vexor.Client
-	hub         *Hub
-	terminal    *terminal.Manager
-	projectRoot string
-	sttEndpoint string
-	sttModel    string
-	staticFiles fs.FS
-	version     string
+	db            *db.DB
+	coordinator   *orchestration.Coordinator
+	vexor         *vexor.Client
+	hub           *Hub
+	terminal      *terminal.Manager
+	projectRoot   string
+	sttEndpoint   string
+	sttModel      string
+	staticFiles   fs.FS
+	version       string
+	syncedVersion string   // version when assets were last refreshed to disk
+	skippedFiles  []string // asset files skipped in last refresh (user-customized)
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -45,20 +47,24 @@ func NewServer(
 	sttModel string,
 	staticFiles fs.FS,
 	version string,
+	syncedVersion string,
+	skippedFiles []string,
 ) *Server {
 	s := &Server{
-		db:          database,
-		coordinator: coord,
-		vexor:       vexorClient,
-		hub:         hub,
-		terminal:    termMgr,
-		projectRoot: projectRoot,
-		sttEndpoint: sttEndpoint,
-		sttModel:    sttModel,
-		staticFiles: staticFiles,
-		version:     version,
-		dirtyFiles:  make(map[string]struct{}),
-		dirtyCh:     make(chan struct{}, 1),
+		db:            database,
+		coordinator:   coord,
+		vexor:         vexorClient,
+		hub:           hub,
+		terminal:      termMgr,
+		projectRoot:   projectRoot,
+		sttEndpoint:   sttEndpoint,
+		sttModel:      sttModel,
+		staticFiles:   staticFiles,
+		version:       version,
+		syncedVersion: syncedVersion,
+		skippedFiles:  skippedFiles,
+		dirtyFiles:    make(map[string]struct{}),
+		dirtyCh:       make(chan struct{}, 1),
 	}
 	go s.indexWorker()
 	return s

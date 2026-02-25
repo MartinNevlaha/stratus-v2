@@ -21,7 +21,35 @@
   ]
 
   let pendingProposals = $derived(appState.dashboard?.pending_proposals?.length ?? 0)
+
+  // Resizable split pane
+  let splitRatio = $state(parseFloat(localStorage.getItem('stratus-split-ratio') ?? '0.5'))
+  let isDragging = $state(false)
+  let dragStartX = 0
+  let dragStartRatio = 0
+  let splitView: HTMLDivElement
+
+  function onDividerMouseDown(e: MouseEvent) {
+    isDragging = true
+    dragStartX = e.clientX
+    dragStartRatio = splitRatio
+    e.preventDefault()
+  }
+
+  function onMouseMove(e: MouseEvent) {
+    if (!isDragging || !splitView) return
+    const dx = e.clientX - dragStartX
+    splitRatio = Math.min(0.8, Math.max(0.2, dragStartRatio + dx / splitView.clientWidth))
+  }
+
+  function onMouseUp() {
+    if (!isDragging) return
+    isDragging = false
+    localStorage.setItem('stratus-split-ratio', splitRatio.toString())
+  }
 </script>
+
+<svelte:window onmousemove={onMouseMove} onmouseup={onMouseUp} />
 
 <div class="app">
   <header>
@@ -53,16 +81,32 @@
     <div class="status-dot" class:connected={appState.connected} title={appState.connected ? 'Live' : 'Reconnecting…'}></div>
   </header>
 
+  {#if appState.version?.skipped_files?.length || appState.version?.sync_required}
+    <div class="sync-notice">
+      {#if appState.version.skipped_files?.length}
+        ⚠ {appState.version.skipped_files.length} asset(s) changed in this update but were skipped
+        (you've customized them). Run <code>/sync-stratus</code> in Claude to review.
+      {:else}
+        ↻ Assets not yet refreshed for v{appState.version.current}. Run <code>stratus refresh</code>.
+      {/if}
+    </div>
+  {/if}
+
   <main>
     {#if appState.loading && !appState.dashboard}
       <div class="loading">Connecting to stratus…</div>
     {:else if activeTab === 'overview'}
-      <div class="split-view">
-        <div class="split-pane">
+      <div class="split-view" class:dragging={isDragging} bind:this={splitView}>
+        <div class="split-pane" style="flex: 0 0 {splitRatio * 100}%; max-width: {splitRatio * 100}%;">
           <Overview />
         </div>
-        <div class="split-divider"></div>
-        <div class="split-pane terminal-pane">
+        <div
+          class="split-divider"
+          class:dragging={isDragging}
+          role="separator"
+          onmousedown={onDividerMouseDown}
+        ></div>
+        <div class="split-pane terminal-pane" style="flex: 1; min-width: 0;">
           <Terminal />
         </div>
       </div>
@@ -186,7 +230,6 @@
   }
 
   .split-pane {
-    flex: 1;
     overflow-y: auto;
     padding: 20px;
     min-width: 0;
@@ -194,9 +237,33 @@
   }
 
   .split-divider {
+    width: 6px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+  }
+
+  .split-divider::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
     width: 1px;
     background: #30363d;
-    flex-shrink: 0;
+    transform: translateX(-50%);
+    transition: background 0.15s;
+  }
+
+  .split-divider:hover::after,
+  .split-divider.dragging::after {
+    background: #58a6ff;
+  }
+
+  .split-view.dragging {
+    user-select: none;
+    cursor: col-resize;
   }
 
   .terminal-pane {
@@ -205,6 +272,21 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+
+  .sync-notice {
+    padding: 6px 16px;
+    background: #2d2208;
+    border-bottom: 1px solid #9e6a03;
+    color: #ffa657;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .sync-notice code {
+    background: #161b22;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: monospace;
   }
 
   .loading {

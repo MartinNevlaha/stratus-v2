@@ -14,11 +14,13 @@ import (
 
 // VersionResponse is returned by GET /api/system/version.
 type VersionResponse struct {
-	Current         string `json:"current"`
-	Latest          string `json:"latest"`
-	UpdateAvailable bool   `json:"update_available"`
-	ReleaseURL      string `json:"release_url"`
-	ReleaseNotes    string `json:"release_notes"`
+	Current         string   `json:"current"`
+	Latest          string   `json:"latest"`
+	UpdateAvailable bool     `json:"update_available"`
+	ReleaseURL      string   `json:"release_url"`
+	ReleaseNotes    string   `json:"release_notes"`
+	SyncRequired    bool     `json:"sync_required"`   // binary upgraded but refresh not yet run
+	SkippedFiles    []string `json:"skipped_files"`   // assets skipped in last refresh (user-customized)
 }
 
 type githubRelease struct {
@@ -29,8 +31,14 @@ type githubRelease struct {
 
 // handleVersion returns the current version and checks GitHub for a newer release.
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	skipped := s.skippedFiles
+	if skipped == nil {
+		skipped = []string{}
+	}
 	resp := VersionResponse{
-		Current: s.version,
+		Current:      s.version,
+		SyncRequired: s.syncedVersion != "" && s.syncedVersion != s.version,
+		SkippedFiles: skipped,
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}

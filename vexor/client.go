@@ -82,16 +82,14 @@ func (c *Client) Search(query string, topK int, mode string) ([]Result, error) {
 	return parsePorcelain(string(out)), nil
 }
 
-// Index re-indexes the given file paths. If paths is empty, a full project
-// reindex is performed. Uses a longer timeout since indexing can be slow.
-func (c *Client) Index(paths []string) error {
+// Index runs a full project reindex. The paths argument is accepted for API
+// compatibility but ignored — vexor index does not support incremental
+// file-level indexing.
+func (c *Client) Index(_ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	args := []string{"index"}
-	args = append(args, paths...)
-
-	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
+	cmd := exec.CommandContext(ctx, c.binaryPath, "index")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("vexor index timeout after 120s")

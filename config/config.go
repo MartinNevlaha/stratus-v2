@@ -7,6 +7,15 @@ import (
 	"strconv"
 )
 
+// SyncState tracks which version of the embedded assets was last written to disk
+// and the SHA-256 hash of each file at the time it was written.  This lets
+// smart-refresh detect user customizations and skip overwriting them.
+type SyncState struct {
+	SyncedVersion string            `json:"synced_version"`
+	AssetHashes   map[string]string `json:"asset_hashes,omitempty"`
+	SkippedFiles  []string          `json:"skipped_files,omitempty"`
+}
+
 // Config holds the stratus configuration.
 type Config struct {
 	Port        int         `json:"port"`
@@ -14,6 +23,7 @@ type Config struct {
 	ProjectRoot string      `json:"project_root"`
 	Vexor       VexorConfig `json:"vexor"`
 	STT         STTConfig   `json:"stt"`
+	SyncState   *SyncState  `json:"sync_state,omitempty"`
 }
 
 // VexorConfig configures the Vexor code search backend.
@@ -44,9 +54,18 @@ func Default() Config {
 		},
 		STT: STTConfig{
 			Endpoint: "http://localhost:8011",
-			Model:    "whisper-1",
+			Model:    "Systran/faster-whisper-small",
 		},
 	}
+}
+
+// Save marshals the config to JSON and writes it to path.
+func (c Config) Save(path string) error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // Load loads config from .stratus.json in the current directory, merging with defaults.
