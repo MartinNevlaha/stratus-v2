@@ -8,9 +8,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// semverGT returns true if version a is strictly greater than b.
+// Both must be in "X.Y.Z" form; any parse error treats a as not greater.
+func semverGT(a, b string) bool {
+	parse := func(s string) [3]int {
+		parts := strings.SplitN(s, ".", 3)
+		var v [3]int
+		for i := 0; i < 3 && i < len(parts); i++ {
+			v[i], _ = strconv.Atoi(parts[i])
+		}
+		return v
+	}
+	av, bv := parse(a), parse(b)
+	for i := range av {
+		if av[i] != bv[i] {
+			return av[i] > bv[i]
+		}
+	}
+	return false
+}
 
 // VersionResponse is returned by GET /api/system/version.
 type VersionResponse struct {
@@ -31,13 +52,29 @@ type githubRelease struct {
 
 // handleVersion returns the current version and checks GitHub for a newer release.
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	// Re-read sync state from disk so that changes made by `stratus refresh`
+	// (a separate process) are reflected without restarting the server.
+	syncedVersion := s.syncedVersion
 	skipped := s.skippedFiles
+	cfgPath := filepath.Join(s.projectRoot, ".stratus.json")
+	if raw, err := os.ReadFile(cfgPath); err == nil {
+		var diskCfg struct {
+			SyncState *struct {
+				SyncedVersion string   `json:"synced_version"`
+				SkippedFiles  []string `json:"skipped_files"`
+			} `json:"sync_state"`
+		}
+		if json.Unmarshal(raw, &diskCfg) == nil && diskCfg.SyncState != nil {
+			syncedVersion = diskCfg.SyncState.SyncedVersion
+			skipped = diskCfg.SyncState.SkippedFiles
+		}
+	}
 	if skipped == nil {
 		skipped = []string{}
 	}
 	resp := VersionResponse{
 		Current:      s.version,
-		SyncRequired: s.syncedVersion != "" && s.syncedVersion != s.version,
+		SyncRequired: syncedVersion != "" && syncedVersion != s.version,
 		SkippedFiles: skipped,
 	}
 
@@ -54,7 +91,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(body, &release) == nil && release.TagName != "" {
 			latest := strings.TrimPrefix(release.TagName, "v")
 			resp.Latest = latest
-			resp.UpdateAvailable = latest != s.version
+			resp.UpdateAvailable = semverGT(latest, s.version)
 			resp.ReleaseURL = release.HTMLURL
 			resp.ReleaseNotes = release.Body
 		}
