@@ -29,6 +29,7 @@ const (
 	sttContainerName = "stratus-stt"
 	sttImage         = "ghcr.io/speaches-ai/speaches:latest-cpu"
 	sttDefaultModel  = "Systran/faster-whisper-small"
+	sttHost          = "http://localhost:8011"
 )
 
 //go:embed skills
@@ -167,7 +168,47 @@ func sttStart(model string) bool {
 		return false
 	}
 	log.Printf("STT: container started (model: %s)", model)
+
+	// Install the model in speaches in the background — speaches tracks
+	// installed models separately from the HuggingFace file cache.
+	// POST /v1/models/{id} triggers download; subsequent calls are no-ops.
+	go sttInstallModel(sttHost, model)
 	return true
+}
+
+// sttInstallModel waits for the speaches health endpoint then installs the model.
+func sttInstallModel(host, model string) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	// Wait up to 30s for the container to be healthy.
+	for range 30 {
+		resp, err := client.Get(host + "/health")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(time.Second)
+	}
+
+	// POST /v1/models/{model_id} — triggers download if not already installed.
+	encoded := strings.ReplaceAll(model, "/", "%2F")
+	req, err := http.NewRequest(http.MethodPost, host+"/v1/models/"+encoded, nil)
+	if err != nil {
+		log.Printf("STT: model install request error: %v", err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("STT: model install failed: %v", err)
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusConflict {
+		log.Printf("STT: model %s installing/ready (status %d)", model, resp.StatusCode)
+	} else {
+		log.Printf("STT: model install returned %d", resp.StatusCode)
+	}
 }
 
 // sttStop stops and removes the speaches container.
