@@ -1,7 +1,53 @@
 ---
-name: delivery-frontend-engineer
-description: "Frontend delivery agent for UI components, pages, and client-side logic."
+description: >-
+  Frontend delivery agent for UI components, pages, and client-side logic. Use
+  for any browser-side work including React, Svelte, Vue, or Next.js components,
+  styling, state management, and client-side routing.
+
+
+  **Examples:**
+
+
+  <example>
+
+  Context: The user needs a new UI component.
+
+  user: "Add a filterable data table component to the dashboard"
+
+  assistant: "I'm going to use the Task tool to launch the
+  delivery-frontend-engineer agent to build this component with proper
+  accessibility and responsive design."
+
+  <commentary>
+
+  Since this is a UI component, use the delivery-frontend-engineer agent which
+  follows the project's frontend framework patterns and accessibility standards.
+
+  </commentary>
+
+  </example>
+
+
+  <example>
+
+  Context: The user needs to fix a UI bug.
+
+  user: "The sidebar menu doesn't collapse properly on mobile"
+
+  assistant: "I'll use the Task tool to launch the delivery-frontend-engineer
+  agent to fix this responsive layout issue."
+
+  <commentary>
+
+  Responsive layout fixes are frontend work, so the delivery-frontend-engineer
+  agent is the right choice.
+
+  </commentary>
+
+  </example>
 mode: subagent
+tools:
+  todowrite: false
 ---
 
 # Frontend Engineer

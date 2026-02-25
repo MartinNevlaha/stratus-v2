@@ -1,11 +1,57 @@
 ---
-name: delivery-code-reviewer
-description: "Code review delivery agent for quality, correctness, security, and governance checks. Read-only — reviews and reports, never modifies code."
+description: >-
+  Code review delivery agent for quality, correctness, security, and governance
+  checks. Read-only — reviews and reports, never modifies code. Use when code
+  needs to be reviewed before merging or after implementation.
+
+
+  **Examples:**
+
+
+  <example>
+
+  Context: The user wants a code review of recent changes.
+
+  user: "Review the authentication changes I just implemented"
+
+  assistant: "I'm going to use the Task tool to launch the
+  delivery-code-reviewer agent to review the code for quality, security, and
+  correctness."
+
+  <commentary>
+
+  Since this is a code review task (read-only analysis), use the
+  delivery-code-reviewer agent which checks against the project's coding
+  standards and governance rules.
+
+  </commentary>
+
+  </example>
+
+
+  <example>
+
+  Context: The user wants a security review.
+
+  user: "Check the new API endpoints for security vulnerabilities"
+
+  assistant: "I'll use the Task tool to launch the delivery-code-reviewer agent
+  to perform a security-focused review."
+
+  <commentary>
+
+  Security review is part of the code reviewer's checklist, so the
+  delivery-code-reviewer agent is the right choice.
+
+  </commentary>
+
+  </example>
 mode: subagent
-permission:
-  edit: deny
-  write: deny
-  bash: deny
+tools:
+  todowrite: false
+  edit: false
+  write: false
+  bash: false
 ---
 
 # Code Reviewer

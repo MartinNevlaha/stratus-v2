@@ -1,7 +1,53 @@
 ---
-name: delivery-database-engineer
-description: "Database delivery agent for schema design, migrations, queries, and data model changes."
+description: >-
+  Database delivery agent for schema design, migrations, queries, and data model
+  changes. Use for any database work including schema modifications, writing
+  migrations, query optimization, index design, and data integrity constraints.
+
+
+  **Examples:**
+
+
+  <example>
+
+  Context: The user needs a new database table.
+
+  user: "Add a notifications table with foreign key to users"
+
+  assistant: "I'm going to use the Task tool to launch the
+  delivery-database-engineer agent to design the schema and write the migration."
+
+  <commentary>
+
+  Since this involves schema design and migrations, use the
+  delivery-database-engineer agent which enforces forward-only migrations and
+  proper constraints.
+
+  </commentary>
+
+  </example>
+
+
+  <example>
+
+  Context: The user has a slow query.
+
+  user: "The projects list query takes 3 seconds with 10k rows"
+
+  assistant: "I'll use the Task tool to launch the delivery-database-engineer
+  agent to analyze and optimize this query."
+
+  <commentary>
+
+  Query optimization requires database expertise including EXPLAIN ANALYZE and
+  index design, so the delivery-database-engineer is the right choice.
+
+  </commentary>
+
+  </example>
 mode: subagent
+tools:
+  todowrite: false
 ---
 
 # Database Engineer

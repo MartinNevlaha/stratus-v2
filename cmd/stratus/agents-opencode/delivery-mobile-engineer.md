@@ -1,7 +1,54 @@
 ---
-name: delivery-mobile-engineer
-description: "Mobile delivery agent for React Native / Expo cross-platform development (iOS + Android)."
+description: >-
+  Mobile delivery agent for React Native / Expo cross-platform development
+  (iOS + Android). Use for mobile screens, navigation, native integrations,
+  mobile performance optimization, and platform-specific features.
+
+
+  **Examples:**
+
+
+  <example>
+
+  Context: The user needs a new mobile screen.
+
+  user: "Add a profile settings screen with avatar upload"
+
+  assistant: "I'm going to use the Task tool to launch the
+  delivery-mobile-engineer agent to build this screen with proper navigation
+  and image handling."
+
+  <commentary>
+
+  Since this involves mobile UI with native features (image picker), use the
+  delivery-mobile-engineer agent which handles Expo APIs and platform
+  differences.
+
+  </commentary>
+
+  </example>
+
+
+  <example>
+
+  Context: The user has a mobile performance issue.
+
+  user: "The feed screen stutters when scrolling through 200+ items"
+
+  assistant: "I'll use the Task tool to launch the delivery-mobile-engineer
+  agent to optimize the list rendering."
+
+  <commentary>
+
+  Mobile list performance requires FlatList optimization and memoization
+  patterns, so the delivery-mobile-engineer agent is the right choice.
+
+  </commentary>
+
+  </example>
 mode: subagent
+tools:
+  todowrite: false
 ---
 
 # Mobile Engineer

@@ -395,7 +395,7 @@ func initClaudeCode(wd string, allHashes map[string]string) {
 }
 
 // initOpenCode writes all OpenCode integration files: opencode.json (MCP + plugin),
-// .opencode/agents|commands|plugin, and .claude/skills|rules (shared with Claude Code).
+// .opencode/agent|commands|plugin, and .claude/skills|rules (shared with Claude Code).
 func initOpenCode(wd string, allHashes map[string]string) {
 	if err := writeOpenCodeConfig(wd); err != nil {
 		log.Printf("warning: could not write opencode.json: %v", err)
@@ -426,7 +426,7 @@ func initOpenCode(wd string, allHashes map[string]string) {
 		root    string
 		destDir string
 	}{
-		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
+		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agent")},
 		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
 	} {
@@ -473,7 +473,7 @@ func printInitSummary(target string) {
   delivery-governance-checker     — governance & ADR compliance
   delivery-debugger               — root cause diagnosis`
 
-	const ocAgents = `Agents written to .opencode/agents/:
+	const ocAgents = `Agents written to .opencode/agent/:
   delivery-implementation-expert  — general-purpose implementation
   delivery-backend-engineer       — API, services, handlers
   delivery-frontend-engineer      — UI, components, pages
@@ -806,7 +806,7 @@ func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[st
 		root    string
 		destDir string
 	}{
-		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
+		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agent")},
 		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
 	} {
@@ -859,9 +859,11 @@ func writeMCP(projectRoot string) error {
 	return os.WriteFile(mcpPath, append(out, '\n'), 0o644)
 }
 
-// writeOpenCodeConfig merges the stratus MCP server and plugin entries into
+// writeOpenCodeConfig merges the stratus MCP server entry into
 // <project>/opencode.json. If the file already contains other configuration it
-// is preserved — only "mcp.stratus" and "plugins.stratus" are added/updated.
+// is preserved — only "mcp.stratus" is added/updated.
+// Local plugins are auto-discovered from .opencode/plugins/ and do not need
+// a config entry.
 func writeOpenCodeConfig(projectRoot string) error {
 	ocPath := filepath.Join(projectRoot, "opencode.json")
 
@@ -890,17 +892,9 @@ func writeOpenCodeConfig(projectRoot string) error {
 	}
 	existing["mcp"] = mcpSection
 
-	// Get or create "plugins" object.
-	pluginsSection, _ := existing["plugins"].(map[string]any)
-	if pluginsSection == nil {
-		pluginsSection = map[string]any{}
-	}
-	if _, ok := pluginsSection["stratus"]; !ok {
-		pluginsSection["stratus"] = map[string]any{
-			"enabled": true,
-		}
-	}
-	existing["plugins"] = pluginsSection
+	// Remove stale "plugins" key from older Stratus versions — OpenCode
+	// auto-discovers local plugins from .opencode/plugins/.
+	delete(existing, "plugins")
 
 	out, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {

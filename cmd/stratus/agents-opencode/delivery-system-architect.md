@@ -1,10 +1,57 @@
 ---
-name: delivery-system-architect
-description: "System architecture delivery agent for technical design documents, API contracts, and data models. Read-only — produces specs, never writes source code."
+description: >-
+  System architecture delivery agent for technical design documents, API
+  contracts, and data models. Read-only — produces specs, never writes source
+  code. Use when a feature needs a technical design before implementation.
+
+
+  **Examples:**
+
+
+  <example>
+
+  Context: The user needs a technical design for a new feature.
+
+  user: "Design the API and data model for a notification system"
+
+  assistant: "I'm going to use the Task tool to launch the
+  delivery-system-architect agent to produce a technical design document with
+  API contracts and data models."
+
+  <commentary>
+
+  Since this needs a technical design before implementation, use the
+  delivery-system-architect agent which produces structured TDDs with API
+  contracts, data models, and sequence diagrams.
+
+  </commentary>
+
+  </example>
+
+
+  <example>
+
+  Context: The user needs to understand the impact of a change.
+
+  user: "What components would be affected if we switch from REST to gRPC?"
+
+  assistant: "I'll use the Task tool to launch the delivery-system-architect
+  agent to analyze the component impact and produce a design document."
+
+  <commentary>
+
+  Analyzing system-wide impact of architectural changes requires understanding
+  component boundaries, so the delivery-system-architect agent is the right
+  choice.
+
+  </commentary>
+
+  </example>
 mode: subagent
-permission:
-  edit: deny
-  write: deny
+tools:
+  todowrite: false
+  edit: false
+  write: false
 ---
 
 # System Architect

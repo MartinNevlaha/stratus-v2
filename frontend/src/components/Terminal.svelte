@@ -16,6 +16,17 @@
   // Auto-scroll: follow output unless the user has manually scrolled up.
   let autoScroll = true
 
+  function fitAndNotify() {
+    if (!fitAddon || !container || container.clientHeight === 0) return
+    fitAddon.fit()
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'resize',
+        data: { id: sessionId, rows: term.rows, cols: term.cols }
+      }))
+    }
+  }
+
   onMount(() => {
     term = new Terminal({
       theme: {
@@ -36,7 +47,7 @@
     // Double rAF: first frame lets the browser finish the current render
     // cycle, second frame ensures the flex layout has fully settled and the
     // container has its final pixel dimensions before xterm calculates cols.
-    requestAnimationFrame(() => requestAnimationFrame(() => fitAddon.fit()))
+    requestAnimationFrame(() => requestAnimationFrame(() => fitAndNotify()))
 
     // Track user scroll position: disable auto-scroll when they scroll up,
     // re-enable when they reach the bottom again.
@@ -50,17 +61,20 @@
 
     connectWS()
 
-    // Resize handler
-    const observer = new ResizeObserver(() => {
-      fitAddon.fit()
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'resize',
-          data: { id: sessionId, rows: term.rows, cols: term.cols }
-        }))
+    // Resize handler — refit whenever the container size changes.
+    const resizeObs = new ResizeObserver(() => fitAndNotify())
+    resizeObs.observe(container)
+
+    // Visibility handler — ResizeObserver does NOT fire when an ancestor
+    // toggles display:none ↔ display:flex (the split-view does this on tab
+    // switch). IntersectionObserver reliably detects when the container
+    // re-enters the viewport and we can re-fit at the correct dimensions.
+    const visObs = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) {
+        requestAnimationFrame(() => fitAndNotify())
       }
     })
-    observer.observe(container)
+    visObs.observe(container)
 
     // Send input to server. Re-enable auto-scroll on user input so they
     // always see the response to what they typed.
@@ -72,7 +86,8 @@
     })
 
     return () => {
-      observer.disconnect()
+      resizeObs.disconnect()
+      visObs.disconnect()
       viewport?.removeEventListener('scroll', onViewportScroll)
     }
   })

@@ -1,10 +1,56 @@
 ---
-name: delivery-debugger
-description: "Diagnostic delivery agent for tracing root causes of bugs. Read-only — diagnoses and reports, never writes code or applies fixes."
+description: >-
+  Diagnostic delivery agent for tracing root causes of bugs. Read-only —
+  diagnoses and reports, never writes code or applies fixes. Use when a bug
+  needs investigation and root cause analysis before fixing.
+
+
+  **Examples:**
+
+
+  <example>
+
+  Context: The user has a bug with unclear cause.
+
+  user: "Users are getting 500 errors on the dashboard but only after 5 minutes"
+
+  assistant: "I'm going to use the Task tool to launch the delivery-debugger
+  agent to trace the root cause of this intermittent error."
+
+  <commentary>
+
+  Since this bug needs investigation before a fix can be attempted, use the
+  delivery-debugger agent which systematically traces from symptom to root
+  cause.
+
+  </commentary>
+
+  </example>
+
+
+  <example>
+
+  Context: The user needs to understand why a test is failing.
+
+  user: "The integration test for order processing started failing after the
+  last deploy"
+
+  assistant: "I'll use the Task tool to launch the delivery-debugger agent to
+  diagnose why this test is failing."
+
+  <commentary>
+
+  Diagnosing test failures requires tracing execution paths and identifying the
+  breaking change, so the delivery-debugger agent is the right choice.
+
+  </commentary>
+
+  </example>
 mode: subagent
-permission:
-  edit: deny
-  write: deny
+tools:
+  todowrite: false
+  edit: false
+  write: false
 ---
 
 # Debugger

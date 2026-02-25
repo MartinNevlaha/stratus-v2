@@ -1,11 +1,59 @@
 ---
-name: delivery-governance-checker
-description: "Governance review delivery agent that checks plans, designs, and implementations against project rules and ADRs. Read-only — reports findings, never modifies files."
+description: >-
+  Governance review delivery agent that checks plans, designs, and
+  implementations against project rules and ADRs. Read-only — reports findings,
+  never modifies files. Use when plans or code need compliance verification
+  against project standards.
+
+
+  **Examples:**
+
+
+  <example>
+
+  Context: The user wants to verify a plan complies with project rules.
+
+  user: "Check if the implementation plan follows our architecture decisions"
+
+  assistant: "I'm going to use the Task tool to launch the
+  delivery-governance-checker agent to verify compliance against ADRs and
+  project rules."
+
+  <commentary>
+
+  Since this is a governance compliance check, use the
+  delivery-governance-checker agent which loads project rules and ADRs before
+  issuing findings.
+
+  </commentary>
+
+  </example>
+
+
+  <example>
+
+  Context: The user wants to validate implementation against standards.
+
+  user: "Verify the new module follows our coding and security standards"
+
+  assistant: "I'll use the Task tool to launch the delivery-governance-checker
+  agent to check the implementation against governance rules."
+
+  <commentary>
+
+  Implementation compliance verification requires checking against project
+  governance docs, so the delivery-governance-checker agent is the right
+  choice.
+
+  </commentary>
+
+  </example>
 mode: subagent
-permission:
-  edit: deny
-  write: deny
-  bash: deny
+tools:
+  todowrite: false
+  edit: false
+  write: false
+  bash: false
 ---
 
 # Governance Checker

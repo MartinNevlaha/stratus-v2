@@ -20,7 +20,7 @@ Check for `.stratus.json`:
 
 Check for `opencode.json`:
 - Present? `stratus mcp-serve` registered under `mcp.stratus`?
-- Plugin `stratus` registered under `plugins.stratus`?
+- Stale `plugins` key absent? (local plugins are auto-discovered from `.opencode/plugins/`)
 
 ### Step 2: Skills Audit
 
@@ -35,12 +35,12 @@ Detect:
 
 For each user-added skill (not in the baseline list):
 - Read its `SKILL.md` — record `name`, `description`, `context`
-- Check if any agent in `.opencode/agents/` references it
+- Check if any agent in `.opencode/agent/` references it
 - If no agent references it → **Integration Gap**
 
 ### Step 3: Agents Audit
 
-Enumerate every `.md` file in `.opencode/agents/`.
+Enumerate every `.md` file in `.opencode/agent/`.
 
 Expected delivery agents:
 - `delivery-implementation-expert`, `delivery-backend-engineer`, `delivery-frontend-engineer`
@@ -117,7 +117,7 @@ Report detected stack, agent coverage, and irrelevant agents.
 Show the report. If there are integration recommendations, ask the user which to apply using the `question` tool.
 
 For each confirmed skill integration patch:
-1. Read the target agent file (`.opencode/agents/<agent>.md`)
+1. Read the target agent file (`.opencode/agent/<agent>.md`)
 2. Append a bullet under the `## Skills` section
 3. Line: `- Use the \`<skill-name>\` skill for <purpose>.`
 
