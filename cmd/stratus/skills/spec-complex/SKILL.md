@@ -171,9 +171,48 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 6: Learn
 
-- Capture lessons, patterns, and memory events (use `save_memory` MCP tool or POST /api/events).
-- Update any rules or ADRs based on what was learned.
-- Complete the workflow:
+**Step 1 — Save memory events** (session discoveries, decisions):
+
+```bash
+# Via MCP tool (preferred)
+save_memory(text="...", type="decision|discovery|bugfix", tags=[...], importance=0.8)
+
+# Or direct API
+curl -sS -X POST $BASE/api/events \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "...", "type": "decision", "title": "...", "tags": ["..."]}'
+```
+
+**Step 2 — Write governance artifacts** (permanent, retrievable by future agents):
+
+| Artifact type | Write to |
+|--------------|----------|
+| New coding rule | `.claude/rules/<name>.md` |
+| Decision / ADR | `docs/decisions/<slug>-adr.md` |
+| Architecture note | `docs/architecture/<slug>.md` |
+
+Only write files for insights worth preserving long-term.
+
+**Step 2b — Register pattern candidates** (for patterns needing human review before becoming rules):
+
+```bash
+curl -sS -X POST $BASE/api/learning/candidates \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "detection_type": "pattern|antipattern|convention",
+    "description": "...",
+    "confidence": 0.8,
+    "files": ["path/to/relevant/file"]
+  }'
+```
+
+**Step 3 — Re-index governance** (only if you wrote files in Step 2):
+
+```bash
+curl -sS -X POST $BASE/api/retrieve/index
+```
+
+**Step 4 — Complete workflow**:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \

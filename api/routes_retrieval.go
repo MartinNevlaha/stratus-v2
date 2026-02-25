@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -86,6 +87,18 @@ func (s *Server) handleReIndex(w http.ResponseWriter, r *http.Request) {
 		s.hub.BroadcastJSON("governance_indexed", stats)
 	}()
 	json200(w, map[string]any{"status": "indexing"})
+}
+
+func (s *Server) handleMarkDirty(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Paths) == 0 {
+		jsonErr(w, http.StatusBadRequest, "paths required")
+		return
+	}
+	s.markDirty(body.Paths)
+	json200(w, map[string]any{"status": "queued", "count": len(body.Paths)})
 }
 
 func truncate(s string, n int) string {

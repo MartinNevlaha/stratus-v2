@@ -3,8 +3,11 @@ package api
 import (
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
@@ -23,6 +26,10 @@ type Server struct {
 	sttEndpoint string
 	staticFiles fs.FS
 	version     string
+
+	dirtyFiles map[string]struct{}
+	dirtyMu    sync.Mutex
+	dirtyCh    chan struct{} // buffered(1) signal channel
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -37,7 +44,7 @@ func NewServer(
 	staticFiles fs.FS,
 	version string,
 ) *Server {
-	return &Server{
+	s := &Server{
 		db:          database,
 		coordinator: coord,
 		vexor:       vexorClient,
@@ -47,6 +54,68 @@ func NewServer(
 		sttEndpoint: sttEndpoint,
 		staticFiles: staticFiles,
 		version:     version,
+		dirtyFiles:  make(map[string]struct{}),
+		dirtyCh:     make(chan struct{}, 1),
+	}
+	go s.indexWorker()
+	return s
+}
+
+// markDirty adds file paths to the dirty set and signals the index worker.
+func (s *Server) markDirty(paths []string) {
+	s.dirtyMu.Lock()
+	for _, p := range paths {
+		s.dirtyFiles[p] = struct{}{}
+	}
+	s.dirtyMu.Unlock()
+	select {
+	case s.dirtyCh <- struct{}{}:
+	default:
+	}
+}
+
+// indexWorker runs a debounced background loop that calls vexor.Index whenever
+// files are marked dirty. It waits for a 5s quiet period after the last dirty
+// signal before indexing, and falls back to a full reindex when the batch
+// exceeds 20 files.
+func (s *Server) indexWorker() {
+	const quietPeriod = 5 * time.Second
+	const maxBatch = 20
+
+	for {
+		<-s.dirtyCh // wait for first dirty signal
+
+		timer := time.NewTimer(quietPeriod)
+	debounce:
+		for {
+			select {
+			case <-s.dirtyCh:
+				if !timer.Stop() {
+					<-timer.C
+				}
+				timer.Reset(quietPeriod)
+			case <-timer.C:
+				break debounce
+			}
+		}
+
+		s.dirtyMu.Lock()
+		files := make([]string, 0, len(s.dirtyFiles))
+		for f := range s.dirtyFiles {
+			files = append(files, f)
+		}
+		s.dirtyFiles = make(map[string]struct{})
+		s.dirtyMu.Unlock()
+
+		if len(files) == 0 || !s.vexor.Available() {
+			continue
+		}
+		if len(files) > maxBatch {
+			files = nil // full reindex
+		}
+		if err := s.vexor.Index(files); err != nil {
+			log.Printf("vexor reindex: %v", err)
+		}
 	}
 }
 
@@ -72,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/retrieve", s.handleRetrieve)
 	mux.HandleFunc("GET /api/retrieve/status", s.handleRetrieveStatus)
 	mux.HandleFunc("POST /api/retrieve/index", s.handleReIndex)
+	mux.HandleFunc("POST /api/retrieve/dirty", s.handleMarkDirty)
 
 	// Orchestration
 	mux.HandleFunc("POST /api/workflows", s.handleStartWorkflow)

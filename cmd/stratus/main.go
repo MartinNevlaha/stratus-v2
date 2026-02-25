@@ -132,6 +132,7 @@ func cmdHook() {
 		"phase_guard":       hooks.PhaseGuard,
 		"delegation_guard":  hooks.DelegationGuard,
 		"workflow_enforcer": hooks.WorkflowEnforcer,
+		"watcher":           hooks.Watcher,
 	}
 	hooks.Run(hookName, handlers)
 }
@@ -189,6 +190,9 @@ func cmdInit() {
 	// Run initial Vexor index (best-effort — skip if vexor not installed)
 	vexorIndex(wd)
 
+	// Index governance docs into the DB (best-effort)
+	governanceIndex(wd)
+
 	fmt.Println(`stratus initialized!
 
 Skills written to .claude/skills/:
@@ -230,8 +234,11 @@ Rules written to .claude/rules/:
 Hooks registered in .claude/settings.json:
   PreToolUse  phase_guard       — blocks write tools during review/verify
   PreToolUse  delegation_guard  — requires active workflow for delivery agents
+  PostToolUse watcher           — queues modified files for vexor reindexing
 
-Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar`)
+Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar
+
+Governance docs indexed into DB (CLAUDE.md, rules, skills, agents, ADRs)`)
 }
 
 // writeSkills extracts embedded SKILL.md files into <project>/.claude/skills/.
@@ -437,6 +444,12 @@ func writeHooks(projectRoot string) error {
 				{"Task", "stratus hook delegation_guard"},
 			},
 		},
+		{
+			event: "PostToolUse",
+			hooks: []hookDef{
+				{"Write|Edit|MultiEdit|NotebookEdit", "stratus hook watcher"},
+			},
+		},
 	}
 
 	for _, d := range defs {
@@ -505,6 +518,20 @@ func vexorIndex(projectRoot string) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("warning: vexor index failed: %v\n", err)
+		return
+	}
+	fmt.Println("done.")
+}
+
+// governanceIndex indexes governance docs into the DB at init time.
+// Best-effort: errors are printed as warnings, never fatal.
+func governanceIndex(projectRoot string) {
+	fmt.Print("Indexing governance docs… ")
+	cfg := config.Load()
+	database := mustOpenDB(cfg)
+	defer database.Close()
+	if err := database.IndexGovernance(projectRoot); err != nil {
+		fmt.Printf("warning: governance index failed: %v\n", err)
 		return
 	}
 	fmt.Println("done.")

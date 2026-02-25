@@ -10,13 +10,13 @@ Single binary (~15 MB), zero runtime dependencies.
 
 ## vs stratus v1 (Python)
 
-| | Python | Go v2 |
-|---|---|---|
-| Backend | 29 k LOC, 164 files | ~4.5 k LOC, ~25 files |
-| Frontend | 3.9 k LOC vanilla JS | ~2 k LOC Svelte 5 |
-| Databases | 4 SQLite, 18+ tables | 1 SQLite, 8 tables |
-| Deployment | Python + pip + venv | Single binary |
-| State | JSON files on disk | DB-backed state machine |
+|            | Python               | Go v2                   |
+| ---------- | -------------------- | ----------------------- |
+| Backend    | 29 k LOC, 164 files  | ~4.5 k LOC, ~25 files   |
+| Frontend   | 3.9 k LOC vanilla JS | ~2 k LOC Svelte 5       |
+| Databases  | 4 SQLite, 18+ tables | 1 SQLite, 8 tables      |
+| Deployment | Python + pip + venv  | Single binary           |
+| State      | JSON files on disk   | DB-backed state machine |
 
 ## Features
 
@@ -70,8 +70,8 @@ Add hooks to `.claude/settings.json`:
 {
   "hooks": {
     "PreToolUse": [
-      {"command": "stratus hook phase_guard"},
-      {"command": "stratus hook delegation_guard"}
+      { "command": "stratus hook phase_guard" },
+      { "command": "stratus hook delegation_guard" }
     ]
   }
 }
@@ -81,11 +81,11 @@ Add hooks to `.claude/settings.json`:
 
 `stratus init` writes coordinator skills to `.claude/skills/`:
 
-| Skill | Description |
-|-------|-------------|
-| `/spec` | Spec-driven development: plan → implement → verify → learn |
-| `/bug` | Bug-fixing workflow: analyze → fix → review → complete |
-| `/learn` | Pattern learning: detect candidates, generate proposals |
+| Skill           | Description                                                    |
+| --------------- | -------------------------------------------------------------- |
+| `/spec`         | Spec-driven development: plan → implement → verify → learn     |
+| `/bug`          | Bug-fixing workflow: analyze → fix → review → complete         |
+| `/learn`        | Pattern learning: detect candidates, generate proposals        |
 | `/sync-stratus` | Installation health check: audits agents, skills, rules, hooks |
 
 ## API
@@ -180,16 +180,16 @@ frontend/           Svelte 5 dashboard
 
 ### Database schema (1 SQLite, 8 tables)
 
-| Table | Purpose |
-|-------|---------|
-| `events` | Memory event store |
-| `events_fts` | FTS5 index on events |
-| `sessions` | Claude Code session tracking |
-| `docs` | Governance document chunks |
-| `docs_fts` | FTS5 index on docs |
-| `candidates` | Learning pattern candidates |
-| `proposals` | Learning proposals |
-| `workflows` | Orchestration state |
+| Table        | Purpose                      |
+| ------------ | ---------------------------- |
+| `events`     | Memory event store           |
+| `events_fts` | FTS5 index on events         |
+| `sessions`   | Claude Code session tracking |
+| `docs`       | Governance document chunks   |
+| `docs_fts`   | FTS5 index on docs           |
+| `candidates` | Learning pattern candidates  |
+| `proposals`  | Learning proposals           |
+| `workflows`  | Orchestration state          |
 
 ## Frontend Development
 

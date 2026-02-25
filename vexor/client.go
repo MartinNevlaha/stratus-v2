@@ -82,6 +82,25 @@ func (c *Client) Search(query string, topK int, mode string) ([]Result, error) {
 	return parsePorcelain(string(out)), nil
 }
 
+// Index re-indexes the given file paths. If paths is empty, a full project
+// reindex is performed. Uses a longer timeout since indexing can be slow.
+func (c *Client) Index(paths []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	args := []string{"index"}
+	args = append(args, paths...)
+
+	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("vexor index timeout after 120s")
+		}
+		return fmt.Errorf("vexor index: %w\n%s", err, out)
+	}
+	return nil
+}
+
 // parsePorcelain parses vexor's tab-separated porcelain output.
 // Format: rank \t score \t file_path \t chunk_index \t line_start \t line_end \t heading :: excerpt
 func parsePorcelain(output string) []Result {
