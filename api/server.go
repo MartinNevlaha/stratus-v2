@@ -167,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/learning/candidates", s.handleListCandidates)
 	mux.HandleFunc("POST /api/learning/candidates", s.handleSaveCandidate)
 	mux.HandleFunc("GET /api/learning/proposals", s.handleListProposals)
+	mux.HandleFunc("POST /api/learning/proposals", s.handleSaveProposal)
 	mux.HandleFunc("POST /api/learning/proposals/{id}/decide", s.handleDecideProposal)
 
 	// Dashboard

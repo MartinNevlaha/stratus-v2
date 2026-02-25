@@ -35,6 +35,21 @@ func (s *Server) handleSaveCandidate(w http.ResponseWriter, r *http.Request) {
 	json200(w, map[string]any{"id": id})
 }
 
+func (s *Server) handleSaveProposal(w http.ResponseWriter, r *http.Request) {
+	var p db.Proposal
+	if err := decodeBody(r, &p); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	id, err := s.db.SaveProposal(p)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.hub.BroadcastJSON("learning_update", map[string]string{"type": "proposal", "id": id})
+	json200(w, map[string]any{"id": id})
+}
+
 func (s *Server) handleListProposals(w http.ResponseWriter, r *http.Request) {
 	status := queryStr(r, "status")
 	limit := queryInt(r, "limit", 50)
