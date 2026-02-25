@@ -190,6 +190,7 @@
     overflow-y: auto;
     padding: 20px;
     min-width: 0;
+    min-height: 0;
   }
 
   .split-divider {
@@ -201,6 +202,9 @@
   .terminal-pane {
     padding: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
   .loading {

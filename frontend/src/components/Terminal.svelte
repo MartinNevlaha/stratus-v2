@@ -30,7 +30,9 @@
     fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(container)
-    fitAddon.fit()
+    // Delay initial fit so the flex layout has settled and the container
+    // has its final pixel dimensions before xterm calculates rows/cols.
+    requestAnimationFrame(() => fitAddon.fit())
 
     connectWS()
 
@@ -128,7 +130,8 @@
   .terminal-wrapper {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     background: #0d1117;
     border-radius: 6px;
     overflow: hidden;
@@ -162,10 +165,16 @@
 
   .terminal-container {
     flex: 1;
-    padding: 8px;
+    min-height: 0;
+    overflow: hidden;
+    padding: 4px;
   }
 
   :global(.terminal-container .xterm) {
     height: 100%;
+  }
+
+  :global(.terminal-container .xterm-viewport) {
+    overflow-y: scroll !important;
   }
 </style>
