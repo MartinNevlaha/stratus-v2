@@ -3,6 +3,7 @@
   import { Terminal } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
+  import SttButton from './SttButton.svelte'
 
   let container: HTMLDivElement
   let term: Terminal
@@ -60,6 +61,12 @@
     term?.dispose()
   })
 
+  function handleTranscript(text: string) {
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input', data: { id: sessionId, data: text } }))
+    }
+  }
+
   function connectWS() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     ws = new WebSocket(`${proto}//${window.location.host}/api/terminal/ws`)
@@ -110,6 +117,9 @@
     {#if error}
       <span class="error">{error}</span>
     {/if}
+    <div class="stt-slot">
+      <SttButton onTranscript={handleTranscript} />
+    </div>
   </div>
   <div class="terminal-container" bind:this={container}></div>
 </div>
@@ -143,6 +153,12 @@
   .status { color: #8b949e; }
   .status.connected { color: #3fb950; }
   .error { color: #f85149; }
+
+  .stt-slot {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+  }
 
   .terminal-container {
     flex: 1;
