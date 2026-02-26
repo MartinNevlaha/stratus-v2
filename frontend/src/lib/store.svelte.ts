@@ -11,7 +11,12 @@ interface AppState {
   updateInProgress: boolean
   updateLog: string[]
   updateError: string | null  // set when update_failed, cleared on next attempt or success
+  // Swarm real-time state
+  swarmUpdateCounter: number
+  lastHeartbeats: Record<string, number>
 }
+
+function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
 
 // Svelte 5 reactive state — must live in .svelte.ts to use $state rune.
 export const appState: AppState = $state({
@@ -23,6 +28,8 @@ export const appState: AppState = $state({
   updateInProgress: false,
   updateLog: [],
   updateError: null,
+  swarmUpdateCounter: 0,
+  lastHeartbeats: {},
 })
 
 export async function refreshDashboard() {
@@ -97,6 +104,19 @@ export function initStore() {
     appState.updateInProgress = false
     appState.updateError = data?.error ?? 'Unknown error'
     if (data?.error) appState.updateLog.push(`Error: ${data.error}`)
+  })
+
+  // Swarm real-time events — targeted refresh instead of full dashboard reload
+  const swarmTypes = ['mission_status', 'worker_spawned', 'worker_status', 'ticket_status', 'forge_update', 'signal_sent']
+  for (const type of swarmTypes) {
+    wsClient.on(type, () => { emitSwarmUpdate() })
+  }
+
+  // Worker heartbeat — track timestamps for live pulse display
+  wsClient.on('worker_heartbeat', (msg) => {
+    const data = msg.payload as { id?: string; ts?: string } | undefined
+    if (data?.id) appState.lastHeartbeats[data.id] = Date.now()
+    emitSwarmUpdate()
   })
 
   refreshDashboard()

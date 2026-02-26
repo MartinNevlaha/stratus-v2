@@ -42,4 +42,3 @@ func queryInt(r *http.Request, key string, def int) int {
 func queryStr(r *http.Request, key string) string {
 	return r.URL.Query().Get(key)
 }
-

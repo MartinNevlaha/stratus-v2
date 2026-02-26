@@ -4,50 +4,130 @@
 
 <h1 align="center">stratus v2</h1>
 
-<p align="center">A lightweight Claude Code extension framework — persistent memory, intelligent retrieval, spec-driven orchestration, and an embedded terminal dashboard.</p>
+<p align="center">
+  <strong>A production-grade AI development framework for Claude Code and OpenCode.</strong><br/>
+  Persistent memory · semantic retrieval · spec-driven orchestration · multi-agent swarms · live dashboard.
+</p>
 
-Single binary (~15 MB), zero runtime dependencies.
+<p align="center">
+  Single binary (~15 MB) · zero runtime dependencies · SQLite-backed · WebSocket real-time
+</p>
 
-## vs stratus v1 (Python)
+---
 
-|            | Python               | Go v2                   |
-| ---------- | -------------------- | ----------------------- |
-| Backend    | 29 k LOC, 164 files  | ~4.5 k LOC, ~25 files   |
-| Frontend   | 3.9 k LOC vanilla JS | ~2 k LOC Svelte 5       |
-| Databases  | 4 SQLite, 18+ tables | 1 SQLite, 13 tables     |
-| Deployment | Python + pip + venv  | Single binary           |
-| State      | JSON files on disk   | DB-backed state machine |
+## What it is
+
+Stratus gives your AI coding assistant a persistent brain, a structured workflow engine, and the ability to coordinate multiple agents working in parallel — all visible from a live dashboard. It runs as a local server alongside Claude Code or OpenCode and exposes 15 MCP tools that agents use to remember, retrieve, and coordinate.
+
+### Why it matters
+
+Out of the box, Claude Code and OpenCode have no memory across sessions, no structure for complex multi-phase features, and no way to run multiple agents coordinating on the same codebase. Stratus fills all three gaps:
+
+| Without Stratus | With Stratus |
+|-----------------|--------------|
+| Context window fills up, knowledge is lost | Persistent event store with FTS5 full-text search + semantic retrieval |
+| Each session starts from scratch | Agents build on previous decisions, bugs fixed, patterns learned |
+| One agent, one file at a time | Swarm: multiple agents in isolated worktrees, dispatched by domain |
+| No visibility into what agents are doing | Live dashboard: workflow state, ticket progress, worker heartbeats |
+| Governance docs ignored | Chunked, FTS-indexed, surfaced in context on every request |
+| Patterns die with the conversation | Learning pipeline: detect → propose → accept → embed as rules |
+
+---
 
 ## Features
 
-- **Memory** — FTS5 event store with deduplication, TTL, timeline, and scoped search
-- **Retrieval** — Dual-backend: Vexor (code embeddings) + FTS5 governance docs, auto-routed
-- **Orchestration** — Pure state machine for spec and bug workflows with task tracking
-- **Learning** — Pattern candidate detection → proposals → accept/reject decisions
-- **Terminal** — PTY terminal embedded side-by-side with Overview (50/50 split) via xterm.js + WebSocket
-- **STT** — Microphone button in terminal header; records audio → Whisper transcription → text injected into terminal input. Powered by [speaches](https://github.com/speaches-ai/speaches) (faster-whisper, Docker). Container lifecycle managed automatically by `stratus serve`.
-- **Swarm** — Multi-agent parallel execution: isolated git worktrees, domain-based dispatch, merge queue, inter-agent signals
-- **MCP** — 12 tools: `search`, `timeline`, `get_observations`, `save_memory`, `retrieve`, `index_status`, `delivery_dispatch`, `swarm_heartbeat`, `swarm_signals`, `swarm_ticket_update`, `swarm_submit_merge`, `swarm_send_signal`
-- **Hooks** — `phase_guard`, `delegation_guard`, `workflow_enforcer`, `watcher` (auto-reindex on file write)
+### Memory
+- **FTS5 event store** with deduplication, TTL, importance scoring, scoped search (`repo`, `global`, `user`)
+- **Timeline** — retrieve chronological context around any memory event
+- **Session tracking** — every Claude Code session recorded with initial prompt
+- **Tags + refs** — structured metadata on every event
+
+### Retrieval
+- **Dual-backend**: Vexor (code embeddings, semantic) + FTS5 (governance docs, keyword)
+- **Auto-routed** — code-like queries go to Vexor; governance/ADR queries go to FTS5
+- **Watcher hook** — re-indexes on every file write, always fresh
+- **Governance docs** — your ADRs, rules, and `.claude/` files chunked and indexed automatically
+
+### Orchestration
+- **Pure state machine** — explicit phase transitions enforced before any DB write
+- **Spec workflow** (simple): `plan → implement → verify → learn → complete`
+- **Spec workflow** (complex): `plan → discovery → design → governance → accept → implement → verify → learn → complete`
+- **Bug workflow**: `analyze → fix → review → complete` (review loops back to fix)
+- **Task tracking** — per-workflow task list with progress visible in dashboard
+- **Guard hooks** — `phase_guard` blocks invalid transitions, `delegation_guard` enforces agent rules
+
+### Multi-Agent Swarm
+
+**Claude Code** — parallel workers in isolated git worktrees:
+- Each worker gets its own `swarm/<mission>/<worker>` branch
+- Domain-based dispatch: backend → frontend → database → tests → infra
+- Workers run via Claude Code `Task` tool, truly parallel
+- Merge queue (Forge) collects completed branches for integration
+- Heartbeat monitoring — stale workers automatically detected and flagged
+
+**OpenCode** — sequential workers on the same branch:
+- Same mission/ticket/worker tracking, full dashboard visibility
+- Workers execute as `@agent-name` delegations, one at a time
+- File reservations prevent edit conflicts between sequential workers
+- Checkpoints after each worker — resume interrupted missions from last checkpoint
+- Decomposition strategy tracking: `file-based` / `feature-based` / `risk-based` / `domain-based`
+
+### Delivery Agents (13)
+Pre-configured, automatically written to `.claude/agents/` or `.opencode/agents/`:
+
+| Agent | Speciality |
+|-------|-----------|
+| `delivery-backend-engineer` | API, handlers, business logic |
+| `delivery-frontend-engineer` | Svelte, React, UI components |
+| `delivery-database-engineer` | Schema, migrations, queries |
+| `delivery-qa-engineer` | Tests, coverage, edge cases |
+| `delivery-devops-engineer` | CI/CD, Docker, infrastructure |
+| `delivery-mobile-engineer` | React Native, mobile UX |
+| `delivery-system-architect` | Architecture, ADRs, decomposition |
+| `delivery-strategic-architect` | High-level strategy, tech direction |
+| `delivery-code-reviewer` | Quality, correctness, best practices |
+| `delivery-governance-checker` | Compliance with project rules |
+| `delivery-ux-designer` | UX, accessibility, design systems |
+| `delivery-debugger` | Root cause analysis, bug hunting |
+| `delivery-implementation-expert` | Mixed/general implementation |
+
+### Learning Pipeline
+1. **Detect** — agents save pattern candidates via MCP (`detection_type`, `confidence`, `files`)
+2. **Propose** — candidates generate proposals: rules, ADRs, or templates (`proposed_content`, `proposed_path`)
+3. **Decide** — accept / reject / snooze / ignore via dashboard or API
+4. **Embed** — accepted proposals written as `.claude/rules/` files, indexed into governance FTS
+
+### Dashboard
+- **Overview** — all workflows, missions, task progress, delegated agents, resume commands
+- **Active Missions** — expandable swarm missions: workers grid, ticket list with progress bar, forge queue
+- **Terminal** — full PTY terminal embedded 50/50 next to the overview via xterm.js + WebSocket
+- **Voice input (STT)** — microphone button → faster-whisper → text injected at cursor (Docker, local, no cloud)
+- **Real-time** — all updates via WebSocket, no polling
+
+### Hooks
+| Hook | Behaviour |
+|------|-----------|
+| `phase_guard` | Blocks invalid workflow phase transitions before they reach the DB |
+| `delegation_guard` | Enforces which agents can be delegated to in each phase |
+| `workflow_enforcer` | Ensures agent follows active workflow phase |
+| `watcher` | Re-indexes governance docs on every file write |
+
+---
 
 ## Install
 
-**Requirements:** Go 1.21+, Docker
+**Requirements:** Go 1.21+
 
 ```bash
 go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@latest
 ```
 
-> If `@latest` installs an old version (Go module proxy cache), bypass it with:
+> If `@latest` resolves an old version (Go module proxy cache):
 > ```bash
 > GOPROXY=direct go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@latest
 > ```
-> Or pin a specific version:
-> ```bash
-> go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@v0.3.3
-> ```
 
-Or build from source:
+Build from source:
 
 ```bash
 git clone https://github.com/MartinNevlaha/stratus-v2
@@ -55,140 +135,195 @@ cd stratus-v2
 make install     # builds frontend + Go binary → GOPATH/bin
 ```
 
-Available `make` targets:
-
-| Target | Description |
-|--------|-------------|
+| Make target | Description |
+|-------------|-------------|
 | `make install` | Build frontend + Go binary, install to `GOPATH/bin` |
 | `make build` | Build frontend + Go binary, output `./stratus` |
 | `make dev` | Run Vite dev server on `:5173` (hot-reload UI) |
 | `make clean` | Remove `./stratus` build artifact |
 
-Cross-compile (after `npm run build` in `frontend/`):
-
-```bash
-GOOS=linux  GOARCH=amd64 go build -o stratus-linux-amd64  ./cmd/stratus
-GOOS=darwin GOARCH=arm64 go build -o stratus-darwin-arm64 ./cmd/stratus
-```
+---
 
 ## Quick Start
 
-**Requirements:** Go 1.21+, Docker (for STT voice input)
-
 ```bash
-# 1. Initialize project
+# 1. Initialize in your project
 #    Writes .stratus.json, .mcp.json, .claude/{skills,agents,rules,settings.json}
-#    Pulls speaches Docker image for STT (~700 MB, one-time)
 cd your-project
-stratus init
+stratus init                    # Claude Code (default)
+stratus init --target opencode  # OpenCode
+stratus init --target both      # Both simultaneously
 
-# 2. Start server
-#    Dashboard + API on :41777
-#    Starts speaches STT container automatically (port 8011)
-#    Ctrl+C stops server and STT container
+# 2. Start the server (dashboard + API on :41777)
 stratus serve
 
-# 3. Open dashboard
+# 3. Open the dashboard
 open http://localhost:41777
+
+# 4. Start coding — in Claude Code:
+/spec add JWT authentication
+/swarm implement full auth system with refresh tokens
+
+# Or in OpenCode:
+/spec add JWT authentication
+/swarm implement full auth system with refresh tokens
 ```
 
-Hooks are registered automatically by `stratus init` — no manual `.claude/settings.json` edits needed.
+Hooks are registered automatically — no manual `.claude/settings.json` edits needed.
+
+---
 
 ## Skills
 
-`stratus init` writes coordinator skills to `.claude/skills/`:
+### Claude Code Skills (`/skill-name`)
 
-| Skill           | Description                                                    |
-| --------------- | -------------------------------------------------------------- |
-| `/spec`         | Spec-driven development: plan → implement → verify → learn     |
-| `/bug`          | Bug-fixing workflow: analyze → fix → review → complete         |
-| `/swarm`        | Multi-agent swarm: parallel workers in git worktrees           |
-| `/learn`        | Pattern learning: detect candidates, generate proposals        |
-| `/sync-stratus` | Installation health check: audits agents, skills, rules, hooks |
+| Skill | Description |
+|-------|-------------|
+| `/spec` | Spec-driven delivery: plan → implement → verify → learn |
+| `/spec-complex` | Extended spec with discovery, design, governance, and accept phases |
+| `/bug` | Bug-fixing workflow: analyze → fix → review → complete |
+| `/swarm` | Multi-agent parallel execution in isolated git worktrees |
+| `/learn` | Pattern learning: detect candidates, generate proposals |
+| `/resume` | Resume a workflow from where it left off |
+| `/code-review` | Deep code review with structured feedback |
+| `/run-tests` | Test execution with coverage reporting |
+| `/find-bugs` | Systematic bug hunting and analysis |
+| `/security-review` | OWASP and security vulnerability analysis |
+| `/create-architecture` | Architecture design and documentation |
+| `/explain-architecture` | Architecture explanation and diagramming |
+| `/frontend-design` | UI/UX design and Svelte/React components |
+| `/react-native-best-practices` | Mobile-specific patterns and conventions |
+| `/vexor-cli` | Code embedding and semantic search via Vexor |
+| `/governance-db` | Governance document management |
+| `/sync-stratus` | Health check: audits agents, skills, rules, hooks |
 
-## API
+### OpenCode Commands (`/command-name`)
+
+| Command | Description |
+|---------|-------------|
+| `/spec` | Spec-driven delivery (sequential, same branch) |
+| `/spec-complex` | Full-phase spec workflow |
+| `/bug` | Bug-fixing workflow |
+| `/swarm` | Multi-agent coordination with file reservations + checkpointing |
+| `/learn` | Pattern learning pipeline |
+| `/team` | Team coordination and handoff |
+| `/sync-stratus` | Installation health check |
+
+---
+
+## MCP Tools (15)
+
+Registered in `.mcp.json` (Claude Code) or `opencode.json` (OpenCode) by `stratus init`:
+
+| Tool | Description |
+|------|-------------|
+| `search` | FTS5 full-text search across memory events |
+| `timeline` | Chronological context around a memory event |
+| `get_observations` | Batch fetch full event details by IDs |
+| `save_memory` | Persist a memory event (with deduplication) |
+| `retrieve` | Semantic/keyword search across code + governance docs |
+| `index_status` | Index freshness and Vexor/FTS backend availability |
+| `delivery_dispatch` | Delivery phase briefing and delegation instructions |
+| `swarm_heartbeat` | Worker liveness signal (keeps worker marked active) |
+| `swarm_signals` | Poll unread signals for a worker |
+| `swarm_ticket_update` | Update ticket status (`in_progress` / `done` / `failed`) |
+| `swarm_submit_merge` | Submit worker branch to the Forge merge queue |
+| `swarm_send_signal` | Send a typed signal to another worker or broadcast |
+| `swarm_reserve_files` | Atomically reserve file patterns (conflict detection) |
+| `swarm_release_files` | Release all file reservations for a worker |
+| `swarm_checkpoint` | Save coordinator state snapshot for crash recovery |
+
+---
+
+## API Reference
 
 ### Memory
-
 ```
-POST   /api/events              Save memory event (with deduplication)
-GET    /api/events/search       FTS5 full-text search
-GET    /api/events/{id}/timeline Chronological context around an event
-POST   /api/events/batch        Batch fetch events by IDs
+POST   /api/events                       Save memory event (with deduplication)
+GET    /api/events/search                FTS5 full-text search
+GET    /api/events/{id}/timeline         Chronological context around an event
+POST   /api/events/batch                 Batch fetch events by IDs
 ```
 
 ### Orchestration
-
 ```
-POST   /api/workflows                         Start workflow (spec|bug)
-GET    /api/workflows/{id}                    Get state
-PUT    /api/workflows/{id}/phase              Transition phase
-POST   /api/workflows/{id}/delegate           Record agent delegation
-POST   /api/workflows/{id}/tasks              Set task list
-POST   /api/workflows/{id}/tasks/{n}/start    Mark task in-progress
-POST   /api/workflows/{id}/tasks/{n}/complete Mark task done
-DELETE /api/workflows/{id}                    Abort workflow
-GET    /api/workflows/{id}/dispatch           Dispatch info for MCP
+POST   /api/workflows                    Start workflow (spec | bug)
+GET    /api/workflows                    List all workflows
+GET    /api/workflows/{id}               Get workflow state
+PUT    /api/workflows/{id}/phase         Transition phase
+POST   /api/workflows/{id}/delegate      Record agent delegation
+POST   /api/workflows/{id}/tasks         Set task list
+POST   /api/workflows/{id}/tasks/{n}/start     Mark task in-progress
+POST   /api/workflows/{id}/tasks/{n}/complete  Mark task done
+DELETE /api/workflows/{id}               Abort workflow
+GET    /api/workflows/{id}/dispatch      Dispatch info for MCP
 ```
 
 ### Retrieval
-
 ```
-GET    /api/retrieve            Semantic search (code + governance, auto-routed)
-GET    /api/retrieve/status     Index freshness and Vexor availability
-POST   /api/retrieve/index      Trigger re-index of governance docs
+GET    /api/retrieve                     Semantic search (auto-routed code/governance)
+GET    /api/retrieve/status              Index freshness and backend availability
+POST   /api/retrieve/index               Trigger re-index of governance docs
 ```
 
 ### Learning
-
 ```
-GET    /api/learning/candidates             List pattern candidates
-POST   /api/learning/candidates             Save a candidate
-GET    /api/learning/proposals              List proposals
-POST   /api/learning/proposals/{id}/decide  Accept / reject / snooze / ignore
+GET    /api/learning/candidates              List pattern candidates
+POST   /api/learning/candidates              Save a candidate
+GET    /api/learning/proposals               List proposals
+POST   /api/learning/proposals               Create a proposal
+POST   /api/learning/proposals/{id}/decide   Accept / reject / snooze / ignore
 ```
 
 ### Swarm
-
 ```
-POST   /api/swarm/missions                       Create mission
-GET    /api/swarm/missions                       List missions
-GET    /api/swarm/missions/{id}                  Get mission (+ workers, tickets, forge)
-PUT    /api/swarm/missions/{id}/status           Update mission status
-DELETE /api/swarm/missions/{id}                  Cleanup + delete mission
+POST   /api/swarm/missions                          Create mission
+GET    /api/swarm/missions                          List missions
+GET    /api/swarm/missions/{id}                     Mission detail (+ workers, tickets, forge)
+PUT    /api/swarm/missions/{id}/status              Update mission status
+PUT    /api/swarm/missions/{id}/strategy-outcome    Record decomposition strategy outcome
+DELETE /api/swarm/missions/{id}                     Cleanup worktrees + delete mission
 
-POST   /api/swarm/missions/{id}/workers          Spawn worker (creates git worktree)
-GET    /api/swarm/missions/{id}/workers          List workers
-POST   /api/swarm/workers/{id}/heartbeat         Worker heartbeat
-PUT    /api/swarm/workers/{id}/status            Update worker status
+POST   /api/swarm/missions/{id}/workers             Spawn worker (creates git worktree)
+GET    /api/swarm/missions/{id}/workers             List workers
+POST   /api/swarm/workers/{id}/heartbeat            Worker heartbeat
+PUT    /api/swarm/workers/{id}/status               Update worker status
 
-POST   /api/swarm/missions/{id}/tickets          Create ticket
-POST   /api/swarm/missions/{id}/tickets/batch    Batch create tickets
-GET    /api/swarm/missions/{id}/tickets          List tickets
-PUT    /api/swarm/tickets/{id}/status            Update ticket status + result
+POST   /api/swarm/missions/{id}/tickets             Create ticket
+POST   /api/swarm/missions/{id}/tickets/batch       Batch create tickets
+GET    /api/swarm/missions/{id}/tickets             List tickets
+PUT    /api/swarm/tickets/{id}/status               Update ticket status + result
 
-POST   /api/swarm/missions/{id}/dispatch         Run dispatch algorithm
-POST   /api/swarm/signals                        Send signal between workers
-GET    /api/swarm/workers/{id}/signals           Poll unread signals
+POST   /api/swarm/missions/{id}/dispatch            Run domain-based dispatch algorithm
+POST   /api/swarm/signals                           Send signal between workers
+GET    /api/swarm/workers/{id}/signals              Poll unread signals
 
-POST   /api/swarm/forge/submit                   Submit worker branch to forge
-GET    /api/swarm/missions/{id}/forge            List forge entries
+POST   /api/swarm/forge/submit                      Submit worker branch to forge
+GET    /api/swarm/missions/{id}/forge               List forge entries
+
+POST   /api/swarm/files/reserve                     Atomically reserve file patterns
+POST   /api/swarm/files/release                     Release file reservations for a worker
+POST   /api/swarm/files/check                       Check for conflicts without reserving
+
+POST   /api/swarm/missions/{id}/checkpoint          Save coordinator checkpoint
+GET    /api/swarm/missions/{id}/checkpoint/latest   Get latest checkpoint (for recovery)
 ```
 
-### Other
+### System
+```
+GET    /api/dashboard/state    Aggregated dashboard state
+POST   /api/stt/transcribe     Whisper proxy (multipart audio)
+GET    /api/stt/status         STT container availability
+GET    /api/health             Health check
+WS     /api/ws                 Real-time dashboard updates
+WS     /api/terminal/ws        PTY terminal I/O
+```
 
-```
-GET    /api/dashboard/state     Aggregated state for the dashboard
-POST   /api/stt/transcribe      Whisper proxy (multipart audio)
-GET    /api/stt/status          STT endpoint availability
-GET    /api/health              Health check
-WS     /api/ws                  Real-time dashboard updates
-WS     /api/terminal/ws         PTY terminal I/O
-```
+---
 
 ## Configuration
 
-`.stratus.json` in project root (created by `stratus init`):
+`.stratus.json` in your project root (created by `stratus init`):
 
 ```json
 {
@@ -207,7 +342,18 @@ WS     /api/terminal/ws         PTY terminal I/O
 }
 ```
 
-`stt.model` controls which faster-whisper model the speaches container loads. Larger models are more accurate but slower to start:
+Environment overrides: `STRATUS_PORT`, `STRATUS_DATA_DIR`.
+
+---
+
+## Voice Input (STT)
+
+`stratus serve` automatically manages a [speaches](https://github.com/speaches-ai/speaches) Docker container that runs faster-whisper locally. No cloud API keys, no data leaves your machine.
+
+- Click the microphone button in the terminal header to record
+- Click again to stop — audio is transcribed and injected at the terminal cursor
+
+**Docker is only required for STT** — all other features work without it.
 
 | Model | Size | Notes |
 |-------|------|-------|
@@ -215,218 +361,168 @@ WS     /api/terminal/ws         PTY terminal I/O
 | `Systran/faster-whisper-medium` | ~769 MB | Better accuracy |
 | `Systran/faster-whisper-large-v3` | ~3 GB | Best accuracy |
 
-Environment overrides: `STRATUS_PORT`, `STRATUS_DATA_DIR`.
+Set `stt.model` in `.stratus.json` to change the model. The container is stopped and removed when `stratus serve` exits.
+
+---
 
 ## Architecture
 
 ```
-cmd/stratus/        CLI entry point, go:embed for skills
-config/             Config loading (.stratus.json + env)
-db/                 SQLite: memory events, governance docs, learning, workflows, swarm
-orchestration/      Pure state machine (spec + bug workflows)
-swarm/              Multi-agent swarm: worktree management, dispatch, signals
-api/                HTTP server, REST routes, WebSocket hub
-mcp/                MCP stdio server (JSON-RPC, 12 tools)
-hooks/              Claude Code hook handlers
-terminal/           PTY session management + WebSocket I/O
-vexor/              Vexor CLI wrapper for code embeddings
-frontend/           Svelte 5 dashboard
+cmd/stratus/        CLI entry point — go:embed for skills, agents, rules, commands
+config/             Config loading (.stratus.json + env overrides)
+db/                 SQLite wrapper — all queries in one package
+orchestration/      Pure phase state machine (spec + bug workflows)
+swarm/              Swarm engine: worktree manager, dispatch, signal bus, store
+api/                HTTP server, all REST routes, WebSocket hub, SPA handler
+mcp/                MCP stdio server (JSON-RPC, 15 tools) — thin HTTP proxy
+hooks/              Hook handlers: phase_guard, delegation_guard, workflow_enforcer
+terminal/           PTY session management + WebSocket I/O (creack/pty + xterm.js)
+vexor/              CLI wrapper for Vexor code embedding
+frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
 ```
 
-### Database schema (1 SQLite, 13 tables)
+**Key design principles:**
+- **MCP is a thin proxy** — `mcp/` never touches the DB directly; it translates JSON-RPC calls into HTTP requests to the API server
+- **Hooks are stateless** — read JSON from stdin, write `{"continue": bool}` to stdout, exit 0 or 2; fail-open on any parse error
+- **State machine is pure** — `orchestration/state.go` defines `validTransitions`; every phase change is validated before any DB write
+- **Single SQLite connection** — `db.DB` is the shared connection passed to all subsystems; no connection pools, no ORMs
 
-| Table           | Purpose                        |
-| --------------- | ------------------------------ |
-| `events`        | Memory event store             |
-| `events_fts`    | FTS5 index on events           |
-| `sessions`      | Claude Code session tracking   |
-| `docs`          | Governance document chunks     |
-| `docs_fts`      | FTS5 index on docs             |
-| `candidates`    | Learning pattern candidates    |
-| `proposals`     | Learning proposals             |
-| `workflows`     | Orchestration state            |
-| `missions`      | Swarm missions                 |
-| `workers`       | Swarm workers + worktree info  |
-| `tickets`       | Swarm tickets with deps graph  |
-| `signals`       | Inter-worker messaging         |
-| `forge_entries` | Merge queue entries            |
+### Database (1 SQLite, 16 tables)
 
-## Swarm (Multi-Agent Parallel Execution)
+| Table | Purpose |
+|-------|---------|
+| `events` | Memory event store with FTS5 trigger sync |
+| `events_fts` | Porter-stemmed full-text index on events |
+| `sessions` | Claude Code session tracking |
+| `docs` | Governance document chunks |
+| `docs_fts` | FTS5 index on governance docs |
+| `candidates` | Learning pattern candidates |
+| `proposals` | Learning proposals (rule / ADR / template) |
+| `workflows` | Orchestration state machine |
+| `missions` | Swarm missions with strategy + outcome |
+| `workers` | Swarm workers + git worktree info |
+| `tickets` | Atomic work units with domain + dependencies |
+| `signals` | Inter-worker typed message bus |
+| `file_reservations` | Atomic file pattern locks (conflict prevention) |
+| `swarm_checkpoints` | Coordinator state snapshots for crash recovery |
+| `forge_entries` | Merge queue — worker branches awaiting integration |
+| `schema_versions` | Applied migration tracking |
 
-The `/swarm` skill spawns multiple Claude Code agents in isolated git worktrees, enabling truly parallel implementation without file conflicts. Progress is tracked in the **Teams** tab of the dashboard.
+---
 
-### How it works
+## Swarm Deep Dive
 
-1. **Plan** — You describe a feature (`/swarm implement auth system`). The lead agent explores the codebase, breaks work into tickets with domains and dependencies, and presents the plan for approval.
-2. **Spawn** — One worker per domain is spawned. Each worker gets its own git worktree (`.stratus/worktrees/`) and branch (`swarm/<mission>/<worker>`).
-3. **Dispatch** — Tickets are assigned to workers by domain matching (backend, frontend, database, tests, infra, architecture). Workers execute in parallel via Claude Code's Task tool.
-4. **Forge** — Workers submit completed branches to the merge queue.
-5. **Verify** — Code review agents check the combined result.
-6. **Complete** — Cleanup, learn, done.
+### Claude Code — Parallel Execution
 
-### Terminology
+```
+/swarm implement user authentication with OAuth2 and JWT
+```
 
-| Term         | Description                                                              |
-| ------------ | ------------------------------------------------------------------------ |
-| **Mission**  | Group of related tickets for coordinated delivery. Tied to a workflow.   |
-| **Ticket**   | Atomic work unit. Has domain, priority, dependencies.                    |
-| **Worker**   | Agent process with its own git worktree. Isolated, heartbeat-monitored.  |
-| **Lead**     | Coordinating agent (the `/swarm` skill). Creates missions, dispatches.   |
-| **Sentinel** | Background health monitor (marks stale/failed workers).                  |
-| **Forge**    | Merge queue — processes worker branches into an integration branch.      |
-| **Signal**   | Persistent message between agents (TICKET_DONE, HELP, CONFLICT, etc.).  |
-| **Dispatch** | Intelligent ticket-to-worker assignment by domain + priority + deps.     |
+The `/swarm` skill:
+1. Explores the codebase and delegates architecture breakdown to `@delivery-system-architect`
+2. Decomposes work into tickets with domains, priorities, and dependencies
+3. Presents the plan — **waits for your approval**
+4. Spawns one worker per domain (each gets an isolated git worktree + branch)
+5. Dispatches tickets using domain matching + round-robin load balancing
+6. Workers execute in parallel via Claude Code `Task` tool with `run_in_background: true`
+7. Workers signal each other via the DB bus (`TICKET_DONE`, `HELP`, `CONFLICT`)
+8. Completed branches enter the Forge merge queue for integration
+9. Code review + governance check before marking complete
+10. Learn phase: saves strategy outcome, generates rule proposals
 
-### Worker domains
+### OpenCode — Sequential Execution with Full Tracking
 
-Each ticket has a `domain` that determines which agent type handles it:
+```
+/swarm implement user authentication with OAuth2 and JWT
+```
 
-| Domain         | Agent type                        |
-| -------------- | --------------------------------- |
-| `backend`      | `delivery-backend-engineer`       |
-| `frontend`     | `delivery-frontend-engineer`      |
-| `database`     | `delivery-database-engineer`      |
-| `tests`        | `delivery-qa-engineer`            |
-| `infra`        | `delivery-devops-engineer`        |
-| `architecture` | `delivery-system-architect`       |
-| `general`      | `delivery-implementation-expert`  |
+Same 4-phase structure (plan → implement → verify → learn), but:
+- Workers execute sequentially via `@agent-name` delegations
+- All on the same branch — no worktrees, no merge conflicts
+- **File reservations** prevent overlapping edits between sequential workers (atomic CAS in SQLite)
+- **Checkpoints** after each worker — crash or kill the session, resume with `/swarm recover`
+- **Decomposition strategy** tracked per mission; outcomes feed future strategy selection
 
-### Worker lifecycle
+### Worker Lifecycle
 
 ```
 pending → active → done
-                 → failed
-                 → stale (no heartbeat)
-                 → killed (aborted)
+                 ↘ failed
+                 ↘ stale   (missed heartbeat window)
+                 ↘ killed  (mission aborted)
 ```
 
-Workers communicate with the server via 5 MCP tools: `swarm_heartbeat`, `swarm_signals`, `swarm_ticket_update`, `swarm_submit_merge`, `swarm_send_signal`.
-
-### Git worktrees
-
-Each worker operates in an isolated git worktree:
+### Git Worktree Layout (Claude Code)
 
 ```
 .stratus/worktrees/
-  swarm-<mission>-<worker-1>/    ← branch: swarm/<mission>/<worker-1>
-  swarm-<mission>-<worker-2>/    ← branch: swarm/<mission>/<worker-2>
+  swarm-<mission>-<worker-a>/    ← branch: swarm/<mission>/<worker-a>
+  swarm-<mission>-<worker-b>/    ← branch: swarm/<mission>/<worker-b>
 ```
 
-Worktrees are created automatically when workers spawn and cleaned up when the mission completes or is deleted.
+Worktrees are created at spawn and cleaned up when the mission is deleted.
 
-### Usage
+---
 
-```bash
-# In Claude Code, invoke the swarm skill:
-/swarm implement user authentication with JWT
+## Release Process
 
-# The lead agent will:
-# 1. Explore your codebase
-# 2. Break work into tickets
-# 3. Present the plan — wait for your approval
-# 4. Spawn workers and execute in parallel
-# 5. Verify and complete
-```
-
-### Dashboard
-
-The **Teams** tab shows active missions with:
-- Worker status indicators (colored dots)
-- Ticket progress bars
-- Forge merge queue status
-- Real-time updates via WebSocket
-
-## STT (Voice Input)
-
-`stratus serve` automatically manages a [speaches](https://github.com/speaches-ai/speaches) Docker container that runs faster-whisper locally. No cloud API keys required.
-
-- Click the microphone button in the terminal header to record
-- Recording stops on second click → audio transcribed → text inserted at the terminal cursor
-- The container (`stratus-stt`) is stopped and removed when `stratus serve` exits
-
-**Manual container management** (if needed):
+The frontend is committed as pre-built static files so `go install` works without Node.js.
 
 ```bash
-# Start manually
-docker run -d --name stratus-stt -p 8011:8000 \
-  -e WHISPER__MODEL=Systran/faster-whisper-small \
-  -v stratus-whisper-cache:/root/.cache/huggingface \
-  ghcr.io/speaches-ai/speaches:latest-cpu
+# 1. Make your changes
 
-# Stop
-docker stop stratus-stt && docker rm stratus-stt
-```
-
-## Frontend Development
-
-```bash
-cd frontend
-npm install
-npm run dev      # hot-reload dev server on :5173 (proxies API to :41777)
-npm run build    # builds to ../cmd/stratus/static/ (required before go build)
-```
-
-## Publishing a Release
-
-The frontend is committed to the repo as pre-built static files so that `go install` works without Node.js on the user's machine. Every release must follow this exact order:
-
-```bash
-# 1. Make your changes (Go, Svelte, agents, skills, …)
-
-# 2. Build frontend and install binary locally to test
+# 2. Build frontend + install locally to test
 make install
-
-# 3. Test the changes
 stratus serve   # smoke-test at http://localhost:41777
 
-# 4. Commit everything — including the built static files
-git add cmd/stratus/static/ <other changed files>
-git commit -m "feat: your message"
+# 3. Commit everything including built static files
+git add cmd/stratus/static/ <other files>
+git commit -m "feat: ..."
 
-# 5. Tag the release (semver — go install @latest picks the highest tag)
+# 4. Tag and push (semver — go install @latest picks the highest tag)
 git tag v0.X.Y
-
-# 6. Push branch + tag
 git push origin main --tags
 ```
 
-> **Why commit `cmd/stratus/static/`?**
-> `go install` only runs `go build` — it never runs `npm`. The frontend must be
-> pre-built and committed so the embedded `go:embed static` picks it up at compile time.
+---
 
-> **Why tag?**
-> Without a semver tag, the Go module proxy serves a cached pseudo-version.
-> A new tag guarantees `go install @latest` resolves to the new release immediately.
+## Development
 
-## MCP Tools
+```bash
+# Frontend dev server with hot-reload (proxies API to :41777)
+cd frontend && npm run dev
 
-Register in `.mcp.json` (created by `stratus init`):
+# Build frontend (must do before go build)
+cd frontend && npm run build
 
-```json
-{
-  "mcpServers": {
-    "stratus": {
-      "type": "stdio",
-      "command": "stratus",
-      "args": ["mcp-serve"]
-    }
-  }
-}
+# Build Go binary
+go build -o stratus ./cmd/stratus
+
+# Run tests
+go test ./...
+
+# Type-check frontend
+cd frontend && npm run check
+
+# Cross-compile
+GOOS=linux  GOARCH=amd64 go build -o stratus-linux-amd64  ./cmd/stratus
+GOOS=darwin GOARCH=arm64 go build -o stratus-darwin-arm64 ./cmd/stratus
 ```
 
-Available tools:
+---
 
-| Tool | Description |
-|------|-------------|
-| `search` | FTS5 full-text search across memory events |
-| `timeline` | Chronological context around a memory event |
-| `get_observations` | Batch fetch full event details by IDs |
-| `save_memory` | Save a memory event for future search |
-| `retrieve` | Semantic search across code (Vexor) and governance docs |
-| `index_status` | Check index freshness and backend availability |
-| `delivery_dispatch` | Get delivery phase briefing and delegation instructions |
-| `swarm_heartbeat` | Worker heartbeat signal (keeps worker marked active) |
-| `swarm_signals` | Poll unread signals for a worker |
-| `swarm_ticket_update` | Update ticket status (in_progress / done / failed) |
-| `swarm_submit_merge` | Submit worker branch to the Forge merge queue |
-| `swarm_send_signal` | Send a signal to another worker or broadcast |
+## stratus v1 → v2
+
+|  | Python v1 | Go v2 |
+|--|-----------|-------|
+| Backend | 29k LOC, 164 files | ~5k LOC, ~30 files |
+| Frontend | 3.9k LOC vanilla JS | ~2k LOC Svelte 5 |
+| Databases | 4 SQLite, 18+ tables | 1 SQLite, 16 tables |
+| Deployment | Python + pip + venv | Single binary (~15 MB) |
+| State | JSON files on disk | DB-backed state machine |
+| AI clients | Claude Code only | Claude Code + OpenCode |
+| Swarm | — | Parallel (CC) + Sequential (OC) |
+| Voice | — | Local STT via faster-whisper |
+| Learning | — | Candidate → proposal pipeline |
+| File locking | — | Atomic reservations (SQLite tx) |
+| Recovery | — | Checkpoint/resume |

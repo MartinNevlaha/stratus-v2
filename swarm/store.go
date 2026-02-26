@@ -28,14 +28,14 @@ func NewStore(database *db.DB, projectRoot string) *Store {
 
 // CreateMission creates a new mission linked to a workflow.
 // The merge branch is named swarm/<missionID>/integration.
-func (s *Store) CreateMission(workflowID, title, baseBranch string) (*db.SwarmMission, error) {
+func (s *Store) CreateMission(workflowID, title, baseBranch, strategy string) (*db.SwarmMission, error) {
 	id := slugify(title)
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
 	mergeBranch := fmt.Sprintf("swarm/%s/integration", id)
 
-	if err := s.db.CreateMission(id, workflowID, title, baseBranch, mergeBranch); err != nil {
+	if err := s.db.CreateMission(id, workflowID, title, baseBranch, mergeBranch, strategy); err != nil {
 		return nil, err
 	}
 	return s.db.GetMission(id)
@@ -221,6 +221,43 @@ func (s *Store) SubmitToForge(workerID string) (*db.SwarmForgeEntry, error) {
 // ListForgeEntries returns all forge entries for a mission.
 func (s *Store) ListForgeEntries(missionID string) ([]db.SwarmForgeEntry, error) {
 	return s.db.ListForgeEntries(missionID)
+}
+
+// --- File Reservations ---
+
+// ReserveFiles atomically checks for conflicts and creates a file reservation.
+// Returns (reservationID, conflicts, error). If conflicts is non-empty, no reservation was made and id is "".
+func (s *Store) ReserveFiles(missionID, workerID string, patterns []string, reason string) (string, []db.FileConflict, error) {
+	return s.db.ReserveFilesAtomic(missionID, workerID, patterns, reason)
+}
+
+// ReleaseFiles removes all file reservations for a worker.
+func (s *Store) ReleaseFiles(workerID string) error {
+	return s.db.ReleaseFiles(workerID)
+}
+
+// CheckFileConflicts checks for overlapping file reservations without reserving.
+func (s *Store) CheckFileConflicts(missionID, excludeWorkerID string, patterns []string) ([]db.FileConflict, error) {
+	return s.db.CheckFileConflicts(missionID, excludeWorkerID, patterns)
+}
+
+// --- Checkpoints ---
+
+// SaveCheckpoint records a coordinator state snapshot.
+func (s *Store) SaveCheckpoint(missionID string, progress int, stateJSON string) (string, error) {
+	return s.db.SaveCheckpointReturningID(missionID, progress, stateJSON)
+}
+
+// GetLatestCheckpoint returns the most recent checkpoint for a mission.
+func (s *Store) GetLatestCheckpoint(missionID string) (*db.SwarmCheckpoint, error) {
+	return s.db.GetLatestCheckpoint(missionID)
+}
+
+// --- Strategy ---
+
+// UpdateStrategyOutcome records the strategy outcome JSON on a mission.
+func (s *Store) UpdateStrategyOutcome(missionID, outcome string) error {
+	return s.db.UpdateMissionStrategyOutcome(missionID, outcome)
 }
 
 // --- Cleanup ---

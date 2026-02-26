@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -45,5 +46,29 @@ func (d *DB) migrate() error {
 	if _, err := d.sql.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+	// Add columns that may be missing on existing databases.
+	// SQLite doesn't support ADD COLUMN IF NOT EXISTS, so we ignore
+	// "duplicate column" errors from ALTER TABLE.
+	for _, stmt := range migrations {
+		if _, err := d.sql.Exec(stmt); err != nil {
+			if !isDuplicateColumn(err) {
+				return fmt.Errorf("migration: %w", err)
+			}
+		}
+	}
 	return nil
+}
+
+// migrations contains ALTER TABLE statements for columns added after the initial schema.
+// Each runs on every startup; duplicate-column errors are silently ignored.
+var migrations = []string{
+	`ALTER TABLE missions ADD COLUMN strategy TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE missions ADD COLUMN strategy_outcome TEXT NOT NULL DEFAULT '{}'`,
+}
+
+func isDuplicateColumn(err error) bool {
+	// modernc.org/sqlite returns "duplicate column name: <col>" for ALTER TABLE ADD COLUMN
+	// when the column already exists.
+	msg := err.Error()
+	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
 }

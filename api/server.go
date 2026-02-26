@@ -211,6 +211,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/swarm/forge/{id}/status", s.handleUpdateForgeEntry)
 	mux.HandleFunc("POST /api/swarm/forge/submit", s.handleSubmitToForgeByWorker)
 	mux.HandleFunc("GET /api/swarm/workers/{id}", s.handleGetWorker)
+	mux.HandleFunc("POST /api/swarm/files/reserve", s.handleReserveFiles)
+	mux.HandleFunc("POST /api/swarm/files/release", s.handleReleaseFiles)
+	mux.HandleFunc("POST /api/swarm/files/check", s.handleCheckFileConflicts)
+	mux.HandleFunc("POST /api/swarm/missions/{id}/checkpoint", s.handleSaveCheckpoint)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/checkpoint/latest", s.handleGetLatestCheckpoint)
+	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
 
 	// WebSocket
 	mux.HandleFunc("/api/ws", s.hub.ServeWS)

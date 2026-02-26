@@ -128,14 +128,16 @@ CREATE TABLE IF NOT EXISTS workflows (
 
 -- Swarm: Missions (groups of coordinated tickets)
 CREATE TABLE IF NOT EXISTS missions (
-    id           TEXT PRIMARY KEY,
-    workflow_id  TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-    title        TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'planning',
-    base_branch  TEXT NOT NULL DEFAULT 'main',
-    merge_branch TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    id               TEXT PRIMARY KEY,
+    workflow_id      TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    title            TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'planning',
+    base_branch      TEXT NOT NULL DEFAULT 'main',
+    merge_branch     TEXT NOT NULL DEFAULT '',
+    strategy         TEXT NOT NULL DEFAULT '',
+    strategy_outcome TEXT NOT NULL DEFAULT '{}',
+    created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 -- Swarm: Workers (agent processes with git worktrees)
@@ -186,6 +188,29 @@ CREATE TABLE IF NOT EXISTS signals (
 
 CREATE INDEX IF NOT EXISTS idx_signals_to      ON signals(to_worker, read);
 CREATE INDEX IF NOT EXISTS idx_signals_mission  ON signals(mission_id);
+
+-- Swarm: File reservations (prevent edit conflicts)
+CREATE TABLE IF NOT EXISTS file_reservations (
+    id          TEXT PRIMARY KEY,
+    mission_id  TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    worker_id   TEXT NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    patterns    TEXT NOT NULL DEFAULT '[]',
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_reservations_mission ON file_reservations(mission_id);
+
+-- Swarm: Checkpoints (coordinator state snapshots)
+CREATE TABLE IF NOT EXISTS swarm_checkpoints (
+    id          TEXT PRIMARY KEY,
+    mission_id  TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    progress    INTEGER NOT NULL DEFAULT 0,
+    state_json  TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_swarm_checkpoints_mission ON swarm_checkpoints(mission_id);
 
 -- Swarm: Forge (merge queue entries)
 CREATE TABLE IF NOT EXISTS forge_entries (

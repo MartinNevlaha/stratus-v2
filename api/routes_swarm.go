@@ -15,6 +15,7 @@ func (s *Server) handleCreateMission(w http.ResponseWriter, r *http.Request) {
 		WorkflowID string `json:"workflow_id"`
 		Title      string `json:"title"`
 		BaseBranch string `json:"base_branch"`
+		Strategy   string `json:"strategy"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
@@ -24,7 +25,7 @@ func (s *Server) handleCreateMission(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "workflow_id and title are required")
 		return
 	}
-	mission, err := s.swarm.CreateMission(body.WorkflowID, body.Title, body.BaseBranch)
+	mission, err := s.swarm.CreateMission(body.WorkflowID, body.Title, body.BaseBranch, body.Strategy)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -161,6 +162,7 @@ func (s *Server) handleWorkerHeartbeat(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, err.Error())
 		return
 	}
+	s.hub.BroadcastJSON("worker_heartbeat", map[string]string{"id": workerID})
 	json200(w, map[string]string{"status": "ok"})
 }
 
@@ -257,6 +259,7 @@ func (s *Server) handleBatchCreateTickets(w http.ResponseWriter, r *http.Request
 		created = append(created, *ticket)
 	}
 
+	s.hub.BroadcastJSON("tickets_created", created)
 	json200(w, created)
 }
 
@@ -421,4 +424,148 @@ func (s *Server) handleListForgeEntries(w http.ResponseWriter, r *http.Request) 
 		entries = []db.SwarmForgeEntry{}
 	}
 	json200(w, entries)
+}
+
+// --- File Reservations ---
+
+func (s *Server) handleReserveFiles(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		MissionID string   `json:"mission_id"`
+		WorkerID  string   `json:"worker_id"`
+		Patterns  []string `json:"patterns"`
+		Reason    string   `json:"reason"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.WorkerID == "" || len(body.Patterns) == 0 {
+		jsonErr(w, http.StatusBadRequest, "worker_id and patterns are required")
+		return
+	}
+	// Auto-detect mission_id from worker if not provided
+	if body.MissionID == "" {
+		worker, err := s.swarm.GetWorker(body.WorkerID)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, "worker not found: "+err.Error())
+			return
+		}
+		body.MissionID = worker.MissionID
+	}
+	// Atomic check + reserve (prevents TOCTOU race)
+	resID, conflicts, err := s.swarm.ReserveFiles(body.MissionID, body.WorkerID, body.Patterns, body.Reason)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(conflicts) > 0 {
+		json200(w, map[string]any{"reserved": false, "conflicts": conflicts})
+		return
+	}
+	s.hub.BroadcastJSON("files_reserved", map[string]any{"worker_id": body.WorkerID, "patterns": body.Patterns})
+	json200(w, map[string]any{"reserved": true, "id": resID})
+}
+
+func (s *Server) handleReleaseFiles(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WorkerID string `json:"worker_id"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.WorkerID == "" {
+		jsonErr(w, http.StatusBadRequest, "worker_id is required")
+		return
+	}
+	if err := s.swarm.ReleaseFiles(body.WorkerID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.hub.BroadcastJSON("files_released", map[string]any{"worker_id": body.WorkerID})
+	json200(w, map[string]string{"status": "released"})
+}
+
+func (s *Server) handleCheckFileConflicts(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		MissionID string   `json:"mission_id"`
+		WorkerID  string   `json:"worker_id"`
+		Patterns  []string `json:"patterns"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.MissionID == "" || len(body.Patterns) == 0 {
+		jsonErr(w, http.StatusBadRequest, "mission_id and patterns are required")
+		return
+	}
+	conflicts, err := s.swarm.CheckFileConflicts(body.MissionID, body.WorkerID, body.Patterns)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if conflicts == nil {
+		conflicts = []db.FileConflict{}
+	}
+	json200(w, map[string]any{"conflicts": conflicts})
+}
+
+// --- Checkpoints ---
+
+func (s *Server) handleSaveCheckpoint(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	var body struct {
+		Progress  int    `json:"progress"`
+		StateJSON string `json:"state_json"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.StateJSON == "" {
+		body.StateJSON = "{}"
+	}
+	id, err := s.swarm.SaveCheckpoint(missionID, body.Progress, body.StateJSON)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	json200(w, map[string]any{"id": id, "progress": body.Progress})
+}
+
+func (s *Server) handleGetLatestCheckpoint(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	checkpoint, err := s.swarm.GetLatestCheckpoint(missionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if checkpoint == nil {
+		json200(w, map[string]any{"checkpoint": nil})
+		return
+	}
+	json200(w, checkpoint)
+}
+
+// --- Strategy outcome ---
+
+func (s *Server) handleUpdateStrategyOutcome(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	var body struct {
+		StrategyOutcome string `json:"strategy_outcome"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.StrategyOutcome == "" {
+		jsonErr(w, http.StatusBadRequest, "strategy_outcome is required")
+		return
+	}
+	if err := s.swarm.UpdateStrategyOutcome(missionID, body.StrategyOutcome); err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	json200(w, map[string]string{"status": "updated"})
 }

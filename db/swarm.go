@@ -1,6 +1,7 @@
 package db
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,14 +10,42 @@ import (
 
 // SwarmMission represents a group of coordinated tickets.
 type SwarmMission struct {
-	ID          string `json:"id"`
-	WorkflowID  string `json:"workflow_id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	BaseBranch  string `json:"base_branch"`
-	MergeBranch string `json:"merge_branch"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID              string `json:"id"`
+	WorkflowID      string `json:"workflow_id"`
+	Title           string `json:"title"`
+	Status          string `json:"status"`
+	BaseBranch      string `json:"base_branch"`
+	MergeBranch     string `json:"merge_branch"`
+	Strategy        string `json:"strategy"`
+	StrategyOutcome string `json:"strategy_outcome"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+}
+
+// FileReservation represents a file lock held by a worker.
+type FileReservation struct {
+	ID        string `json:"id"`
+	MissionID string `json:"mission_id"`
+	WorkerID  string `json:"worker_id"`
+	Patterns  string `json:"patterns"`
+	Reason    string `json:"reason"`
+	CreatedAt string `json:"created_at"`
+}
+
+// FileConflict describes an overlap between a reservation and requested patterns.
+type FileConflict struct {
+	WorkerID string `json:"worker_id"`
+	Pattern  string `json:"pattern"`
+	Reason   string `json:"reason"`
+}
+
+// SwarmCheckpoint stores coordinator state at a progress milestone.
+type SwarmCheckpoint struct {
+	ID        string `json:"id"`
+	MissionID string `json:"mission_id"`
+	Progress  int    `json:"progress"`
+	StateJSON string `json:"state_json"`
+	CreatedAt string `json:"created_at"`
 }
 
 // SwarmWorker represents an agent process with its own git worktree.
@@ -75,11 +104,11 @@ type SwarmForgeEntry struct {
 
 // --- Missions ---
 
-func (d *DB) CreateMission(id, workflowID, title, baseBranch, mergeBranch string) error {
+func (d *DB) CreateMission(id, workflowID, title, baseBranch, mergeBranch, strategy string) error {
 	_, err := d.sql.Exec(`
-		INSERT INTO missions (id, workflow_id, title, base_branch, merge_branch)
-		VALUES (?, ?, ?, ?, ?)`,
-		id, workflowID, title, baseBranch, mergeBranch,
+		INSERT INTO missions (id, workflow_id, title, base_branch, merge_branch, strategy)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		id, workflowID, title, baseBranch, mergeBranch, strategy,
 	)
 	if err != nil {
 		return fmt.Errorf("insert mission: %w", err)
@@ -90,9 +119,9 @@ func (d *DB) CreateMission(id, workflowID, title, baseBranch, mergeBranch string
 func (d *DB) GetMission(id string) (*SwarmMission, error) {
 	var m SwarmMission
 	err := d.sql.QueryRow(`
-		SELECT id, workflow_id, title, status, base_branch, merge_branch, created_at, updated_at
+		SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, created_at, updated_at
 		FROM missions WHERE id = ?`, id).
-		Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.CreatedAt, &m.UpdatedAt)
+		Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.CreatedAt, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("mission not found: %s", id)
 	}
@@ -119,7 +148,7 @@ func (d *DB) UpdateMissionStatus(id, status string) error {
 
 func (d *DB) ListMissions() ([]SwarmMission, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, workflow_id, title, status, base_branch, merge_branch, created_at, updated_at
+		SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, created_at, updated_at
 		FROM missions ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list missions: %w", err)
@@ -128,7 +157,7 @@ func (d *DB) ListMissions() ([]SwarmMission, error) {
 	var missions []SwarmMission
 	for rows.Next() {
 		var m SwarmMission
-		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		missions = append(missions, m)
@@ -562,6 +591,264 @@ func (d *DB) ListForgeEntries(missionID string) ([]SwarmForgeEntry, error) {
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// --- File Reservations ---
+
+// ReserveFilesAtomic checks for conflicts and inserts the reservation in a single transaction.
+// Returns (id, conflicts, error). If conflicts is non-empty, no reservation was made and id is "".
+func (d *DB) ReserveFilesAtomic(missionID, workerID string, patterns []string, reason string) (string, []FileConflict, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return "", nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Check existing reservations within the transaction
+	rows, err := tx.Query(`
+		SELECT id, mission_id, worker_id, patterns, reason, created_at
+		FROM file_reservations WHERE mission_id = ?`, missionID)
+	if err != nil {
+		return "", nil, fmt.Errorf("list reservations: %w", err)
+	}
+	var existing []FileReservation
+	for rows.Next() {
+		var r FileReservation
+		if err := rows.Scan(&r.ID, &r.MissionID, &r.WorkerID, &r.Patterns, &r.Reason, &r.CreatedAt); err != nil {
+			rows.Close()
+			return "", nil, err
+		}
+		existing = append(existing, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return "", nil, err
+	}
+
+	// Check for conflicts
+	var conflicts []FileConflict
+	for _, res := range existing {
+		if res.WorkerID == workerID {
+			continue
+		}
+		var resPatterns []string
+		if err := json.Unmarshal([]byte(res.Patterns), &resPatterns); err != nil {
+			continue
+		}
+		for _, rp := range resPatterns {
+			for _, newP := range patterns {
+				if rp == newP || hasPathOverlap(rp, newP) {
+					conflicts = append(conflicts, FileConflict{
+						WorkerID: res.WorkerID,
+						Pattern:  rp,
+						Reason:   res.Reason,
+					})
+				}
+			}
+		}
+	}
+	if len(conflicts) > 0 {
+		return "", conflicts, nil
+	}
+
+	// No conflicts — insert reservation
+	patternsJSON, _ := json.Marshal(patterns)
+	id := generateReservationID()
+	_, err = tx.Exec(`
+		INSERT INTO file_reservations (id, mission_id, worker_id, patterns, reason)
+		VALUES (?, ?, ?, ?, ?)`,
+		id, missionID, workerID, string(patternsJSON), reason,
+	)
+	if err != nil {
+		return "", nil, fmt.Errorf("reserve files: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return id, nil, nil
+}
+
+func generateReservationID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+	const hex = "0123456789abcdef"
+	s := make([]byte, 16)
+	for i, v := range b {
+		s[i*2] = hex[v>>4]
+		s[i*2+1] = hex[v&0x0f]
+	}
+	return string(s)
+}
+
+func (d *DB) ReleaseFiles(workerID string) error {
+	_, err := d.sql.Exec(`DELETE FROM file_reservations WHERE worker_id = ?`, workerID)
+	if err != nil {
+		return fmt.Errorf("release files: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) ListFileReservations(missionID string) ([]FileReservation, error) {
+	rows, err := d.sql.Query(`
+		SELECT id, mission_id, worker_id, patterns, reason, created_at
+		FROM file_reservations WHERE mission_id = ? ORDER BY created_at ASC`, missionID)
+	if err != nil {
+		return nil, fmt.Errorf("list file reservations: %w", err)
+	}
+	defer rows.Close()
+	var reservations []FileReservation
+	for rows.Next() {
+		var r FileReservation
+		if err := rows.Scan(&r.ID, &r.MissionID, &r.WorkerID, &r.Patterns, &r.Reason, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		reservations = append(reservations, r)
+	}
+	return reservations, rows.Err()
+}
+
+// CheckFileConflicts finds existing reservations in a mission that overlap with the given patterns.
+// Pattern matching is simple string prefix/equality — not full glob. Good enough for directory-level locks.
+func (d *DB) CheckFileConflicts(missionID string, excludeWorkerID string, patterns []string) ([]FileConflict, error) {
+	existing, err := d.ListFileReservations(missionID)
+	if err != nil {
+		return nil, err
+	}
+	var conflicts []FileConflict
+	for _, res := range existing {
+		if res.WorkerID == excludeWorkerID {
+			continue
+		}
+		var resPatterns []string
+		if err := json.Unmarshal([]byte(res.Patterns), &resPatterns); err != nil {
+			continue
+		}
+		for _, rp := range resPatterns {
+			for _, newP := range patterns {
+				// Simple overlap: one is prefix of the other, or exact match
+				if rp == newP || hasPathOverlap(rp, newP) {
+					conflicts = append(conflicts, FileConflict{
+						WorkerID: res.WorkerID,
+						Pattern:  rp,
+						Reason:   res.Reason,
+					})
+				}
+			}
+		}
+	}
+	return conflicts, nil
+}
+
+// hasPathOverlap checks if two path patterns potentially overlap.
+// Uses path-boundary-aware prefix matching: "src/api" overlaps "src/api/foo"
+// but NOT "src/api-v2".
+func hasPathOverlap(a, b string) bool {
+	// Strip trailing wildcards for prefix comparison
+	aBase := trimGlob(a)
+	bBase := trimGlob(b)
+	if len(aBase) == 0 || len(bBase) == 0 {
+		return false
+	}
+	return hasPathPrefix(aBase, bBase) || hasPathPrefix(bBase, aBase)
+}
+
+func trimGlob(s string) string {
+	for len(s) > 0 && (s[len(s)-1] == '*' || s[len(s)-1] == '/') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// hasPathPrefix checks if s starts with prefix at a path boundary.
+// "src/api/foo" has path prefix "src/api" (boundary at '/').
+// "src/api-v2" does NOT have path prefix "src/api".
+func hasPathPrefix(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	if s[:len(prefix)] != prefix {
+		return false
+	}
+	// Exact match or the character after the prefix is a path separator
+	return len(s) == len(prefix) || s[len(prefix)] == '/'
+}
+
+// --- Checkpoints ---
+
+// SaveCheckpointReturningID creates a checkpoint and returns its generated ID.
+func (d *DB) SaveCheckpointReturningID(missionID string, progress int, stateJSON string) (string, error) {
+	id := generateReservationID()
+	if err := d.SaveCheckpoint(id, missionID, progress, stateJSON); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (d *DB) SaveCheckpoint(id, missionID string, progress int, stateJSON string) error {
+	_, err := d.sql.Exec(`
+		INSERT INTO swarm_checkpoints (id, mission_id, progress, state_json)
+		VALUES (?, ?, ?, ?)`,
+		id, missionID, progress, stateJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("save checkpoint: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) GetLatestCheckpoint(missionID string) (*SwarmCheckpoint, error) {
+	var c SwarmCheckpoint
+	err := d.sql.QueryRow(`
+		SELECT id, mission_id, progress, state_json, created_at
+		FROM swarm_checkpoints WHERE mission_id = ?
+		ORDER BY created_at DESC LIMIT 1`, missionID).
+		Scan(&c.ID, &c.MissionID, &c.Progress, &c.StateJSON, &c.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil // no checkpoint yet, not an error
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get latest checkpoint: %w", err)
+	}
+	return &c, nil
+}
+
+func (d *DB) ListCheckpoints(missionID string) ([]SwarmCheckpoint, error) {
+	rows, err := d.sql.Query(`
+		SELECT id, mission_id, progress, state_json, created_at
+		FROM swarm_checkpoints WHERE mission_id = ?
+		ORDER BY created_at ASC`, missionID)
+	if err != nil {
+		return nil, fmt.Errorf("list checkpoints: %w", err)
+	}
+	defer rows.Close()
+	var checkpoints []SwarmCheckpoint
+	for rows.Next() {
+		var c SwarmCheckpoint
+		if err := rows.Scan(&c.ID, &c.MissionID, &c.Progress, &c.StateJSON, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		checkpoints = append(checkpoints, c)
+	}
+	return checkpoints, rows.Err()
+}
+
+// UpdateMissionStrategyOutcome records the outcome JSON of the decomposition strategy.
+func (d *DB) UpdateMissionStrategyOutcome(id, outcome string) error {
+	res, err := d.sql.Exec(`
+		UPDATE missions SET strategy_outcome = ?, updated_at = ? WHERE id = ?`,
+		outcome, now(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update mission strategy outcome: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("mission not found: %s", id)
+	}
+	return nil
 }
 
 // --- helpers ---

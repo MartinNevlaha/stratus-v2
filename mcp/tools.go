@@ -9,7 +9,7 @@ import (
 	neturl "net/url"
 )
 
-// RegisterTools registers the 7 standard Stratus MCP tools on the server.
+// RegisterTools registers Stratus MCP tools on the server.
 func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -260,6 +260,62 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 		),
 		Handler: func(args map[string]any) (any, error) {
 			return client.post("/api/swarm/signals", args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_reserve_files",
+		Description: "Reserve file patterns for exclusive editing by a worker. Checks for conflicts with other workers' reservations before reserving.",
+		InputSchema: obj(
+			req("worker_id", "string", "Worker ID requesting the reservation"),
+			req("patterns", "array", "Array of glob patterns to reserve (e.g. [\"src/api/**\", \"db/schema.go\"])"),
+			opt("reason", "string", "Why these files are needed"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			workerID, _ := args["worker_id"].(string)
+			if workerID == "" {
+				return nil, fmt.Errorf("worker_id is required")
+			}
+			return client.post("/api/swarm/files/reserve", args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_release_files",
+		Description: "Release all file reservations held by a worker. Call after finishing edits.",
+		InputSchema: obj(
+			req("worker_id", "string", "Worker ID releasing reservations"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			workerID, _ := args["worker_id"].(string)
+			if workerID == "" {
+				return nil, fmt.Errorf("worker_id is required")
+			}
+			return client.post("/api/swarm/files/release", map[string]any{"worker_id": workerID})
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_checkpoint",
+		Description: "Save a coordinator checkpoint for mission recovery. Records progress percentage and context state.",
+		InputSchema: obj(
+			req("mission_id", "string", "Mission ID"),
+			req("progress", "integer", "Progress percentage 0-100"),
+			opt("context", "string", "JSON string with coordinator state snapshot"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			missionID, _ := args["mission_id"].(string)
+			if missionID == "" {
+				return nil, fmt.Errorf("mission_id is required")
+			}
+			body := map[string]any{
+				"progress":   intArg(args, "progress", 0),
+				"state_json": "{}",
+			}
+			if ctx, ok := args["context"].(string); ok && ctx != "" {
+				body["state_json"] = ctx
+			}
+			return client.post(fmt.Sprintf("/api/swarm/missions/%s/checkpoint", missionID), body)
 		},
 	})
 }

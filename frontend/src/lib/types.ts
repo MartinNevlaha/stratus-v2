@@ -106,6 +106,8 @@ export interface SwarmMission {
   status: 'planning' | 'active' | 'merging' | 'verifying' | 'complete' | 'failed' | 'aborted'
   base_branch: string
   merge_branch: string
+  strategy?: string
+  strategy_outcome?: string
   created_at: string
   updated_at: string
 }

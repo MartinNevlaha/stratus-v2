@@ -12,6 +12,7 @@
   let missionLoading = $state(false)
   let confirmDelete = $state<string | null>(null)
   let copiedId = $state<string | null>(null)
+  let expandedTasks = $state<Set<string>>(new Set())
   let confirmTimer: ReturnType<typeof setTimeout> | null = null
 
   let activeWfs = $derived(allWorkflows.filter(w => !w.aborted && w.phase !== 'complete'))
@@ -123,11 +124,52 @@
     }
   }
 
+  function relativeTime(ts: string): string {
+    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
+    if (diff < 5) return 'just now'
+    if (diff < 60) return `${diff}s ago`
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    return `${Math.floor(diff / 3600)}h ago`
+  }
+
+  function workerTicketCounts(workerId: string): string {
+    if (!missionDetail) return ''
+    const assigned = missionDetail.tickets.filter(t => t.worker_id === workerId)
+    if (assigned.length === 0) return ''
+    const done = assigned.filter(t => t.status === 'done').length
+    return `${done}/${assigned.length}`
+  }
+
   onMount(loadWorkflows)
 
   $effect(() => {
     const _ = appState.dashboard
     loadWorkflows()
+  })
+
+  // Swarm real-time refresh — re-fetch on every WS event
+  $effect(() => {
+    const _ = appState.swarmUpdateCounter
+    if (_ === 0) return // skip initial
+    listMissions().then(m => {
+      missions = m
+      // Auto-expand if exactly 1 active mission and none expanded
+      const active = m.filter(mi => mi.status !== 'complete' && mi.status !== 'failed' && mi.status !== 'aborted')
+      if (active.length === 1 && !expandedMission) {
+        toggleMission(active[0].id)
+      }
+    }).catch(() => {})
+    if (expandedMission) {
+      getMission(expandedMission).then(d => missionDetail = d).catch(() => {})
+    }
+  })
+
+  // Tick heartbeat display every 5s so relative times update
+  let _heartbeatTick = $state(0)
+  let _heartbeatInterval: ReturnType<typeof setInterval> | undefined
+  onMount(() => {
+    _heartbeatInterval = setInterval(() => _heartbeatTick++, 5000)
+    return () => clearInterval(_heartbeatInterval)
   })
 </script>
 
@@ -196,10 +238,16 @@
                 <div class="detail-label">Workers</div>
                 <div class="workers-grid">
                   {#each missionDetail.workers as worker}
-                    <div class="worker-node">
-                      <span class="worker-dot" style="background: {workerStatusColor(worker.status)}"></span>
+                    <div class="worker-node" class:failed={worker.status === 'failed' || worker.status === 'killed'} class:stale={worker.status === 'stale'}>
+                      <span class="worker-dot" class:active={worker.status === 'active'} style="background: {workerStatusColor(worker.status)}"></span>
                       <span class="worker-type">{worker.agent_type.replace('delivery-', '')}</span>
                       <span class="worker-status">{worker.status}</span>
+                      {#if workerTicketCounts(worker.id)}
+                        <span class="worker-tickets">{workerTicketCounts(worker.id)}</span>
+                      {/if}
+                      {#if worker.status === 'active'}
+                        <span class="worker-heartbeat">{(() => { const _ = _heartbeatTick; const hb = appState.lastHeartbeats[worker.id]; return hb ? relativeTime(new Date(hb).toISOString()) : relativeTime(worker.last_heartbeat) })()}</span>
+                      {/if}
                     </div>
                   {/each}
                 </div>
@@ -213,14 +261,21 @@
                   <div class="progress-bar">
                     <div
                       class="ticket-progress-fill"
+                      class:active={missionDetail.tickets.some(t => t.status === 'in_progress' || t.status === 'assigned')}
                       style="width: {missionDetail.tickets.length > 0 ? (missionDetail.tickets.filter(t => t.status === 'done').length / missionDetail.tickets.length) * 100 : 0}%"
                     ></div>
                   </div>
                 </div>
                 {#each missionDetail.tickets as ticket}
                   <div class="ticket" class:done={ticket.status === 'done'} class:active={ticket.status === 'in_progress'} class:failed={ticket.status === 'failed'}>
-                    <span class="ticket-icon">{ticketIcon(ticket.status)}</span>
+                    <span class="ticket-icon" class:spinning={ticket.status === 'in_progress'}>{ticketIcon(ticket.status)}</span>
                     <span class="ticket-title">{ticket.title}</span>
+                    {#if ticket.worker_id}
+                      {@const worker = missionDetail.workers.find(w => w.id === ticket.worker_id)}
+                      {#if worker}
+                        <span class="ticket-worker-chip">{worker.agent_type.replace('delivery-', '')}</span>
+                      {/if}
+                    {/if}
                     <span class="ticket-domain">{ticket.domain}</span>
                   </div>
                 {/each}
@@ -232,6 +287,9 @@
                 <div class="detail-label">Forge (merge queue)</div>
                 {#each missionDetail.forge as entry}
                   <div class="forge-entry" class:merged={entry.status === 'merged'} class:conflict={entry.status === 'conflict'}>
+                    {#if entry.status === 'merged'}
+                      <span class="forge-check">&#10003;</span>
+                    {/if}
                     <span class="forge-branch">{entry.branch_name}</span>
                     <span class="forge-status">{entry.status}</span>
                   </div>
@@ -303,7 +361,7 @@
                 ></div>
               </div>
             </div>
-            {#each wf.tasks.slice(0, 5) as task}
+            {#each expandedTasks.has(wf.id) ? wf.tasks : wf.tasks.slice(0, 5) as task}
               <div class="task" class:done={task.status === 'done'} class:active={task.status === 'in_progress'}>
                 <span class="task-status">
                   {task.status === 'done' ? '✓' : task.status === 'in_progress' ? '▶' : '○'}
@@ -312,7 +370,17 @@
               </div>
             {/each}
             {#if wf.tasks.length > 5}
-              <div class="task-more">+{wf.tasks.length - 5} more</div>
+              <button
+                class="task-toggle"
+                onclick={() => {
+                  const next = new Set(expandedTasks)
+                  if (next.has(wf.id)) next.delete(wf.id)
+                  else next.add(wf.id)
+                  expandedTasks = next
+                }}
+              >
+                {expandedTasks.has(wf.id) ? 'Show less' : `+${wf.tasks.length - 5} more`}
+              </button>
             {/if}
           </div>
         {/if}
@@ -437,7 +505,11 @@
   .task.done { color: #3fb950; }
   .task.active { color: #58a6ff; }
   .task-status { width: 16px; text-align: center; }
-  .task-more { font-size: 12px; color: #8b949e; padding-left: 24px; }
+  .task-toggle {
+    font-size: 12px; color: #58a6ff; padding-left: 24px;
+    background: none; border: none; cursor: pointer; text-align: left;
+  }
+  .task-toggle:hover { color: #79c0ff; text-decoration: underline; }
 
   .delegated { display: flex; flex-direction: column; gap: 4px; }
   .phase-agents { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -539,4 +611,61 @@
   .forge-status { font-size: 11px; }
 
   .detail-loading { font-size: 12px; color: #8b949e; padding: 12px 0; }
+
+  /* === Swarm live animations === */
+
+  /* Active worker pulse */
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.6); }
+    50% { box-shadow: 0 0 0 4px rgba(63, 185, 80, 0); }
+  }
+  .worker-dot.active { animation: pulse 2s ease-in-out infinite; }
+
+  /* In-progress ticket spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ticket-icon.spinning { display: inline-block; animation: spin 1s linear infinite; }
+
+  /* New element entrance */
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .worker-node, .ticket, .forge-entry { animation: fadeSlideIn 0.3s ease-out; }
+
+  /* Progress bar shimmer while active */
+  @keyframes shimmer {
+    from { background-position: -200% 0; }
+    to { background-position: 200% 0; }
+  }
+  .ticket-progress-fill.active {
+    background: linear-gradient(90deg, #a371f7 30%, #c9a0ff 50%, #a371f7 70%);
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* Failed/stale worker attention shake */
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-2px); }
+    75% { transform: translateX(2px); }
+  }
+  .worker-node.failed { animation: shake 0.4s ease-in-out; }
+  .worker-node.stale { border: 1px solid #d29922; }
+
+  /* Forge merged checkmark scale-in */
+  @keyframes scaleIn {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .forge-check { display: inline-block; color: #3fb950; font-weight: bold; animation: scaleIn 0.3s ease-out; }
+
+  /* Worker extra info */
+  .worker-tickets { font-size: 10px; color: #58a6ff; background: #1f3056; padding: 1px 5px; border-radius: 3px; }
+  .worker-heartbeat { font-size: 10px; color: #8b949e; }
+
+  /* Ticket worker chip */
+  .ticket-worker-chip { font-size: 10px; background: #2d1f56; color: #a371f7; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+
+  /* Smooth status transitions on tickets */
+  .ticket { transition: color 0.3s, opacity 0.3s; }
 </style>
