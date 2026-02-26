@@ -5,10 +5,9 @@
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'
   import Learning from './routes/Learning.svelte'
-  import Teams from './routes/Teams.svelte'
   import Terminal from './components/Terminal.svelte'
 
-  let activeTab = $state<'overview' | 'memory' | 'retrieval' | 'learning' | 'teams' | 'terminal'>('overview')
+  let activeTab = $state<'overview' | 'memory' | 'retrieval' | 'learning' | 'terminal'>('overview')
 
   onMount(() => {
     initStore()
@@ -19,7 +18,6 @@
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
     { id: 'learning' as const, label: 'Learning' },
-    { id: 'teams' as const, label: 'Teams' },
   ]
 
   let pendingProposals = $derived(appState.dashboard?.pending_proposals?.length ?? 0)
@@ -132,8 +130,6 @@
         <Retrieval />
       {:else if activeTab === 'learning'}
         <Learning />
-      {:else if activeTab === 'teams'}
-        <Teams />
       {/if}
     {/if}
   </main>
