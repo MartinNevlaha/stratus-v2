@@ -16,15 +16,27 @@
   // Auto-scroll: follow output unless the user has manually scrolled up.
   let autoScroll = true
 
+  let fitTimer: ReturnType<typeof setTimeout> | null = null
+
   function fitAndNotify() {
     if (!fitAddon || !container || container.clientHeight === 0) return
     fitAddon.fit()
+    // Force xterm to re-render all visible rows — fixes garbled glyphs
+    // that occur when the container is resized rapidly (e.g. popup overlay).
+    term.refresh(0, term.rows - 1)
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'resize',
         data: { id: sessionId, rows: term.rows, cols: term.cols }
       }))
     }
+  }
+
+  // Debounced fit: absorbs rapid resize events (popups, split drag)
+  // so xterm only reflows once after the layout settles.
+  function debouncedFit() {
+    if (fitTimer) clearTimeout(fitTimer)
+    fitTimer = setTimeout(() => fitAndNotify(), 80)
   }
 
   onMount(() => {
@@ -61,8 +73,8 @@
 
     connectWS()
 
-    // Resize handler — refit whenever the container size changes.
-    const resizeObs = new ResizeObserver(() => fitAndNotify())
+    // Resize handler — debounced refit whenever the container size changes.
+    const resizeObs = new ResizeObserver(() => debouncedFit())
     resizeObs.observe(container)
 
     // Visibility handler — ResizeObserver does NOT fire when an ancestor
@@ -75,6 +87,12 @@
       }
     })
     visObs.observe(container)
+
+    // Window focus handler — when a popup overlay (e.g. Claude Code permission
+    // dialog) appears and disappears, the terminal may have garbled glyphs.
+    // Force a clean re-render when the window regains focus.
+    const onFocus = () => requestAnimationFrame(() => fitAndNotify())
+    window.addEventListener('focus', onFocus)
 
     // Send input to server. Re-enable auto-scroll on user input so they
     // always see the response to what they typed.
@@ -89,6 +107,8 @@
       resizeObs.disconnect()
       visObs.disconnect()
       viewport?.removeEventListener('scroll', onViewportScroll)
+      window.removeEventListener('focus', onFocus)
+      if (fitTimer) clearTimeout(fitTimer)
     }
   })
 
