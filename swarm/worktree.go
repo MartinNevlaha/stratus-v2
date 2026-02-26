@@ -44,16 +44,26 @@ func (wm *WorktreeManager) Create(branch string) (string, error) {
 
 // Remove removes a worktree and optionally deletes the branch.
 func (wm *WorktreeManager) Remove(wtPath, branch string) error {
+	var errs []string
+
 	// Remove worktree
 	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
 	cmd.Dir = wm.projectRoot
-	cmd.CombinedOutput() // best-effort
+	if out, err := cmd.CombinedOutput(); err != nil {
+		errs = append(errs, fmt.Sprintf("worktree remove: %s: %v", strings.TrimSpace(string(out)), err))
+	}
 
 	// Delete branch
 	if branch != "" {
 		cmd = exec.Command("git", "branch", "-D", branch)
 		cmd.Dir = wm.projectRoot
-		cmd.CombinedOutput() // best-effort
+		if out, err := cmd.CombinedOutput(); err != nil {
+			errs = append(errs, fmt.Sprintf("branch delete: %s: %v", strings.TrimSpace(string(out)), err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("worktree cleanup: %s", strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -83,5 +93,8 @@ func (wm *WorktreeManager) WorktreeDir() string {
 
 // sanitizeBranchForDir converts a branch name to a safe directory name.
 func sanitizeBranchForDir(branch string) string {
-	return strings.ReplaceAll(branch, "/", "-")
+	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "..", "-")
+	result := replacer.Replace(branch)
+	// Trim leading/trailing dashes and dots
+	return strings.Trim(result, "-.")
 }

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -136,9 +137,13 @@ func (d *DB) ListMissions() ([]SwarmMission, error) {
 }
 
 func (d *DB) DeleteMission(id string) error {
-	_, err := d.sql.Exec(`DELETE FROM missions WHERE id = ?`, id)
+	res, err := d.sql.Exec(`DELETE FROM missions WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete mission: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("mission not found: %s", id)
 	}
 	return nil
 }
@@ -203,8 +208,11 @@ func (d *DB) ListWorkersByStatus(missionID, status string) ([]SwarmWorker, error
 }
 
 func (d *DB) WorkerHeartbeat(id string) error {
+	// Only update heartbeat if worker is in pending or active status.
+	// Do not resurrect failed/done/killed workers.
 	res, err := d.sql.Exec(`
-		UPDATE workers SET last_heartbeat = ?, status = 'active', updated_at = ? WHERE id = ?`,
+		UPDATE workers SET last_heartbeat = ?, status = 'active', updated_at = ?
+		WHERE id = ? AND status IN ('pending', 'active', 'stale')`,
 		now(), now(), id,
 	)
 	if err != nil {
@@ -212,7 +220,16 @@ func (d *DB) WorkerHeartbeat(id string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("worker not found: %s", id)
+		// Check if worker exists but is in a terminal state
+		var status string
+		err := d.sql.QueryRow(`SELECT status FROM workers WHERE id = ?`, id).Scan(&status)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("worker not found: %s", id)
+		}
+		if err != nil {
+			return fmt.Errorf("worker heartbeat: %w", err)
+		}
+		return fmt.Errorf("worker %s is in terminal state: %s", id, status)
 	}
 	return nil
 }
@@ -388,45 +405,11 @@ func parseDependsOn(raw string) []string {
 	if raw == "" || raw == "[]" {
 		return nil
 	}
-	// Simple JSON array parse: ["id1","id2"]
 	var deps []string
-	// Trim brackets and split
-	trimmed := raw[1 : len(raw)-1] // remove [ and ]
-	if trimmed == "" {
+	if err := json.Unmarshal([]byte(raw), &deps); err != nil {
 		return nil
 	}
-	for _, part := range splitJSON(trimmed) {
-		// Remove quotes
-		s := part
-		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-			s = s[1 : len(s)-1]
-		}
-		if s != "" {
-			deps = append(deps, s)
-		}
-	}
 	return deps
-}
-
-func splitJSON(s string) []string {
-	var parts []string
-	inQuote := false
-	start := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '"':
-			inQuote = !inQuote
-		case ',':
-			if !inQuote {
-				parts = append(parts, s[start:i])
-				start = i + 1
-			}
-		}
-	}
-	if start < len(s) {
-		parts = append(parts, s[start:])
-	}
-	return parts
 }
 
 // --- Signals ---
@@ -478,6 +461,40 @@ func (d *DB) MarkSignalsRead(workerID string) error {
 		return fmt.Errorf("mark signals read: %w", err)
 	}
 	return nil
+}
+
+// PollAndMarkSignals atomically fetches unread signals and marks them as read.
+func (d *DB) PollAndMarkSignals(workerID string) ([]SwarmSignal, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`
+		SELECT id, mission_id, from_worker, to_worker, type, payload, read, created_at
+		FROM signals
+		WHERE (to_worker = ? OR to_worker = '*') AND read = 0
+		ORDER BY created_at ASC`, workerID)
+	if err != nil {
+		return nil, fmt.Errorf("poll signals: %w", err)
+	}
+	signals, err := scanSignals(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(signals) > 0 {
+		_, err = tx.Exec(`UPDATE signals SET read = 1 WHERE (to_worker = ? OR to_worker = '*') AND read = 0`, workerID)
+		if err != nil {
+			return nil, fmt.Errorf("mark signals read: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return signals, nil
 }
 
 func scanSignals(rows *sql.Rows) ([]SwarmSignal, error) {

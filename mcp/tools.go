@@ -280,7 +280,7 @@ func (c *apiClient) get(path string, params neturl.Values) (any, error) {
 		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	return decodeJSON(resp.Body)
+	return c.decodeResponse(resp, "GET", path)
 }
 
 func (c *apiClient) post(path string, body any) (any, error) {
@@ -293,7 +293,7 @@ func (c *apiClient) post(path string, body any) (any, error) {
 		return nil, fmt.Errorf("POST %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	return decodeJSON(resp.Body)
+	return c.decodeResponse(resp, "POST", path)
 }
 
 func (c *apiClient) put(path string, body any) (any, error) {
@@ -311,7 +311,25 @@ func (c *apiClient) put(path string, body any) (any, error) {
 		return nil, fmt.Errorf("PUT %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	return decodeJSON(resp.Body)
+	return c.decodeResponse(resp, "PUT", path)
+}
+
+// decodeResponse checks the HTTP status code before decoding JSON.
+func (c *apiClient) decodeResponse(resp *http.Response, method, path string) (any, error) {
+	result, err := decodeJSON(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: failed to decode response: %w", method, path, err)
+	}
+	if resp.StatusCode >= 400 {
+		// Try to extract error message from response body
+		if m, ok := result.(map[string]any); ok {
+			if msg, ok := m["error"].(string); ok {
+				return nil, fmt.Errorf("%s %s: %s (HTTP %d)", method, path, msg, resp.StatusCode)
+			}
+		}
+		return nil, fmt.Errorf("%s %s: HTTP %d", method, path, resp.StatusCode)
+	}
+	return result, nil
 }
 
 func decodeJSON(r io.Reader) (any, error) {

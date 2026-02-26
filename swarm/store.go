@@ -2,7 +2,9 @@ package swarm
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -133,31 +135,35 @@ func (s *Store) Dispatch(missionID string) ([]Assignment, error) {
 		return nil, err
 	}
 
-	// Build domain → worker map (first worker per domain wins)
-	domainWorker := make(map[string]string)
-	var generalWorker string
+	// Build domain → worker list (only active/pending workers, skip stale/failed/killed)
+	domainWorkers := make(map[string][]string)
+	var generalWorkers []string
 	for _, w := range workers {
-		if w.Status == WorkerFailed || w.Status == WorkerKilled {
+		if w.Status == WorkerFailed || w.Status == WorkerKilled || w.Status == WorkerStale {
 			continue
 		}
 		domain := agentTypeToDomain(w.AgentType)
-		if _, exists := domainWorker[domain]; !exists {
-			domainWorker[domain] = w.ID
-		}
-		if generalWorker == "" {
-			generalWorker = w.ID
-		}
+		domainWorkers[domain] = append(domainWorkers[domain], w.ID)
+		generalWorkers = append(generalWorkers, w.ID)
 	}
+
+	// Round-robin counters per domain for load balancing
+	domainIdx := make(map[string]int)
 
 	var assignments []Assignment
 	for _, t := range tickets {
-		workerID := domainWorker[t.Domain]
-		if workerID == "" {
-			workerID = generalWorker // fallback
+		candidates := domainWorkers[t.Domain]
+		if len(candidates) == 0 {
+			candidates = generalWorkers // fallback
 		}
-		if workerID == "" {
+		if len(candidates) == 0 {
 			continue // no workers available
 		}
+		// Round-robin: pick next worker for this domain
+		idx := domainIdx[t.Domain] % len(candidates)
+		domainIdx[t.Domain] = idx + 1
+		workerID := candidates[idx]
+
 		if err := s.db.AssignTicket(t.ID, workerID); err != nil {
 			continue
 		}
@@ -165,9 +171,12 @@ func (s *Store) Dispatch(missionID string) ([]Assignment, error) {
 			TicketID: t.ID,
 			WorkerID: workerID,
 		})
-		// Send signal to worker
+		// Send signal to worker (safe JSON via Marshal)
+		payload, _ := json.Marshal(map[string]string{"ticket_id": t.ID, "title": t.Title})
 		sigID := generateID()
-		s.db.CreateSignal(sigID, missionID, "hub", workerID, SignalTicketAssigned, fmt.Sprintf(`{"ticket_id":"%s","title":"%s"}`, t.ID, t.Title))
+		if err := s.db.CreateSignal(sigID, missionID, "hub", workerID, SignalTicketAssigned, string(payload)); err != nil {
+			log.Printf("swarm dispatch: failed to send signal to %s: %v", workerID, err)
+		}
 	}
 
 	return assignments, nil
@@ -181,16 +190,9 @@ func (s *Store) SendSignal(missionID, from, to, sigType, payload string) error {
 	return s.db.CreateSignal(id, missionID, from, to, sigType, payload)
 }
 
-// PollSignals returns unread signals for a worker and marks them as read.
+// PollSignals returns unread signals for a worker and marks them as read atomically.
 func (s *Store) PollSignals(workerID string) ([]db.SwarmSignal, error) {
-	signals, err := s.db.GetUnreadSignals(workerID)
-	if err != nil {
-		return nil, err
-	}
-	if len(signals) > 0 {
-		s.db.MarkSignalsRead(workerID)
-	}
-	return signals, nil
+	return s.db.PollAndMarkSignals(workerID)
 }
 
 // --- Forge ---
@@ -282,7 +284,9 @@ func slugify(s string) string {
 
 func generateID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	const hex = "0123456789abcdef"
 	s := make([]byte, 16)
 	for i, v := range b {

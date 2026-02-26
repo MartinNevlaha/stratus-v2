@@ -54,6 +54,30 @@ const (
 	ForgeFailed   = "failed"
 )
 
+// ValidMissionStatuses is the set of valid mission status values.
+var ValidMissionStatuses = map[string]bool{
+	MissionPlanning: true, MissionActive: true, MissionMerging: true,
+	MissionVerifying: true, MissionComplete: true, MissionFailed: true, MissionAborted: true,
+}
+
+// ValidWorkerStatuses is the set of valid worker status values.
+var ValidWorkerStatuses = map[string]bool{
+	WorkerPending: true, WorkerActive: true, WorkerStale: true,
+	WorkerDone: true, WorkerFailed: true, WorkerKilled: true,
+}
+
+// ValidTicketStatuses is the set of valid ticket status values.
+var ValidTicketStatuses = map[string]bool{
+	TicketPending: true, TicketAssigned: true, TicketInProgress: true,
+	TicketDone: true, TicketFailed: true, TicketBlocked: true,
+}
+
+// ValidForgeStatuses is the set of valid forge entry status values.
+var ValidForgeStatuses = map[string]bool{
+	ForgePending: true, ForgeMerging: true, ForgeMerged: true,
+	ForgeConflict: true, ForgeFailed: true,
+}
+
 // Assignment represents a ticket-to-worker dispatch result.
 type Assignment struct {
 	TicketID string `json:"ticket_id"`

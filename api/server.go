@@ -208,6 +208,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/swarm/workers/{id}/signals", s.handlePollSignals)
 	mux.HandleFunc("POST /api/swarm/missions/{id}/forge", s.handleSubmitToForge)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/forge", s.handleListForgeEntries)
+	mux.HandleFunc("PUT /api/swarm/forge/{id}/status", s.handleUpdateForgeEntry)
 	mux.HandleFunc("POST /api/swarm/forge/submit", s.handleSubmitToForgeByWorker)
 	mux.HandleFunc("GET /api/swarm/workers/{id}", s.handleGetWorker)
 

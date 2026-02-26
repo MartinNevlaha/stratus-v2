@@ -15,7 +15,7 @@ BASE=http://localhost:41777
 
 > **Swarm** runs delivery agents in isolated git worktrees — each worker has its own
 > branch and filesystem, enabling truly parallel implementation without file conflicts.
-> Progress is tracked in the **Teams** tab of the dashboard.
+> Progress is tracked in the **Overview** tab of the dashboard.
 
 ---
 
@@ -106,6 +106,13 @@ Domain routing:
 ```bash
 curl -sS -X POST $BASE/api/swarm/missions/<mission-id>/dispatch
 ```
+
+**Capture the response** — it contains the ticket-to-worker assignments:
+```json
+{"assignments": [{"ticket_id": "abc123", "worker_id": "def456"}, ...]}
+```
+
+Use this to include the correct tickets in each worker's prompt below.
 
 ### 2c. Spawn Task agents — ALL in a SINGLE message (parallel)
 
@@ -205,5 +212,16 @@ Summarize what was implemented, which workers contributed, and any issues encoun
 - **NEVER** use Write, Edit, or Bash on production source files directly.
 - Delegate ALL implementation work to delivery agents via Task tool.
 - Always get user approval after the plan phase before spawning workers.
-- The `[SWARM]` prefix in the workflow title is mandatory — it's how the Teams dashboard tab identifies these workflows.
+- The `[SWARM]` prefix in the workflow title is mandatory — it's how the Overview dashboard identifies swarm workflows.
 - Each worker operates in its own git worktree — do NOT share worktrees between workers.
+
+## Cleanup
+
+If a mission fails or needs to be restarted, clean up resources:
+
+```bash
+# Delete the mission (removes all worktrees, workers, tickets, signals, forge entries)
+curl -sS -X DELETE $BASE/api/swarm/missions/<mission-id>
+```
+
+This removes all git worktrees and associated branches automatically.

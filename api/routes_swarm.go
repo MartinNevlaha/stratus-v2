@@ -52,10 +52,31 @@ func (s *Server) handleGetMission(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, err.Error())
 		return
 	}
-	// Enrich with workers and tickets
-	workers, _ := s.swarm.ListWorkers(id)
-	tickets, _ := s.swarm.ListTickets(id)
-	forge, _ := s.swarm.ListForgeEntries(id)
+	// Enrich with workers, tickets, and forge entries
+	workers, err := s.swarm.ListWorkers(id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list workers: "+err.Error())
+		return
+	}
+	tickets, err := s.swarm.ListTickets(id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list tickets: "+err.Error())
+		return
+	}
+	forge, err := s.swarm.ListForgeEntries(id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list forge: "+err.Error())
+		return
+	}
+	if workers == nil {
+		workers = []db.SwarmWorker{}
+	}
+	if tickets == nil {
+		tickets = []db.SwarmTicket{}
+	}
+	if forge == nil {
+		forge = []db.SwarmForgeEntry{}
+	}
 
 	json200(w, map[string]any{
 		"mission": mission,
@@ -72,6 +93,10 @@ func (s *Server) handleUpdateMissionStatus(w http.ResponseWriter, r *http.Reques
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if !swarm.ValidMissionStatuses[body.Status] {
+		jsonErr(w, http.StatusBadRequest, "invalid mission status: "+body.Status)
 		return
 	}
 	if err := s.swarm.UpdateMissionStatus(id, body.Status); err != nil {
@@ -148,6 +173,10 @@ func (s *Server) handleUpdateWorkerStatus(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
+	if !swarm.ValidWorkerStatuses[body.Status] {
+		jsonErr(w, http.StatusBadRequest, "invalid worker status: "+body.Status)
+		return
+	}
 	if err := s.swarm.UpdateWorkerStatus(workerID, body.Status); err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -162,11 +191,11 @@ func (s *Server) handleUpdateWorkerStatus(w http.ResponseWriter, r *http.Request
 func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	missionID := r.PathValue("id")
 	var body struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Domain      string `json:"domain"`
-		Priority    int    `json:"priority"`
-		DependsOn   string `json:"depends_on"`
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Domain      string   `json:"domain"`
+		Priority    int      `json:"priority"`
+		DependsOn   []string `json:"depends_on"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
@@ -179,7 +208,12 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	if body.Domain == "" {
 		body.Domain = "general"
 	}
-	ticket, err := s.swarm.CreateTicket(missionID, body.Title, body.Description, body.Domain, body.Priority, body.DependsOn)
+	deps := "[]"
+	if len(body.DependsOn) > 0 {
+		b, _ := json.Marshal(body.DependsOn)
+		deps = string(b)
+	}
+	ticket, err := s.swarm.CreateTicket(missionID, body.Title, body.Description, body.Domain, body.Priority, deps)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -247,6 +281,10 @@ func (s *Server) handleUpdateTicketStatus(w http.ResponseWriter, r *http.Request
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if !swarm.ValidTicketStatuses[body.Status] {
+		jsonErr(w, http.StatusBadRequest, "invalid ticket status: "+body.Status)
 		return
 	}
 	if err := s.swarm.UpdateTicketStatus(ticketID, body.Status, body.Result); err != nil {
@@ -333,27 +371,32 @@ func (s *Server) handleSubmitToForge(w http.ResponseWriter, r *http.Request) {
 	json200(w, entry)
 }
 
-// handleSubmitToForgeByWorker is a convenience endpoint: POST /api/swarm/forge/submit
-// that only needs worker_id (looks up mission automatically).
+// handleSubmitToForgeByWorker is a convenience alias for handleSubmitToForge.
 func (s *Server) handleSubmitToForgeByWorker(w http.ResponseWriter, r *http.Request) {
+	s.handleSubmitToForge(w, r)
+}
+
+// handleUpdateForgeEntry updates the status of a forge entry.
+func (s *Server) handleUpdateForgeEntry(w http.ResponseWriter, r *http.Request) {
+	entryID := r.PathValue("id")
 	var body struct {
-		WorkerID string `json:"worker_id"`
+		Status        string `json:"status"`
+		ConflictFiles string `json:"conflict_files"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	if body.WorkerID == "" {
-		jsonErr(w, http.StatusBadRequest, "worker_id is required")
+	if !swarm.ValidForgeStatuses[body.Status] {
+		jsonErr(w, http.StatusBadRequest, "invalid forge status: "+body.Status)
 		return
 	}
-	entry, err := s.swarm.SubmitToForge(body.WorkerID)
-	if err != nil {
+	if err := s.db.UpdateForgeEntry(entryID, body.Status, body.ConflictFiles); err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.hub.BroadcastJSON("forge_update", entry)
-	json200(w, entry)
+	s.hub.BroadcastJSON("forge_update", map[string]string{"id": entryID, "status": body.Status})
+	json200(w, map[string]string{"id": entryID, "status": body.Status})
 }
 
 // handleGetWorker returns a single worker by ID.

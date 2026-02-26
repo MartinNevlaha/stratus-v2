@@ -9,12 +9,19 @@
   let missions = $state<SwarmMission[]>([])
   let expandedMission = $state<string | null>(null)
   let missionDetail = $state<SwarmMissionDetail | null>(null)
+  let missionLoading = $state(false)
   let confirmDelete = $state<string | null>(null)
   let copiedId = $state<string | null>(null)
   let confirmTimer: ReturnType<typeof setTimeout> | null = null
 
   let activeWfs = $derived(allWorkflows.filter(w => !w.aborted && w.phase !== 'complete'))
   let pastWfs   = $derived(allWorkflows.filter(w => w.aborted || w.phase === 'complete'))
+
+  function displayType(wf: WorkflowState): string {
+    if (wf.title?.startsWith('[SWARM]')) return 'swarm'
+    if (wf.type === 'spec' && wf.complexity === 'complex') return 'spec-complex'
+    return wf.type
+  }
 
   let activeMissions = $derived(missions.filter(m => m.status !== 'complete' && m.status !== 'failed' && m.status !== 'aborted'))
   let pastMissions = $derived(missions.filter(m => m.status === 'complete' || m.status === 'failed' || m.status === 'aborted'))
@@ -65,17 +72,32 @@
     setTimeout(() => { if (copiedId === key) copiedId = null }, 2000)
   }
 
+  let _missionLoadId = 0
   async function toggleMission(id: string) {
     if (expandedMission === id) {
       expandedMission = null
       missionDetail = null
+      missionLoading = false
       return
     }
     expandedMission = id
+    missionDetail = null
+    missionLoading = true
+    const loadId = ++_missionLoadId
     try {
-      missionDetail = await getMission(id)
+      const detail = await getMission(id)
+      // Guard against race: only apply if this is still the latest request
+      if (loadId === _missionLoadId) {
+        missionDetail = detail
+      }
     } catch {
-      missionDetail = null
+      if (loadId === _missionLoadId) {
+        missionDetail = null
+      }
+    } finally {
+      if (loadId === _missionLoadId) {
+        missionLoading = false
+      }
     }
   }
 
@@ -151,14 +173,23 @@
     <div class="section-title">Active Missions</div>
     {#each activeMissions as mission}
       <div class="mission-card" class:expanded={expandedMission === mission.id}>
-        <button class="mission-header" onclick={() => toggleMission(mission.id)}>
+        <button
+          class="mission-header"
+          onclick={() => toggleMission(mission.id)}
+          aria-expanded={expandedMission === mission.id}
+          aria-controls="mission-detail-{mission.id}"
+        >
           <span class="mission-status-dot" style="background: {workerStatusColor(mission.status === 'active' ? 'active' : 'pending')}"></span>
           <span class="mission-title">{mission.title}</span>
           <span class="mission-phase">{mission.status}</span>
           <span class="expand-icon">{expandedMission === mission.id ? '\u25BC' : '\u25B6'}</span>
         </button>
 
-        {#if expandedMission === mission.id && missionDetail}
+        {#if expandedMission === mission.id && missionLoading}
+          <div class="mission-detail">
+            <div class="detail-loading">Loading…</div>
+          </div>
+        {:else if expandedMission === mission.id && missionDetail}
           <div class="mission-detail">
             {#if missionDetail.workers.length > 0}
               <div class="detail-section">
@@ -220,7 +251,7 @@
     {#each activeWfs as wf}
       <div class="workflow-card">
         <div class="workflow-header">
-          <span class="wf-type">{wf.type}</span>
+          <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'}>{displayType(wf)}</span>
           <span class="wf-id">{wf.id}</span>
           <span class="wf-phase">{wf.phase}</span>
           <div class="wf-actions">
@@ -320,7 +351,7 @@
     {#each pastWfs as wf}
       <div class="workflow-card past">
         <div class="workflow-header">
-          <span class="wf-type">{wf.type}</span>
+          <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'}>{displayType(wf)}</span>
           <span class="wf-id">{wf.id}</span>
           <span class="wf-phase" class:aborted={wf.aborted}>{wf.aborted ? 'aborted' : wf.phase}</span>
           <span class="wf-ts">{new Date(wf.updated_at).toLocaleDateString()}</span>
@@ -371,7 +402,9 @@
   .workflow-card.past { opacity: 0.6; }
   .workflow-card.past:hover { opacity: 1; }
   .workflow-header { display: flex; align-items: center; gap: 8px; }
-  .wf-type { font-size: 11px; text-transform: uppercase; font-weight: 700; color: #58a6ff; background: #1f3056; padding: 2px 6px; border-radius: 4px; }
+  .wf-type { font-size: 11px; text-transform: uppercase; font-weight: 700; color: #58a6ff; background: #1f3056; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+  .wf-type.swarm { color: #a371f7; background: #2d1f56; }
+  .wf-type.bug { color: #f0883e; background: #3d2200; }
   .wf-id { font-size: 13px; font-weight: 600; color: #c9d1d9; flex: 1; }
   .wf-phase { font-size: 12px; color: #8b949e; }
   .wf-phase.aborted { color: #f85149; }
@@ -463,7 +496,7 @@
   }
 
   .mission-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .mission-title { flex: 1; font-weight: 500; }
+  .mission-title { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mission-phase { font-size: 12px; color: #8b949e; }
   .mission-phase.failed { color: #f85149; }
   .expand-icon { font-size: 10px; color: #8b949e; }
@@ -492,7 +525,7 @@
   .ticket.active { color: #a371f7; }
   .ticket.failed { color: #f85149; }
   .ticket-icon { width: 16px; text-align: center; flex-shrink: 0; }
-  .ticket-title { flex: 1; }
+  .ticket-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ticket-domain { font-size: 11px; background: #21262d; padding: 1px 6px; border-radius: 4px; }
 
   .ticket-progress-fill { height: 100%; background: #a371f7; border-radius: 2px; transition: width 0.3s; }
@@ -502,6 +535,8 @@
   }
   .forge-entry.merged { color: #3fb950; }
   .forge-entry.conflict { color: #d29922; }
-  .forge-branch { font-family: monospace; font-size: 11px; }
+  .forge-branch { font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .forge-status { font-size: 11px; }
+
+  .detail-loading { font-size: 12px; color: #8b949e; padding: 12px 0; }
 </style>
