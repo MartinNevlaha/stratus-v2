@@ -11,6 +11,7 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
+	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
 	"github.com/MartinNevlaha/stratus-v2/vexor"
 )
@@ -29,6 +30,7 @@ type Server struct {
 	version       string
 	syncedVersion string   // version when assets were last refreshed to disk
 	skippedFiles  []string // asset files skipped in last refresh (user-customized)
+	swarm         *swarm.Store
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -51,6 +53,7 @@ func NewServer(
 	version string,
 	syncedVersion string,
 	skippedFiles []string,
+	swarmStore *swarm.Store,
 ) *Server {
 	s := &Server{
 		db:            database,
@@ -65,6 +68,7 @@ func NewServer(
 		version:       version,
 		syncedVersion: syncedVersion,
 		skippedFiles:  skippedFiles,
+		swarm:         swarmStore,
 		dirtyFiles:    make(map[string]struct{}),
 		dirtyCh:       make(chan struct{}, 1),
 	}
@@ -184,6 +188,28 @@ func (s *Server) Handler() http.Handler {
 	// STT
 	mux.HandleFunc("POST /api/stt/transcribe", s.handleSTTTranscribe)
 	mux.HandleFunc("GET /api/stt/status", s.handleSTTStatus)
+
+	// Swarm
+	mux.HandleFunc("POST /api/swarm/missions", s.handleCreateMission)
+	mux.HandleFunc("GET /api/swarm/missions", s.handleListMissions)
+	mux.HandleFunc("GET /api/swarm/missions/{id}", s.handleGetMission)
+	mux.HandleFunc("PUT /api/swarm/missions/{id}/status", s.handleUpdateMissionStatus)
+	mux.HandleFunc("DELETE /api/swarm/missions/{id}", s.handleDeleteMission)
+	mux.HandleFunc("POST /api/swarm/missions/{id}/workers", s.handleSpawnWorker)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/workers", s.handleListWorkers)
+	mux.HandleFunc("POST /api/swarm/workers/{id}/heartbeat", s.handleWorkerHeartbeat)
+	mux.HandleFunc("PUT /api/swarm/workers/{id}/status", s.handleUpdateWorkerStatus)
+	mux.HandleFunc("POST /api/swarm/missions/{id}/tickets", s.handleCreateTicket)
+	mux.HandleFunc("POST /api/swarm/missions/{id}/tickets/batch", s.handleBatchCreateTickets)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/tickets", s.handleListTickets)
+	mux.HandleFunc("PUT /api/swarm/tickets/{id}/status", s.handleUpdateTicketStatus)
+	mux.HandleFunc("POST /api/swarm/missions/{id}/dispatch", s.handleSwarmDispatch)
+	mux.HandleFunc("POST /api/swarm/signals", s.handleSendSignal)
+	mux.HandleFunc("GET /api/swarm/workers/{id}/signals", s.handlePollSignals)
+	mux.HandleFunc("POST /api/swarm/missions/{id}/forge", s.handleSubmitToForge)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/forge", s.handleListForgeEntries)
+	mux.HandleFunc("POST /api/swarm/forge/submit", s.handleSubmitToForgeByWorker)
+	mux.HandleFunc("GET /api/swarm/workers/{id}", s.handleGetWorker)
 
 	// WebSocket
 	mux.HandleFunc("/api/ws", s.hub.ServeWS)

@@ -52,8 +52,9 @@ Stratus is a single-binary Claude Code extension framework. The binary embeds fo
 |---------|---------------|
 | `cmd/stratus` | CLI entry point; embeds static assets and writes them to disk on `init`/`refresh` |
 | `config` | Loads `.stratus.json` + env overrides into `Config` struct |
-| `db` | SQLite wrapper: schema, memory events, governance docs, learning, workflows |
+| `db` | SQLite wrapper: schema, memory events, governance docs, learning, workflows, swarm |
 | `orchestration` | Phase state machine for `spec` and `bug` workflow types |
+| `swarm` | Multi-agent swarm: worktree management, dispatch engine, signal bus |
 | `api` | HTTP server, all REST routes, WebSocket hub, SPA handler |
 | `mcp` | MCP stdio server (JSON-RPC); proxies all tool calls to the HTTP API |
 | `hooks` | `phase_guard`, `delegation_guard`, `workflow_enforcer` hook handlers |

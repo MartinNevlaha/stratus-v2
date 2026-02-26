@@ -23,6 +23,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/hooks"
 	"github.com/MartinNevlaha/stratus-v2/mcp"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
+	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
 	"github.com/MartinNevlaha/stratus-v2/vexor"
 )
@@ -130,7 +131,8 @@ func cmdServe() {
 		syncedVersion = cfg.SyncState.SyncedVersion
 		skippedFiles = cfg.SyncState.SkippedFiles
 	}
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles)
+	swarmStore := swarm.NewStore(database, cfg.ProjectRoot)
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore)
 
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)

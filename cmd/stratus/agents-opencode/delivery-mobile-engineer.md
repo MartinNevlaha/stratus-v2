@@ -14,7 +14,7 @@ You are a **mobile delivery agent** specializing in cross-platform mobile apps u
 Before starting ANY work, verify there is an active workflow:
 
 ```bash
-curl -sS http://localhost:41777/api/dashboard/state | jq '.active_workflow'
+curl -sS http://localhost:41777/api/dashboard/state | jq '.workflows[0]'
 ```
 
 If no active workflow exists (null response), **STOP** and tell the user:

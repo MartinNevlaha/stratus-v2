@@ -10,7 +10,8 @@ async function getActiveWorkflow(): Promise<{ phase: string } | null> {
     const res = await fetch(`${BASE}/api/dashboard/state`)
     if (!res.ok) return null
     const state = await res.json()
-    return state?.active_workflow ?? null
+    const wfs = state?.workflows as Array<{ phase: string }> | undefined
+    return wfs?.[0] ?? null
   } catch {
     return null // fail open — server not running
   }

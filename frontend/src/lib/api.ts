@@ -1,4 +1,4 @@
-import type { DashboardState, Event, SearchResult, WorkflowState, Candidate, Proposal, VersionInfo } from './types'
+import type { DashboardState, Event, SearchResult, WorkflowState, Candidate, Proposal, VersionInfo, SwarmMission, SwarmMissionDetail } from './types'
 
 const BASE = '/api'
 
@@ -99,6 +99,11 @@ export const listProposals = (status?: string) =>
 
 export const decideProposal = (id: string, decision: string) =>
   post<{ status: string; applied: boolean }>(`/learning/proposals/${id}/decide`, { decision })
+
+// Swarm
+export const listMissions = () => get<SwarmMission[]>('/swarm/missions')
+export const getMission = (id: string) => get<SwarmMissionDetail>(`/swarm/missions/${id}`)
+export const deleteMission = (id: string) => del<{ deleted: boolean }>(`/swarm/missions/${id}`)
 
 // System
 export const getVersion = () => get<VersionInfo>('/system/version')

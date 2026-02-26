@@ -97,3 +97,72 @@ export interface VersionInfo {
   sync_required: boolean
   skipped_files: string[]
 }
+
+// Swarm types
+export interface SwarmMission {
+  id: string
+  workflow_id: string
+  title: string
+  status: 'planning' | 'active' | 'merging' | 'verifying' | 'complete' | 'failed' | 'aborted'
+  base_branch: string
+  merge_branch: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SwarmWorker {
+  id: string
+  mission_id: string
+  agent_type: string
+  worktree_path: string
+  branch_name: string
+  status: 'pending' | 'active' | 'stale' | 'done' | 'failed' | 'killed'
+  session_id?: string
+  last_heartbeat: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SwarmTicket {
+  id: string
+  mission_id: string
+  title: string
+  description: string
+  domain: string
+  priority: number
+  status: 'pending' | 'assigned' | 'in_progress' | 'done' | 'failed' | 'blocked'
+  worker_id?: string
+  depends_on: string
+  result: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SwarmSignal {
+  id: string
+  mission_id: string
+  from_worker: string
+  to_worker: string
+  type: string
+  payload: string
+  read: boolean
+  created_at: string
+}
+
+export interface SwarmForgeEntry {
+  id: string
+  mission_id: string
+  worker_id: string
+  branch_name: string
+  status: 'pending' | 'merging' | 'merged' | 'conflict' | 'failed'
+  conflict_files: string
+  merged_at?: string
+  created_at: string
+}
+
+export interface SwarmMissionDetail {
+  mission: SwarmMission
+  workers: SwarmWorker[]
+  tickets: SwarmTicket[]
+  forge: SwarmForgeEntry[]
+}

@@ -183,6 +183,85 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			return map[string]any{"workflows": []any{}, "message": "no active workflows"}, nil
 		},
 	})
+
+	// --- Swarm tools (worker-facing) ---
+
+	s.Register(Tool{
+		Name:        "swarm_heartbeat",
+		Description: "Send heartbeat from a swarm worker. Workers should call this periodically to stay active.",
+		InputSchema: obj(
+			req("worker_id", "string", "The worker's ID"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			workerID, _ := args["worker_id"].(string)
+			if workerID == "" {
+				return nil, fmt.Errorf("worker_id is required")
+			}
+			return client.post(fmt.Sprintf("/api/swarm/workers/%s/heartbeat", workerID), nil)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_signals",
+		Description: "Poll unread signals for a worker. Returns messages from Hub or other workers, then marks them as read.",
+		InputSchema: obj(
+			req("worker_id", "string", "The worker's ID"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			workerID, _ := args["worker_id"].(string)
+			if workerID == "" {
+				return nil, fmt.Errorf("worker_id is required")
+			}
+			return client.get(fmt.Sprintf("/api/swarm/workers/%s/signals", workerID), nil)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_ticket_update",
+		Description: "Update a ticket's status. Use to start work (in_progress), complete it (done), or report failure (failed).",
+		InputSchema: obj(
+			req("ticket_id", "string", "Ticket ID"),
+			req("status", "string", "New status: in_progress | done | failed"),
+			opt("result", "string", "Completion summary or failure reason"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			ticketID, _ := args["ticket_id"].(string)
+			if ticketID == "" {
+				return nil, fmt.Errorf("ticket_id is required")
+			}
+			return client.put(fmt.Sprintf("/api/swarm/tickets/%s/status", ticketID), args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_submit_merge",
+		Description: "Submit worker's branch to the Forge (merge queue). Call after committing all changes.",
+		InputSchema: obj(
+			req("worker_id", "string", "Worker ID"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			workerID, _ := args["worker_id"].(string)
+			if workerID == "" {
+				return nil, fmt.Errorf("worker_id is required")
+			}
+			return client.post("/api/swarm/forge/submit", map[string]any{"worker_id": workerID})
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_send_signal",
+		Description: "Send a signal to another worker or broadcast to all workers in the mission.",
+		InputSchema: obj(
+			req("from_worker", "string", "Sender worker ID"),
+			req("type", "string", "Signal type: HELP, STATUS, TICKET_DONE, etc."),
+			opt("to_worker", "string", "Recipient worker ID. Omit or '*' for broadcast."),
+			opt("mission_id", "string", "Mission ID (auto-detected from worker if omitted)"),
+			opt("payload", "string", "JSON payload with additional data"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			return client.post("/api/swarm/signals", args)
+		},
+	})
 }
 
 // apiClient is a minimal HTTP client for calling the Stratus API.
@@ -212,6 +291,24 @@ func (c *apiClient) post(path string, body any) (any, error) {
 	resp, err := c.http.Post(c.base+path, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	return decodeJSON(resp.Body)
+}
+
+func (c *apiClient) put(path string, body any) (any, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodPut, c.base+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("PUT %s: %w", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("PUT %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	return decodeJSON(resp.Body)

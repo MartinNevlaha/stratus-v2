@@ -125,4 +125,77 @@ CREATE TABLE IF NOT EXISTS workflows (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- Swarm: Missions (groups of coordinated tickets)
+CREATE TABLE IF NOT EXISTS missions (
+    id           TEXT PRIMARY KEY,
+    workflow_id  TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    title        TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'planning',
+    base_branch  TEXT NOT NULL DEFAULT 'main',
+    merge_branch TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- Swarm: Workers (agent processes with git worktrees)
+CREATE TABLE IF NOT EXISTS workers (
+    id             TEXT PRIMARY KEY,
+    mission_id     TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    agent_type     TEXT NOT NULL,
+    worktree_path  TEXT NOT NULL DEFAULT '',
+    branch_name    TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'pending',
+    session_id     TEXT,
+    last_heartbeat TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_workers_mission ON workers(mission_id);
+
+-- Swarm: Tickets (atomic work units)
+CREATE TABLE IF NOT EXISTS tickets (
+    id          TEXT PRIMARY KEY,
+    mission_id  TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    domain      TEXT NOT NULL DEFAULT 'general',
+    priority    INTEGER NOT NULL DEFAULT 100,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    worker_id   TEXT REFERENCES workers(id),
+    depends_on  TEXT NOT NULL DEFAULT '[]',
+    result      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tickets_mission ON tickets(mission_id);
+
+-- Swarm: Signals (inter-agent messages)
+CREATE TABLE IF NOT EXISTS signals (
+    id          TEXT PRIMARY KEY,
+    mission_id  TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    from_worker TEXT NOT NULL,
+    to_worker   TEXT NOT NULL DEFAULT '*',
+    type        TEXT NOT NULL,
+    payload     TEXT NOT NULL DEFAULT '{}',
+    read        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_signals_to      ON signals(to_worker, read);
+CREATE INDEX IF NOT EXISTS idx_signals_mission  ON signals(mission_id);
+
+-- Swarm: Forge (merge queue entries)
+CREATE TABLE IF NOT EXISTS forge_entries (
+    id             TEXT PRIMARY KEY,
+    mission_id     TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    worker_id      TEXT NOT NULL REFERENCES workers(id),
+    branch_name    TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    conflict_files TEXT NOT NULL DEFAULT '[]',
+    merged_at      TEXT,
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 `
