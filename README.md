@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A production-grade AI development framework for Claude Code and OpenCode.</strong><br/>
-  Persistent memory · semantic retrieval · spec-driven orchestration · multi-agent swarms · live dashboard.
+  Persistent memory · semantic retrieval · spec-driven orchestration · multi-agent swarms · voice input · live dashboard.
 </p>
 
 <p align="center">
@@ -31,6 +31,7 @@ Out of the box, Claude Code and OpenCode have no memory across sessions, no stru
 | No visibility into what agents are doing | Live dashboard: workflow state, ticket progress, worker heartbeats |
 | Governance docs ignored | Chunked, FTS-indexed, surfaced in context on every request |
 | Patterns die with the conversation | Learning pipeline: detect → propose → accept → embed as rules |
+| Type every prompt by hand | Voice input: describe features, dictate bug reports, think out loud — hands stay on code |
 
 ---
 
@@ -101,7 +102,7 @@ Pre-configured, automatically written to `.claude/agents/` or `.opencode/agents/
 - **Overview** — all workflows, missions, task progress, delegated agents, resume commands
 - **Active Missions** — expandable swarm missions: workers grid, ticket list with progress bar, forge queue
 - **Terminal** — full PTY terminal embedded 50/50 next to the overview via xterm.js + WebSocket
-- **Voice input (STT)** — microphone button → faster-whisper → text injected at cursor (Docker, local, no cloud)
+- **Voice input (STT)** — talk instead of type: describe a feature, dictate a bug report, or think out loud while your hands stay on code. One click to record, one click to transcribe. Runs locally via faster-whisper — no cloud, no API keys, no latency
 - **Real-time** — all updates via WebSocket, no polling
 
 ### Hooks
@@ -346,22 +347,34 @@ Environment overrides: `STRATUS_PORT`, `STRATUS_DATA_DIR`.
 
 ---
 
-## Voice Input (STT)
+## Voice Input (STT) — Talk to Your Terminal
 
-`stratus serve` automatically manages a [speaches](https://github.com/speaches-ai/speaches) Docker container that runs faster-whisper locally. No cloud API keys, no data leaves your machine.
+The fastest way to give instructions to an AI agent is to just say them out loud. Complex feature descriptions, multi-step bug reports, architecture discussions — things that take 2 minutes to type take 15 seconds to speak. Stratus puts a microphone button directly in the terminal header. One click to start, one click to stop — your speech becomes a prompt.
 
-- Click the microphone button in the terminal header to record
-- Click again to stop — audio is transcribed and injected at the terminal cursor
+**Why this changes the workflow:**
+- **Describe features naturally** — "Add a settings page with theme toggle, notification preferences, and account deletion with a confirmation modal" becomes a single breath instead of 30 seconds of typing
+- **Dictate while reviewing code** — eyes on the diff, mouth describing the fix. No context switching between reading and typing
+- **Think out loud** — rubber-duck debugging becomes real: narrate your reasoning and the agent acts on it
+- **Hands stay on code** — voice for prompts, keyboard for code. The split that makes sense
 
-**Docker is only required for STT** — all other features work without it.
+**How it works:**
 
-| Model | Size | Notes |
-|-------|------|-------|
-| `Systran/faster-whisper-small` | ~244 MB | Default, fast |
-| `Systran/faster-whisper-medium` | ~769 MB | Better accuracy |
-| `Systran/faster-whisper-large-v3` | ~3 GB | Best accuracy |
+`stratus serve` automatically manages a [speaches](https://github.com/speaches-ai/speaches) Docker container running faster-whisper. Everything runs locally — no cloud APIs, no data leaves your machine, no subscription needed.
 
-Set `stt.model` in `.stratus.json` to change the model. The container is stopped and removed when `stratus serve` exits.
+1. Click the microphone icon in the terminal header
+2. Speak your prompt
+3. Click again — audio is transcribed and injected at the terminal cursor
+4. Press Enter
+
+The container (`stratus-stt`) starts with `stratus serve` and stops when you exit. First launch pulls the model (~244 MB); subsequent starts are instant.
+
+| Model | Size | Speed | Use case |
+|-------|------|-------|----------|
+| `Systran/faster-whisper-small` | ~244 MB | ~1s | Default — fast iteration, quick prompts |
+| `Systran/faster-whisper-medium` | ~769 MB | ~2s | Longer dictation, technical terms |
+| `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Maximum accuracy, heavy accents |
+
+Set `stt.model` in `.stratus.json` to switch models. **Docker is only required for STT** — all other Stratus features work without it.
 
 ---
 
