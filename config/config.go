@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -72,6 +74,23 @@ func (c Config) Save(path string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// ProjectDataDir returns the project-specific data directory.
+// Each project gets its own subdirectory under DataDir, keyed by a
+// SHA-256 hash prefix of the resolved absolute ProjectRoot path.
+func (c Config) ProjectDataDir() string {
+	absRoot, err := filepath.Abs(c.ProjectRoot)
+	if err != nil {
+		absRoot = c.ProjectRoot
+	}
+	absRoot = filepath.Clean(absRoot)
+	if resolved, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = resolved
+	}
+	sum := sha256.Sum256([]byte(absRoot))
+	hash := hex.EncodeToString(sum[:])[:12]
+	return filepath.Join(c.DataDir, hash)
 }
 
 // Load loads config from .stratus.json in the current directory, merging with defaults.

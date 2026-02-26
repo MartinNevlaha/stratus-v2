@@ -188,11 +188,17 @@ Since workers run in the background, you (the lead) are free to act.
 **Do NOT just wait passively.** Actively poll the API and report to the user.
 
 **Polling procedure** — repeat this until all workers are in a terminal state (done/failed/killed).
-First check after 5 seconds, then every 10 seconds:
 
-1. Wait before next check (first iteration: 5s, subsequent: 10s):
+Use **progressive intervals** to balance responsiveness with token efficiency:
+- **First 1 minute**: check every **15 seconds**
+- **1–3 minutes**: check every **30 seconds**
+- **After 3 minutes**: check every **60 seconds**
+
+Each iteration:
+
+1. Wait using the appropriate interval:
    ```bash
-   sleep 5   # first iteration only — use sleep 10 for all subsequent iterations
+   sleep 15   # first minute — increase to 30 after 1m, then 60 after 3m
    ```
 
 2. Fetch ticket + worker status in parallel:

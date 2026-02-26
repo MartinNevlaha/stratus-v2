@@ -1061,10 +1061,25 @@ func governanceIndex(projectRoot string) {
 }
 
 func mustOpenDB(cfg config.Config) *db.DB {
-	dbPath := filepath.Join(cfg.DataDir, "stratus.db")
+	projectDir := cfg.ProjectDataDir()
+	dbPath := filepath.Join(projectDir, "stratus.db")
 	database, err := db.Open(dbPath)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
+	writeProjectInfo(projectDir, cfg.ProjectRoot)
 	return database
+}
+
+func writeProjectInfo(dir, projectRoot string) {
+	infoPath := filepath.Join(dir, "project_info.json")
+	if _, err := os.Stat(infoPath); err == nil {
+		return
+	}
+	info := map[string]string{
+		"project_root": projectRoot,
+		"created_at":   time.Now().UTC().Format(time.RFC3339),
+	}
+	data, _ := json.MarshalIndent(info, "", "  ")
+	_ = os.WriteFile(infoPath, data, 0o644)
 }
