@@ -1,10 +1,10 @@
 ---
-description: "Bug-fixing workflow (analyze → fix → review → complete). Structured debugging and repair via stratus workflow API."
+description: "Bug-fixing workflow coordinator (analyze → fix → review → complete). Orchestrates debugging and repair by delegating to specialized delivery agents via @mention."
 ---
 
 # Bug-Fixing Workflow
 
-You are the **coordinator** for a structured bug-fixing workflow. You manage phases via the stratus HTTP API.
+You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized delivery agents via `@agent-name`. You do NOT write production code directly.
 
 ## API Base
 
@@ -25,41 +25,17 @@ curl -sS -X POST $BASE/api/workflows \
   -d "{\"id\": \"bug-$SLUG\", \"type\": \"bug\", \"title\": \"$ARGUMENTS\"}"
 ```
 
-Diagnose the root cause:
+- Explore the codebase: Read error messages, stack traces, logs.
+- **Delegate to `@delivery-debugger`** for root cause analysis.
+- Record delegation:
 
-1. **Reproduce** — Understand symptoms. Find error messages, stack traces, logs.
-2. **Trace** — Follow the execution path from symptom to root cause. Use `retrieve` MCP tool (corpus: code) to find related code.
-3. **Classify** the bug type:
-
-| Type | Description |
-|------|-------------|
-| **Logic** | Wrong condition, off-by-one, incorrect algorithm |
-| **Integration** | API contract mismatch, wrong endpoint, data format |
-| **Concurrency** | Race condition, deadlock, missing synchronization |
-| **Data** | Corrupt data, missing validation, encoding issue |
-| **Configuration** | Wrong env var, missing config, path issue |
-| **Dependency** | Library bug, version incompatibility |
-
-4. **Report** — Document the diagnosis:
-
+```bash
+curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-debugger"}'
 ```
-## Bug Diagnosis
 
-### Symptom
-<What the user observes>
-
-### Root Cause
-<Exact cause with file:line references>
-
-### Classification
-<Bug type>
-
-### Evidence
-- <file:line — problematic code>
-
-### Recommended Fix
-<What needs to change>
-```
+The debugger will return a structured diagnosis with symptom, root cause, classification, evidence, and recommended fix.
 
 **Present diagnosis to user using the `question` tool. Get explicit approval before fixing.**
 
@@ -75,16 +51,25 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
 
 ## Phase 2: Fix
 
-Implement the fix following project conventions:
+Route to the appropriate delivery agent via `@mention` based on the bug type:
 
-- Write a failing test that reproduces the bug first (TDD)
-- Fix the root cause — not just the symptom
-- Ensure all existing tests still pass
-- No hardcoded values — use proper error types and validation
+| Bug Type | Agent |
+|----------|-------|
+| UI, components | `@delivery-frontend-engineer` |
+| UI/UX design, design system | `@delivery-ux-designer` |
+| API, backend, handlers | `@delivery-backend-engineer` |
+| Migrations, queries | `@delivery-database-engineer` |
+| CI/CD, infra | `@delivery-devops-engineer` |
+| Mobile, React Native | `@delivery-mobile-engineer` |
+| General | `@delivery-implementation-expert` |
 
-Then transition to review:
+Delegate via `@agent-name` with the full diagnosis context from Phase 1, then record and transition:
 
 ```bash
+curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "<agent-name>"}'
+
 curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
   -H 'Content-Type: application/json' \
   -d '{"phase": "review"}'
@@ -94,16 +79,17 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
 
 ## Phase 3: Review
 
-Review the fix for quality and regressions:
+- **Delegate to `@delivery-code-reviewer`** — verify fix quality, no regressions, and test coverage.
+- Record delegation:
 
-1. **Correctness** — does the fix address the root cause? Edge cases?
-2. **Regression** — run all tests, confirm no new failures
-3. **Code quality** — clean code, specific error types, no dead code
-4. **Security** — no new injection vectors, secrets, or validation gaps
+```bash
+curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-code-reviewer"}'
+```
 
-If issues found → fix loop: transition back to fix, re-fix, re-review (max 5 loops).
-
-On pass, complete:
+- If reviewer finds `[must_fix]` issues → fix loop: transition back to fix, delegate to the appropriate agent, re-review (max 5 loops).
+- On pass, complete:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
@@ -111,7 +97,7 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
   -d '{"phase": "complete"}'
 ```
 
-Save a memory event with key findings:
+- Summarize what was fixed. Save a memory event with key findings:
 
 ```bash
 save_memory(text="Bug fix: <summary>", type="bugfix", tags=["bug"], importance=0.7)
@@ -121,9 +107,10 @@ save_memory(text="Bug fix: <summary>", type="bugfix", tags=["bug"], importance=0
 
 ## Rules
 
+- **NEVER** use write, edit, or bash on production source files directly.
+- Delegate ALL implementation work to delivery agents via `@mention`.
 - **ALWAYS get explicit user approval before Phase 2 (Fix).**
 - Max 5 fix loops — escalate to user if still broken after 5 attempts.
-- Write a regression test that proves the bug is fixed.
 - Check current state: `curl -sS $BASE/api/workflows/bug-<slug>`
 
 Fix the bug: $ARGUMENTS

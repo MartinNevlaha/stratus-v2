@@ -1,10 +1,12 @@
 ---
-description: "Parallel spec workflow — plan all tasks, then implement them all at once for faster delivery. Requires stratus serve."
+description: "Team-based spec workflow coordinator — delegates to specialized delivery agents for faster implementation. Requires stratus serve."
 ---
 
 # Team-Based Spec Workflow
 
-> **Experimental**: This workflow implements all tasks in a single pass rather than sequentially.
+You are the **coordinator** for a team-based spec workflow. You orchestrate work by delegating to specialized delivery agents via `@agent-name`. You do NOT write production code directly.
+
+> **Note**: Unlike `/spec` (which delegates tasks one-by-one), `/team` groups tasks by domain and delegates to appropriate agents. OpenCode runs delegations sequentially, but each agent is a specialist in their domain.
 
 ## API Base
 
@@ -30,8 +32,24 @@ Then:
 1. Explore the codebase (read, glob, grep) to understand the relevant context.
 2. Use `retrieve` MCP tool (corpus: code) for pattern discovery.
 3. Use `retrieve` MCP tool (corpus: governance) for rules and ADRs.
-4. Break the work into well-defined tasks with clear boundaries.
-5. Set tasks:
+
+**Delegate planning to `@delivery-system-architect`** — task breakdown, dependencies, component boundaries.
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-system-architect"}'
+```
+
+**Governance check** — delegate to `@delivery-governance-checker` to verify the plan.
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+Set tasks on the workflow:
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/tasks \
@@ -51,29 +69,48 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ---
 
-## Phase 2: Implement — ALL tasks
+## Phase 2: Implement — delegate ALL tasks by domain
 
-Unlike `/spec` (which implements tasks one by one), `/team` implements all tasks in one pass:
+Group tasks by delivery domain and delegate to the appropriate agent:
 
-1. Mark all tasks as started:
+| Task Type | Agent |
+|-----------|-------|
+| API, backend, handlers | `@delivery-backend-engineer` |
+| UI, components, pages | `@delivery-frontend-engineer` |
+| UI/UX design, design system | `@delivery-ux-designer` |
+| Migrations, schema | `@delivery-database-engineer` |
+| Infra, CI/CD | `@delivery-devops-engineer` |
+| Mobile, React Native, iOS/Android | `@delivery-mobile-engineer` |
+| Architecture, system design, ADRs | `@delivery-system-architect` |
+| Tests | `@delivery-qa-engineer` |
+| General/unclear | `@delivery-implementation-expert` |
+
+If multiple tasks map to the same domain, assign them all to one agent of that type.
+
+For each agent delegation:
+1. Mark all assigned tasks as started:
 
 ```bash
-for i in $(seq 0 $((NUM_TASKS-1))); do
-  curl -sS -X POST $BASE/api/workflows/<slug>/tasks/$i/start
-done
+curl -sS -X POST $BASE/api/workflows/<slug>/tasks/<index>/start
 ```
 
-2. Implement all tasks following TDD and project conventions.
+2. Invoke the agent via `@agent-name` with all assigned task descriptions and the stratus task API calls they need to complete each task.
 
-3. Mark all tasks as complete:
+3. Record the delegation:
 
 ```bash
-for i in $(seq 0 $((NUM_TASKS-1))); do
-  curl -sS -X POST $BASE/api/workflows/<slug>/tasks/$i/complete
-done
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "<agent-name>"}'
 ```
 
-Transition to verify:
+4. Mark completed tasks:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/tasks/<index>/complete
+```
+
+After all tasks, transition to verify:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
@@ -85,11 +122,27 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 3: Verify
 
-Review all changes for correctness, security, and governance compliance.
+Delegate review to specialized agents:
 
-Run all tests. If `[must_fix]` issues → back to implement, fix, re-verify.
+1. **Code review** — `@delivery-code-reviewer` for quality, correctness, security, and test adequacy.
 
-On pass:
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-code-reviewer"}'
+```
+
+2. **Governance check** — `@delivery-governance-checker` for governance compliance.
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+If `[must_fix]` issues → transition back to implement, delegate fix to appropriate agent, re-verify.
+
+On pass, transition to learn:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
@@ -115,14 +168,15 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
   -d '{"phase": "complete"}'
 ```
 
-Summarize what was implemented.
+Summarize what was implemented and which agents contributed.
 
 ---
 
 ## Rules
 
-- Follow TDD for all implementation.
-- Always get user approval after the plan phase.
+- **NEVER** use write, edit, or bash on production source files directly.
+- Delegate ALL implementation work to delivery agents via `@mention`.
+- Always get user approval after the plan phase before delegating to agents.
 - The `[TEAM]` title prefix is mandatory — it's how the Teams dashboard tab identifies these workflows.
 - Check current state: `curl -sS $BASE/api/workflows/<slug>`
 

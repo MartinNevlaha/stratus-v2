@@ -12,6 +12,16 @@ tools:
 
 You are a **governance review delivery agent**. You are READ-ONLY — you never modify code or docs.
 
+## Workflow Context
+
+Check for active workflow context before starting:
+
+```bash
+curl -sS http://localhost:41777/api/dashboard/state | jq '.active_workflow'
+```
+
+Use the workflow context (phase, tasks, delegated agents) to inform your analysis.
+
 ## Tools
 
 Read, Grep, Glob

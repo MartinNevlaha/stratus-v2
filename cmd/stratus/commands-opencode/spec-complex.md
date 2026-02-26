@@ -1,10 +1,10 @@
 ---
-description: "Complex spec workflow with discovery and design phases (discovery → design → plan → implement → verify → learn → complete). Use for auth, databases, integrations, architecture."
+description: "Complex spec workflow coordinator (discovery → design → plan → implement → verify → learn → complete). Orchestrates work by delegating to specialized delivery agents via @mention. Use for auth, databases, integrations, architecture."
 ---
 
 # Spec-Driven Development (Complex)
 
-You are the **coordinator** for a complex spec-driven development lifecycle. This adds discovery and design phases before planning.
+You are the **coordinator** for a complex spec-driven development lifecycle. You orchestrate work by delegating to specialized delivery agents via `@agent-name`. You do NOT write production code directly.
 
 ## When to Use
 
@@ -16,6 +16,7 @@ Use `/spec-complex` for:
 - Infrastructure, CI/CD changes
 - Architecture decisions requiring ADRs
 - Multi-file, multi-service, or cross-cutting concerns
+- Unclear or evolving requirements that need discovery first
 
 For simple, well-understood tasks use `/spec`.
 
@@ -44,8 +45,14 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 - Explore the codebase with read, grep, glob — do NOT write code.
 - Use the `retrieve` MCP tool (corpus: code) for pattern discovery.
 - Use the `retrieve` MCP tool (corpus: governance) for existing ADRs and constraints.
-- Identify requirements, constraints, existing architecture, and the technology landscape.
-- Document findings.
+
+**Delegate to `@delivery-strategic-architect`** for requirements analysis, constraints, and technology landscape assessment. Record the delegation:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-strategic-architect"}'
+```
 
 Transition to design:
 
@@ -59,36 +66,34 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 2: Design
 
-Produce a Technical Design Document at `docs/plans/<slug>-design.md`:
+Delegate based on what the spec requires:
 
-```
-## Technical Design: <title>
+| Design Need | Agent |
+|-------------|-------|
+| System architecture, ADRs, tech selection | `@delivery-strategic-architect` |
+| Component design, API contracts, data models | `@delivery-system-architect` |
+| UI/UX design, component hierarchy, design tokens | `@delivery-ux-designer` |
 
-### Component Overview
-<which components are involved and their responsibilities>
+Typically: delegate to `@delivery-system-architect` (always), + `@delivery-strategic-architect` for technology decisions, + `@delivery-ux-designer` for UI-heavy specs.
 
-### API Contract
-<REST/gRPC endpoints with request/response shapes, error codes>
+- Produce a Technical Design Document at `docs/plans/<slug>-design.md`.
+- Record delegation for each agent used:
 
-### Data Model
-<schema changes, new tables, index requirements>
-
-### Sequence Diagram
-<key flows in Mermaid or ASCII>
-
-### Error Handling
-<what errors can occur, how they propagate>
-
-### Breaking Changes
-<interface changes that require consumer updates>
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "<agent-name>"}'
 ```
 
-Check governance compliance:
-- Use `retrieve` MCP tool (corpus: governance) to find applicable rules and ADRs.
-- Verify the design doesn't contradict accepted ADRs.
-- Ensure mandatory practices are covered (TDD, error handling, input validation).
+**Governance check** — delegate to `@delivery-governance-checker` with prompt: "Review design document at docs/plans/<slug>-design.md for governance compliance."
 
-If governance issues exist → address them in the design doc before proceeding.
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+If checker returns `[must_update]` findings → address them in the design doc before transitioning to plan.
 
 Transition to plan:
 
@@ -131,17 +136,35 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 For each task (0-indexed):
 
 ```bash
+# Mark task started
 curl -sS -X POST $BASE/api/workflows/<slug>/tasks/<index>/start
 ```
 
-Implement following the design document and project conventions:
-- TDD: failing test → implement → green → refactor
-- Functions max 50 lines, files max 300 lines
-- Specific error types, no bare exceptions
-- Input validation at API boundaries
-- Coverage >= 80%
+Route to the appropriate delivery agent via `@mention` based on task type:
 
-On task completion:
+| Task Type | Agent |
+|-----------|-------|
+| API, backend, handlers | `@delivery-backend-engineer` |
+| UI, components, pages | `@delivery-frontend-engineer` |
+| UI/UX design, design system | `@delivery-ux-designer` |
+| Migrations, schema | `@delivery-database-engineer` |
+| Infra, CI/CD | `@delivery-devops-engineer` |
+| Mobile, React Native, iOS/Android | `@delivery-mobile-engineer` |
+| Architecture docs, ADRs | `@delivery-system-architect` |
+| Tests | `@delivery-qa-engineer` |
+| General/unclear | `@delivery-implementation-expert` |
+
+For each delegation:
+1. Invoke the agent via `@agent-name` with full task context and reference to the design doc
+2. Record the delegation:
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "<agent-name>"}'
+```
+
+3. Complete the task:
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/tasks/<index>/complete
@@ -159,16 +182,27 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 5: Verify
 
-Review all changes:
+Delegate review to specialized agents:
 
-1. **Code Quality** — functions max 50 lines, clear naming, no dead code, DRY
-2. **Correctness** — matches design doc and requirements, edge cases, tests exist
-3. **Security** — no secrets, input validation, parameterized queries, no injection
-4. **Governance** — check via `retrieve` MCP tool (corpus: governance)
+1. **Code review** — `@delivery-code-reviewer` for spec compliance, code quality, security, and test adequacy.
 
-Run all tests. If issues found → fix loop (back to implement, max 5 loops).
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-code-reviewer"}'
+```
 
-On pass:
+2. **Governance check** — `@delivery-governance-checker` with prompt: "Review implementation for governance compliance."
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+If **either** reviewer returns `[must_fix]` issues → fix loop: transition back to implement, delegate fix to the appropriate agent, re-verify (max 5 loops).
+
+On pass from both, transition to learn:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
@@ -180,9 +214,48 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 6: Learn
 
-Save memory events, create learning candidates and proposals (same as `/spec` learn phase).
+**Step 1 — Save memory events** (session discoveries, decisions):
 
-Complete:
+```bash
+# Via MCP tool (preferred)
+save_memory(text="...", type="decision|discovery|bugfix", tags=[...], importance=0.8)
+
+# Or direct API
+curl -sS -X POST $BASE/api/events \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "...", "type": "decision", "title": "...", "tags": ["..."]}'
+```
+
+**Step 2 — Write governance artifacts** (permanent, retrievable by future agents):
+
+| Artifact type | Write to |
+|--------------|----------|
+| New coding rule | `.claude/rules/<name>.md` |
+| Decision / ADR | `docs/decisions/<slug>-adr.md` |
+| Architecture note | `docs/architecture/<slug>.md` |
+
+Only write files for insights worth preserving long-term.
+
+**Step 2b — Register pattern candidates** (for patterns needing human review before becoming rules):
+
+```bash
+curl -sS -X POST $BASE/api/learning/candidates \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "detection_type": "pattern|antipattern|convention",
+    "description": "...",
+    "confidence": 0.8,
+    "files": ["path/to/relevant/file"]
+  }'
+```
+
+**Step 3 — Re-index governance** (only if you wrote files in Step 2):
+
+```bash
+curl -sS -X POST $BASE/api/retrieve/index
+```
+
+**Step 4 — Complete workflow:**
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
@@ -194,9 +267,11 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Rules
 
+- **NEVER** use write, edit, or bash on production source files directly.
+- Delegate ALL implementation work to delivery agents via `@mention`.
+- Doc/config files (`*.md`, `*.json`, `*.yaml`, `*.toml`) are exceptions — you may edit them.
 - Always produce a design document before implementing — never skip Phase 2.
-- Follow TDD for all implementation.
 - Always get user approval of the plan before implementing.
-- Check current state: `curl -sS $BASE/api/workflows/<slug>`
+- Check current state at any time: `curl -sS $BASE/api/workflows/<slug>`
 
 Implement the complex spec for: $ARGUMENTS
