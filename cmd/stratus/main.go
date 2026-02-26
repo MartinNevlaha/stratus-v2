@@ -494,6 +494,7 @@ func printInitSummary(target string) {
   /spec          — spec-driven development
   /spec-complex  — complex spec workflow
   /bug           — bug-fixing workflow
+  /swarm         — multi-agent swarm with file reservations + checkpointing
   /learn         — pattern learning
   /sync-stratus  — installation health check
   /team          — parallel delivery`
