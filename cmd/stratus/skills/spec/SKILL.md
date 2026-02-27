@@ -42,7 +42,15 @@ The Plan agent will return a step-by-step implementation plan with individual ta
 
 Use the Plan output to:
 1. Write the plan to `docs/plans/<slug>.md`
-2. Extract the ordered task list
+2. Push plan content to the dashboard:
+
+```bash
+curl -sS -X PUT $BASE/api/workflows/<slug>/plan \
+  -H 'Content-Type: application/json' \
+  -d "{\"content\": $(cat docs/plans/<slug>.md | jq -Rs .)}"
+```
+
+3. Extract the ordered task list
 
 - Delegate to `delivery-governance-checker` (Task tool) with prompt: "Review plan at docs/plans/<slug>.md for governance compliance."
 - Record delegation:

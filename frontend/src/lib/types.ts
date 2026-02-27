@@ -27,6 +27,8 @@ export interface WorkflowState {
   aborted: boolean
   title: string
   session_id?: string
+  plan_content?: string
+  design_content?: string
   created_at: string
   updated_at: string
 }

@@ -204,6 +204,50 @@ func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	json200(w, map[string]bool{"deleted": true})
 }
 
+func (s *Server) handleSetPlanContent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	state, err := s.coordinator.SetPlanContent(id, body.Content)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, orchestration.ErrWorkflowNotFound) {
+			status = http.StatusNotFound
+		}
+		jsonErr(w, status, err.Error())
+		return
+	}
+	s.hub.BroadcastJSON("workflow_updated", state)
+	json200(w, state)
+}
+
+func (s *Server) handleSetDesignContent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	state, err := s.coordinator.SetDesignContent(id, body.Content)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, orchestration.ErrWorkflowNotFound) {
+			status = http.StatusNotFound
+		}
+		jsonErr(w, status, err.Error())
+		return
+	}
+	s.hub.BroadcastJSON("workflow_updated", state)
+	json200(w, state)
+}
+
 func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	state, err := s.coordinator.Get(id)

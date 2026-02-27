@@ -13,6 +13,8 @@
   let confirmDelete = $state<string | null>(null)
   let copiedId = $state<string | null>(null)
   let expandedTasks = $state<Set<string>>(new Set())
+  let expandedPlans = $state<Set<string>>(new Set())
+  let expandedDesigns = $state<Set<string>>(new Set())
   let confirmTimer: ReturnType<typeof setTimeout> | null = null
 
   let activeWfs = $derived(allWorkflows.filter(w => !w.aborted && w.phase !== 'complete'))
@@ -326,6 +328,48 @@
           <div class="wf-title">{wf.title}</div>
         {/if}
         <PhaseTimeline type={wf.type} complexity={wf.complexity} currentPhase={wf.phase} />
+
+        <!-- Plan content -->
+        {#if wf.plan_content}
+          <div class="doc-section">
+            <button
+              class="doc-toggle"
+              onclick={() => {
+                const next = new Set(expandedPlans)
+                if (next.has(wf.id)) next.delete(wf.id)
+                else next.add(wf.id)
+                expandedPlans = next
+              }}
+            >
+              <span class="doc-icon">{expandedPlans.has(wf.id) ? '\u25BC' : '\u25B6'}</span>
+              Plan
+            </button>
+            {#if expandedPlans.has(wf.id)}
+              <div class="doc-content"><pre>{wf.plan_content}</pre></div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- Design content -->
+        {#if wf.design_content}
+          <div class="doc-section">
+            <button
+              class="doc-toggle"
+              onclick={() => {
+                const next = new Set(expandedDesigns)
+                if (next.has(wf.id)) next.delete(wf.id)
+                else next.add(wf.id)
+                expandedDesigns = next
+              }}
+            >
+              <span class="doc-icon">{expandedDesigns.has(wf.id) ? '\u25BC' : '\u25B6'}</span>
+              Design Document
+            </button>
+            {#if expandedDesigns.has(wf.id)}
+              <div class="doc-content"><pre>{wf.design_content}</pre></div>
+            {/if}
+          </div>
+        {/if}
 
         <!-- Resume buttons -->
         <div class="resume-row">
@@ -668,4 +712,23 @@
 
   /* Smooth status transitions on tickets */
   .ticket { transition: color 0.3s, opacity 0.3s; }
+
+  /* Plan/Design doc sections */
+  .doc-section { display: flex; flex-direction: column; gap: 0; }
+  .doc-toggle {
+    display: flex; align-items: center; gap: 6px;
+    background: none; border: none; color: #8b949e; cursor: pointer;
+    font-size: 12px; font-weight: 600; padding: 4px 0; text-align: left;
+  }
+  .doc-toggle:hover { color: #c9d1d9; }
+  .doc-icon { font-size: 10px; width: 12px; }
+  .doc-content {
+    max-height: 400px; overflow-y: auto;
+    background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+    padding: 12px; margin-top: 4px;
+  }
+  .doc-content pre {
+    margin: 0; font-size: 12px; color: #c9d1d9; white-space: pre-wrap;
+    word-break: break-word; font-family: monospace; line-height: 1.5;
+  }
 </style>

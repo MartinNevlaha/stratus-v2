@@ -26,6 +26,8 @@ type WorkflowState struct {
 	Aborted    bool              `json:"aborted"`
 	Title      string            `json:"title"`
 	SessionID  string            `json:"session_id,omitempty"` // Claude Code session that owns this workflow
+	PlanContent   string         `json:"plan_content,omitempty"`
+	DesignContent string         `json:"design_content,omitempty"`
 	CreatedAt  string            `json:"created_at"`
 	UpdatedAt  string            `json:"updated_at"`
 }
@@ -178,6 +180,26 @@ func (c *Coordinator) Abort(id string) (*WorkflowState, error) {
 		return nil, err
 	}
 	state.Aborted = true
+	return state, c.save(state)
+}
+
+// SetPlanContent stores the plan markdown content in the workflow state.
+func (c *Coordinator) SetPlanContent(id, content string) (*WorkflowState, error) {
+	state, err := c.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	state.PlanContent = content
+	return state, c.save(state)
+}
+
+// SetDesignContent stores the design document markdown content in the workflow state.
+func (c *Coordinator) SetDesignContent(id, content string) (*WorkflowState, error) {
+	state, err := c.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	state.DesignContent = content
 	return state, c.save(state)
 }
 

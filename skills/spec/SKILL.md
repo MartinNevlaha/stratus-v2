@@ -32,6 +32,14 @@ curl -sS -X POST $BASE/api/workflows \
 - Explore with Read, Grep, Glob — do NOT write code.
 - Delegate to specialized Task agents to draft the plan and task breakdown.
 - Write the plan to `docs/plans/<slug>.md`.
+- Push plan content to the dashboard:
+
+```bash
+curl -sS -X PUT $BASE/api/workflows/<slug>/plan \
+  -H 'Content-Type: application/json' \
+  -d "{\"content\": $(cat docs/plans/<slug>.md | jq -Rs .)}"
+```
+
 - Set tasks once finalized:
 
 ```bash

@@ -169,6 +169,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflows/{id}/tasks/{index}/complete", s.handleCompleteTask)
 	mux.HandleFunc("DELETE /api/workflows/{id}", s.handleDeleteWorkflow)
 	mux.HandleFunc("PATCH /api/workflows/{id}/session", s.handleSetWorkflowSession)
+	mux.HandleFunc("PUT /api/workflows/{id}/plan", s.handleSetPlanContent)
+	mux.HandleFunc("PUT /api/workflows/{id}/design", s.handleSetDesignContent)
 	mux.HandleFunc("GET /api/workflows/{id}/dispatch", s.handleDispatch)
 
 	// Learning
@@ -217,6 +219,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/swarm/missions/{id}/checkpoint", s.handleSaveCheckpoint)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/checkpoint/latest", s.handleGetLatestCheckpoint)
 	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
+
+	// Terminal
+	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)
 
 	// WebSocket
 	mux.HandleFunc("/api/ws", s.hub.ServeWS)

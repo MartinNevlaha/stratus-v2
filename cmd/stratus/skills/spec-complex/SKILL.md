@@ -81,6 +81,14 @@ Delegate based on what the spec requires:
 Typically: delegate to `delivery-system-architect` (always), + `delivery-strategic-architect` for technology decisions, + `delivery-ux-designer` for UI-heavy specs.
 
 - Produce a Technical Design Document at `docs/plans/<slug>-design.md`.
+- Push design content to the dashboard:
+
+```bash
+curl -sS -X PUT $BASE/api/workflows/<slug>/design \
+  -H 'Content-Type: application/json' \
+  -d "{\"content\": $(cat docs/plans/<slug>-design.md | jq -Rs .)}"
+```
+
 - Record delegation for each agent used.
 - Delegate to `delivery-governance-checker` (Task tool) with prompt: "Review design document at docs/plans/<slug>-design.md for governance compliance."
 - Record delegation:
@@ -115,7 +123,15 @@ The Plan agent will return a concrete, ordered implementation plan with individu
 
 Use the Plan output to:
 1. Write the plan to `docs/plans/<slug>.md`
-2. Extract the ordered task list
+2. Push plan content to the dashboard:
+
+```bash
+curl -sS -X PUT $BASE/api/workflows/<slug>/plan \
+  -H 'Content-Type: application/json' \
+  -d "{\"content\": $(cat docs/plans/<slug>.md | jq -Rs .)}"
+```
+
+3. Extract the ordered task list
 
 - Set tasks:
 
