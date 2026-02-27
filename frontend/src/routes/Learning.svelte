@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listProposals, decideProposal, listCandidates } from '$lib/api'
+  import { listProposals, decideProposal, listCandidates, saveProposal } from '$lib/api'
   import type { Proposal, Candidate } from '$lib/types'
   import { onMount } from 'svelte'
 
@@ -36,6 +36,24 @@
       }
     } catch (e) {
       decideError = e instanceof Error ? e.message : 'Failed to save decision'
+    }
+  }
+
+  async function promote(c: Candidate) {
+    decideError = null
+    try {
+      await saveProposal({
+        candidate_id: c.id,
+        type: c.detection_type,
+        title: c.description.slice(0, 120),
+        description: c.description,
+        proposed_content: '',
+        confidence: c.confidence,
+      })
+      await refresh()
+      tab = 'proposals'
+    } catch (e) {
+      decideError = e instanceof Error ? e.message : 'Failed to promote candidate'
     }
   }
 
@@ -114,6 +132,11 @@
             {#if c.files.length > 3}
               <span>+{c.files.length - 3} more</span>
             {/if}
+          </div>
+        {/if}
+        {#if c.status === 'pending'}
+          <div class="actions">
+            <button class="accept" onclick={() => promote(c)}>Promote to Proposal</button>
           </div>
         {/if}
       </div>

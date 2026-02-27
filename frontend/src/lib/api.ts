@@ -100,6 +100,16 @@ export const listProposals = (status?: string) =>
 export const decideProposal = (id: string, decision: string) =>
   post<{ status: string; applied: boolean }>(`/learning/proposals/${id}/decide`, { decision })
 
+export const saveProposal = (proposal: {
+  candidate_id: string
+  type: string
+  title: string
+  description: string
+  proposed_content: string
+  proposed_path?: string
+  confidence: number
+}) => post<{ id: string }>('/learning/proposals', proposal)
+
 // Swarm
 export const listMissions = () => get<SwarmMission[]>('/swarm/missions')
 export const getMission = (id: string) => get<SwarmMissionDetail>(`/swarm/missions/${id}`)
@@ -118,5 +128,14 @@ export async function transcribeAudio(blob: Blob): Promise<{ text: string }> {
   form.append('model', 'whisper-1')
   const res = await fetch(BASE + '/stt/transcribe', { method: 'POST', body: form })
   if (!res.ok) throw new Error(`STT error: ${res.status}`)
+  return res.json()
+}
+
+// Terminal image upload
+export async function uploadTerminalImage(blob: Blob, filename: string): Promise<{ path: string; filename: string }> {
+  const form = new FormData()
+  form.append('image', blob, filename)
+  const res = await fetch(BASE + '/terminal/upload-image', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(`Upload error: ${res.status}`)
   return res.json()
 }
