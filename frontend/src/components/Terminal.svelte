@@ -4,6 +4,8 @@
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
   import SttButton from './SttButton.svelte'
+  import ImageUploadToast from './ImageUploadToast.svelte'
+  import { uploadTerminalImage } from '$lib/api'
 
   let container: HTMLDivElement
   let term: Terminal
@@ -15,6 +17,11 @@
 
   // Auto-scroll: follow output unless the user has manually scrolled up.
   let autoScroll = true
+
+  // Image upload state
+  let uploading = $state(false)
+  let dragOver = $state(false)
+  let toastMessage = $state<string | null>(null)
 
   let fitTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -37,6 +44,23 @@
   function debouncedFit() {
     if (fitTimer) clearTimeout(fitTimer)
     fitTimer = setTimeout(() => fitAndNotify(), 80)
+  }
+
+  async function handleImageUpload(blob: Blob, filename: string) {
+    if (uploading) return
+    uploading = true
+    try {
+      const result = await uploadTerminalImage(blob, filename)
+      if (ws?.readyState === WebSocket.OPEN) {
+        autoScroll = true
+        ws.send(JSON.stringify({ type: 'input', data: { id: sessionId, data: result.path } }))
+      }
+      toastMessage = `Image: ${result.path}`
+    } catch (e) {
+      toastMessage = `Upload failed: ${e instanceof Error ? e.message : 'unknown error'}`
+    } finally {
+      uploading = false
+    }
   }
 
   onMount(() => {
@@ -103,11 +127,63 @@
       }
     })
 
+    // Intercept clipboard paste containing images.
+    // Text paste falls through to xterm's native handler.
+    const onPaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          e.stopPropagation()
+          const blob = item.getAsFile()
+          if (blob) {
+            const ext = item.type.split('/')[1] || 'png'
+            await handleImageUpload(blob, `paste.${ext}`)
+          }
+          return
+        }
+      }
+    }
+    container.addEventListener('paste', onPaste)
+
+    // Drag-and-drop image handling.
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        e.preventDefault()
+        dragOver = true
+      }
+    }
+    const onDragLeave = (e: DragEvent) => {
+      if (e.currentTarget === e.target || !container.contains(e.relatedTarget as Node)) {
+        dragOver = false
+      }
+    }
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault()
+      dragOver = false
+      const files = e.dataTransfer?.files
+      if (!files?.length) return
+      const file = files[0]
+      if (!file.type.startsWith('image/')) {
+        toastMessage = 'Only image files are supported'
+        return
+      }
+      await handleImageUpload(file, file.name)
+    }
+    container.addEventListener('dragover', onDragOver)
+    container.addEventListener('dragleave', onDragLeave)
+    container.addEventListener('drop', onDrop)
+
     return () => {
       resizeObs.disconnect()
       visObs.disconnect()
       viewport?.removeEventListener('scroll', onViewportScroll)
       window.removeEventListener('focus', onFocus)
+      container.removeEventListener('paste', onPaste)
+      container.removeEventListener('dragover', onDragOver)
+      container.removeEventListener('dragleave', onDragLeave)
+      container.removeEventListener('drop', onDrop)
       if (fitTimer) clearTimeout(fitTimer)
     }
   })
@@ -170,6 +246,9 @@
     <span class="status" class:connected>
       {connected ? '● Connected' : '○ Disconnected'}
     </span>
+    {#if uploading}
+      <span class="upload-status">Uploading image...</span>
+    {/if}
     {#if error}
       <span class="error">{error}</span>
     {/if}
@@ -177,7 +256,24 @@
       <SttButton onTranscript={handleTranscript} />
     </div>
   </div>
-  <div class="terminal-container" bind:this={container}></div>
+  <div class="terminal-container" bind:this={container}>
+    {#if dragOver}
+      <div class="drag-overlay">
+        <div class="drag-overlay-content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <span>Drop image here</span>
+        </div>
+      </div>
+    {/if}
+  </div>
+
+  {#if toastMessage}
+    <ImageUploadToast message={toastMessage} onDismiss={() => (toastMessage = null)} />
+  {/if}
 </div>
 
 <style>
@@ -210,6 +306,7 @@
   .status { color: #8b949e; }
   .status.connected { color: #3fb950; }
   .error { color: #f85149; }
+  .upload-status { color: #58a6ff; }
 
   .stt-slot {
     margin-left: auto;
@@ -222,6 +319,34 @@
     min-height: 0;
     overflow: hidden;
     padding: 4px;
+    position: relative;
+  }
+
+  .drag-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(56, 139, 253, 0.1);
+    border: 2px dashed #58a6ff;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  .drag-overlay-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: #58a6ff;
+    font-size: 14px;
+  }
+
+  .drag-overlay-content svg {
+    width: 32px;
+    height: 32px;
   }
 
   :global(.terminal-container .xterm) {
