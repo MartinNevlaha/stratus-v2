@@ -48,8 +48,17 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
   -d '{"phase": "discovery"}'
 ```
 
-- Explore the codebase with Read, Grep, Glob — do NOT write code.
-- Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis, constraints, technology landscape.
+**Codebase exploration — use the built-in Explore agent:**
+
+Delegate to the `Explore` agent via Agent tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+- Find all files, modules, and patterns relevant to the requirement
+- Identify existing conventions, utilities, and abstractions that should be reused
+- Map dependencies and integration points that the implementation will touch
+- Surface any architectural constraints or existing design decisions
+
+Do NOT write code during exploration.
+
+- Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis, constraints, technology landscape. Pass the Explore agent's findings as context.
 - Record delegation:
 
 ```bash

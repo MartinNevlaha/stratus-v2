@@ -29,13 +29,21 @@ curl -sS -X POST $BASE/api/workflows \
 ```
 
 - Use `complexity: "complex"` for multi-service, auth, database, or cross-cutting concerns; `"simple"` for everything else.
-- Explore with Read, Grep, Glob — do NOT write code.
+
+**Codebase exploration — use the built-in Explore agent:**
+
+Delegate to the `Explore` agent via Agent tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+- Find all files, modules, and patterns relevant to the requirement
+- Identify existing conventions, utilities, and abstractions that should be reused
+- Map dependencies and integration points that the implementation will touch
+
+Do NOT write code during exploration.
 
 **Task planning — use the built-in Plan subagent:**
 
-Delegate to the `Plan` subagent via Task tool (`subagent_type: "Plan"`). Pass full context:
+Delegate to the `Plan` subagent via Agent tool (`subagent_type: "Plan"`). Pass full context:
 - The requirement from `$ARGUMENTS`
-- Key files and directories discovered during exploration
+- Key files, directories, and patterns discovered by the Explore agent
 - Relevant architecture, patterns, and constraints found in the codebase
 
 The Plan agent will return a step-by-step implementation plan with individual tasks and critical files.
