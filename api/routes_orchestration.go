@@ -11,7 +11,7 @@ import (
 func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ID         string `json:"id"`
-		Type       string `json:"type"`       // "spec" | "bug"
+		Type       string `json:"type"`       // "spec" | "bug" | "e2e"
 		Complexity string `json:"complexity"` // "simple" | "complex"
 		Title      string `json:"title"`
 		SessionID  string `json:"session_id"` // Claude Code session — optional
@@ -27,6 +27,8 @@ func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 	wtype := orchestration.WorkflowSpec
 	if body.Type == "bug" {
 		wtype = orchestration.WorkflowBug
+	} else if body.Type == "e2e" {
+		wtype = orchestration.WorkflowE2E
 	}
 	complexity := orchestration.ComplexitySimple
 	if body.Complexity == "complex" {
