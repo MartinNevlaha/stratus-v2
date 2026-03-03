@@ -23,6 +23,11 @@ const (
 	PhaseAnalyze Phase = "analyze"
 	PhaseFix     Phase = "fix"
 	PhaseReview  Phase = "review"
+
+	// E2E phases
+	PhaseSetup    Phase = "setup"
+	PhaseGenerate Phase = "generate"
+	PhaseHeal     Phase = "heal"
 )
 
 // WorkflowType distinguishes spec vs bug workflows.
@@ -31,6 +36,7 @@ type WorkflowType string
 const (
 	WorkflowSpec WorkflowType = "spec"
 	WorkflowBug  WorkflowType = "bug"
+	WorkflowE2E  WorkflowType = "e2e"
 )
 
 // Complexity selects simple vs complex spec flow.
@@ -62,6 +68,13 @@ var validTransitions = map[WorkflowType]map[Phase][]Phase{
 		PhaseReview:  {PhaseFix, PhaseComplete}, // FIX = another iteration
 		PhaseComplete: {},
 	},
+	WorkflowE2E: {
+		PhaseSetup:    {PhasePlan},
+		PhasePlan:     {PhaseGenerate},
+		PhaseGenerate: {PhaseHeal},
+		PhaseHeal:     {PhaseGenerate, PhaseComplete}, // GENERATE = regeneration loop
+		PhaseComplete: {},
+	},
 }
 
 // ValidateTransition checks if transitioning from → to is allowed.
@@ -83,6 +96,8 @@ func InitialPhase(wtype WorkflowType) Phase {
 	switch wtype {
 	case WorkflowBug:
 		return PhaseAnalyze
+	case WorkflowE2E:
+		return PhaseSetup
 	default:
 		return PhasePlan
 	}

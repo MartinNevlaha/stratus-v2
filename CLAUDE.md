@@ -53,7 +53,7 @@ Stratus is a single-binary Claude Code extension framework. The binary embeds fo
 | `cmd/stratus` | CLI entry point; embeds static assets and writes them to disk on `init`/`refresh` |
 | `config` | Loads `.stratus.json` + env overrides into `Config` struct |
 | `db` | SQLite wrapper: schema, memory events, governance docs, learning, workflows, swarm |
-| `orchestration` | Phase state machine for `spec` and `bug` workflow types |
+| `orchestration` | Phase state machine for `spec`, `bug`, and `e2e` workflow types |
 | `swarm` | Multi-agent swarm: worktree management, dispatch engine, signal bus |
 | `api` | HTTP server, all REST routes, WebSocket hub, SPA handler |
 | `mcp` | MCP stdio server (JSON-RPC); proxies all tool calls to the HTTP API |
@@ -67,6 +67,7 @@ Stratus is a single-binary Claude Code extension framework. The binary embeds fo
 **Spec workflow** (simple): `plan → implement → verify → learn → complete`
 **Spec workflow** (complex): `plan → discovery → design → governance → accept → implement → verify → learn → complete`
 **Bug workflow**: `analyze → fix → review → complete` (review can loop back to fix)
+**E2E workflow**: `setup → plan → generate → heal → complete` (heal can loop back to generate)
 
 Phase transitions are validated by `orchestration.ValidateTransition()` before any state is persisted.
 

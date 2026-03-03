@@ -311,7 +311,7 @@
     {#each activeWfs as wf}
       <div class="workflow-card">
         <div class="workflow-header">
-          <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'}>{displayType(wf)}</span>
+          <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
           <span class="wf-id">{wf.id}</span>
           <span class="wf-phase">{wf.phase}</span>
           <div class="wf-actions">
@@ -463,7 +463,7 @@
     {#each pastWfs as wf}
       <div class="workflow-card past">
         <div class="workflow-header">
-          <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'}>{displayType(wf)}</span>
+          <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
           <span class="wf-id">{wf.id}</span>
           <span class="wf-phase" class:aborted={wf.aborted}>{wf.aborted ? 'aborted' : wf.phase}</span>
           <span class="wf-ts">{new Date(wf.updated_at).toLocaleDateString()}</span>
@@ -517,6 +517,7 @@
   .wf-type { font-size: 11px; text-transform: uppercase; font-weight: 700; color: #58a6ff; background: #1f3056; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
   .wf-type.swarm { color: #a371f7; background: #2d1f56; }
   .wf-type.bug { color: #f0883e; background: #3d2200; }
+  .wf-type.e2e { color: #3fb950; background: #0d3226; }
   .wf-id { font-size: 13px; font-weight: 600; color: #c9d1d9; flex: 1; }
   .wf-phase { font-size: 12px; color: #8b949e; }
   .wf-phase.aborted { color: #f85149; }

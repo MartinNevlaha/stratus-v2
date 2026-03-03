@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A production-grade AI development framework for Claude Code and OpenCode.</strong><br/>
-  Persistent memory · semantic retrieval · spec-driven orchestration · multi-agent swarms · voice input · live dashboard.
+  Persistent memory · semantic retrieval · spec-driven orchestration · multi-agent swarms · Playwright E2E testing · voice input · live dashboard.
 </p>
 
 <p align="center">
@@ -54,6 +54,7 @@ Out of the box, Claude Code and OpenCode have no memory across sessions, no stru
 - **Spec workflow** (simple): `plan → implement → verify → learn → complete`
 - **Spec workflow** (complex): `plan → discovery → design → governance → accept → implement → verify → learn → complete`
 - **Bug workflow**: `analyze → fix → review → complete` (review loops back to fix)
+- **E2E workflow**: `setup → plan → generate → heal → complete` (heal loops back to generate)
 - **Task tracking** — per-workflow task list with progress visible in dashboard
 - **Guard hooks** — `phase_guard` blocks invalid transitions, `delegation_guard` enforces agent rules
 
@@ -91,6 +92,26 @@ Pre-configured, automatically written to `.claude/agents/` or `.opencode/agents/
 | `delivery-ux-designer` | UX, accessibility, design systems |
 | `delivery-debugger` | Root cause analysis, bug hunting |
 | `delivery-implementation-expert` | Mixed/general implementation |
+
+### Playwright Test Agents (E2E)
+
+Autonomous end-to-end test creation and maintenance using [Playwright Test Agents](https://playwright.dev/docs/test-agents). Registered in `opencode.json` during `stratus init --target opencode`:
+
+| Agent | Role |
+|-------|------|
+| `playwright-test-planner` | Explores the app via browser, creates structured test plans in `specs/` |
+| `playwright-test-generator` | Converts plans into executable Playwright test files in `tests/` |
+| `playwright-test-healer` | Runs tests, diagnoses failures, auto-fixes broken selectors/timing/assertions |
+
+The `/e2e` command orchestrates the full flow:
+
+1. **Setup** — installs Playwright, creates `playwright.config.ts`, seed test, and `specs/` directory
+2. **Plan** — delegates to planner agent which navigates the app and writes test plans
+3. **Generate** — delegates to generator agent for each scenario (creates one test file per scenario)
+4. **Heal** — delegates to healer agent which runs all tests and fixes failures (loops back to generate if needed)
+5. **Complete** — reports summary with pass/fail status
+
+Each agent runs as an OpenCode subagent with fine-grained Playwright MCP tool permissions. The `playwright-test` MCP server (`npx playwright run-test-mcp-server`) provides browser control, verification, and test execution tools.
 
 ### Learning Pipeline
 1. **Detect** — agents save pattern candidates via MCP (`detection_type`, `confidence`, `files`)
@@ -168,6 +189,7 @@ open http://localhost:41777
 # Or in OpenCode:
 /spec add JWT authentication
 /swarm implement full auth system with refresh tokens
+/e2e create tests for the login flow
 ```
 
 Hooks are registered automatically — no manual `.claude/settings.json` edits needed.
@@ -184,6 +206,7 @@ Hooks are registered automatically — no manual `.claude/settings.json` edits n
 | `/spec-complex` | Extended spec with discovery, design, governance, and accept phases |
 | `/bug` | Bug-fixing workflow: analyze → fix → review → complete |
 | `/swarm` | Multi-agent parallel execution in isolated git worktrees |
+| `/e2e` | Playwright E2E testing: setup → plan → generate → heal |
 | `/learn` | Pattern learning: detect candidates, generate proposals |
 | `/resume` | Resume a workflow from where it left off |
 | `/code-review` | Deep code review with structured feedback |
@@ -206,6 +229,7 @@ Hooks are registered automatically — no manual `.claude/settings.json` edits n
 | `/spec-complex` | Full-phase spec workflow |
 | `/bug` | Bug-fixing workflow |
 | `/swarm` | Multi-agent coordination with file reservations + checkpointing |
+| `/e2e` | Playwright E2E testing: setup → plan → generate → heal |
 | `/learn` | Pattern learning pipeline |
 | `/team` | Team coordination and handoff |
 | `/sync-stratus` | Installation health check |
@@ -248,7 +272,7 @@ POST   /api/events/batch                 Batch fetch events by IDs
 
 ### Orchestration
 ```
-POST   /api/workflows                    Start workflow (spec | bug)
+POST   /api/workflows                    Start workflow (spec | bug | e2e)
 GET    /api/workflows                    List all workflows
 GET    /api/workflows/{id}               Get workflow state
 PUT    /api/workflows/{id}/phase         Transition phase
@@ -384,7 +408,7 @@ Set `stt.model` in `.stratus.json` to switch models. **Docker is only required f
 cmd/stratus/        CLI entry point — go:embed for skills, agents, rules, commands
 config/             Config loading (.stratus.json + env overrides)
 db/                 SQLite wrapper — all queries in one package
-orchestration/      Pure phase state machine (spec + bug workflows)
+orchestration/      Pure phase state machine (spec + bug + e2e workflows)
 swarm/              Swarm engine: worktree manager, dispatch, signal bus, store
 api/                HTTP server, all REST routes, WebSocket hub, SPA handler
 mcp/                MCP stdio server (JSON-RPC, 15 tools) — thin HTTP proxy

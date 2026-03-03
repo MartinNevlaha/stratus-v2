@@ -50,6 +50,9 @@ var commandsOpenCodeFS embed.FS
 //go:embed plugins-opencode
 var pluginsOpenCodeFS embed.FS
 
+//go:embed prompts-opencode
+var promptsOpenCodeFS embed.FS
+
 //go:embed rules
 var rulesFS embed.FS
 
@@ -431,6 +434,7 @@ func initOpenCode(wd string, allHashes map[string]string) {
 		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
 		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
+		{promptsOpenCodeFS, "prompts-opencode", filepath.Join(openCodeDir, "prompts")},
 	} {
 		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, nil)
 		if err != nil {
@@ -458,7 +462,8 @@ func printInitSummary(target string) {
   /find-bugs                   — systematic bug diagnosis (read-only)
   /security-review             — security audit (OWASP, secrets, injection)
   /frontend-design             — distinctive UI design guidance
-  /react-native-best-practices — React Native / Expo performance patterns`
+  /react-native-best-practices — React Native / Expo performance patterns
+  /e2e                         — Playwright E2E testing (setup→plan→generate→heal)`
 
 	const ccAgents = `Agents written to .claude/agents/:
   delivery-implementation-expert  — general-purpose implementation
@@ -494,10 +499,21 @@ func printInitSummary(target string) {
   /spec          — spec-driven development
   /spec-complex  — complex spec workflow
   /bug           — bug-fixing workflow
+  /e2e           — Playwright E2E testing (setup→plan→generate→heal)
   /swarm         — multi-agent swarm with file reservations + checkpointing
   /learn         — pattern learning
   /sync-stratus  — installation health check
   /team          — parallel delivery`
+
+	const ocPlaywright = `Playwright Test Agents registered in opencode.json:
+  playwright-test-planner    — explores app and creates test plans (specs/)
+  playwright-test-generator  — converts plans into Playwright test files (tests/)
+  playwright-test-healer     — runs tests and auto-fixes failures
+
+Prompts written to .opencode/prompts/:
+  playwright-test-planner.md
+  playwright-test-generator.md
+  playwright-test-healer.md`
 
 	const ocPlugin = `Plugin written to .opencode/plugin/stratus.ts:
   phase_guard — blocks write tools during verify/review phases
@@ -526,11 +542,13 @@ Statusline registered in .claude/settings.json — workflow status visible in Cl
 		fmt.Println()
 		fmt.Println(ocCommands)
 		fmt.Println()
+		fmt.Println(ocPlaywright)
+		fmt.Println()
 		fmt.Println(ocPlugin)
 		fmt.Println()
 		fmt.Println(rules)
 		fmt.Println()
-		fmt.Println("MCP server registered in opencode.json")
+		fmt.Println("MCP servers registered in opencode.json (stratus + playwright-test)")
 	case "both":
 		fmt.Println(ccAgents)
 		fmt.Println()
@@ -538,13 +556,15 @@ Statusline registered in .claude/settings.json — workflow status visible in Cl
 		fmt.Println()
 		fmt.Println(ocCommands)
 		fmt.Println()
+		fmt.Println(ocPlaywright)
+		fmt.Println()
 		fmt.Println(ocPlugin)
 		fmt.Println()
 		fmt.Println(rules)
 		fmt.Println()
 		fmt.Println(ccHooks)
 		fmt.Println()
-		fmt.Println("MCP server registered in .mcp.json (Claude Code) and opencode.json (OpenCode)")
+		fmt.Println("MCP servers registered in .mcp.json (Claude Code) and opencode.json (OpenCode + Playwright)")
 	default: // "claude-code"
 		fmt.Println(ccAgents)
 		fmt.Println()
@@ -812,6 +832,7 @@ func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[st
 		{agentsOpenCodeFS, "agents-opencode", filepath.Join(openCodeDir, "agents")},
 		{commandsOpenCodeFS, "commands-opencode", filepath.Join(openCodeDir, "commands")},
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
+		{promptsOpenCodeFS, "prompts-opencode", filepath.Join(openCodeDir, "prompts")},
 	} {
 		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, storedHashes)
 		if err != nil {
@@ -893,7 +914,109 @@ func writeOpenCodeConfig(projectRoot string) error {
 			"enabled": true,
 		}
 	}
+	if _, ok := mcpSection["playwright-test"]; !ok {
+		mcpSection["playwright-test"] = map[string]any{
+			"type":    "local",
+			"command": []string{"npx", "playwright", "run-test-mcp-server"},
+			"enabled": true,
+		}
+	}
 	existing["mcp"] = mcpSection
+
+	// Disable playwright tools globally — agents get explicit tool access.
+	toolsSection, _ := existing["tools"].(map[string]any)
+	if toolsSection == nil {
+		toolsSection = map[string]any{}
+	}
+	if _, ok := toolsSection["playwright*"]; !ok {
+		toolsSection["playwright*"] = false
+	}
+	existing["tools"] = toolsSection
+
+	// Register Playwright Test Agents with fine-grained tool permissions.
+	agentSection, _ := existing["agent"].(map[string]any)
+	if agentSection == nil {
+		agentSection = map[string]any{}
+	}
+	if _, ok := agentSection["playwright-test-planner"]; !ok {
+		agentSection["playwright-test-planner"] = map[string]any{
+			"description": "Use this agent when you need to create comprehensive test plan for a web application or website",
+			"mode":        "subagent",
+			"prompt":      "{file:.opencode/prompts/playwright-test-planner.md}",
+			"tools": map[string]any{
+				"ls": true, "glob": true, "grep": true, "read": true,
+				"playwright-test*browser_click":            true,
+				"playwright-test*browser_close":            true,
+				"playwright-test*browser_console_messages": true,
+				"playwright-test*browser_drag":             true,
+				"playwright-test*browser_evaluate":         true,
+				"playwright-test*browser_file_upload":      true,
+				"playwright-test*browser_handle_dialog":    true,
+				"playwright-test*browser_hover":            true,
+				"playwright-test*browser_navigate":         true,
+				"playwright-test*browser_navigate_back":    true,
+				"playwright-test*browser_network_requests": true,
+				"playwright-test*browser_press_key":        true,
+				"playwright-test*browser_run_code":         true,
+				"playwright-test*browser_select_option":    true,
+				"playwright-test*browser_snapshot":         true,
+				"playwright-test*browser_take_screenshot":  true,
+				"playwright-test*browser_type":             true,
+				"playwright-test*browser_wait_for":         true,
+				"playwright-test*planner_setup_page":       true,
+				"playwright-test*planner_save_plan":        true,
+			},
+		}
+	}
+	if _, ok := agentSection["playwright-test-generator"]; !ok {
+		agentSection["playwright-test-generator"] = map[string]any{
+			"description": "Use this agent when you need to create automated browser tests using Playwright",
+			"mode":        "subagent",
+			"prompt":      "{file:.opencode/prompts/playwright-test-generator.md}",
+			"tools": map[string]any{
+				"ls": true, "glob": true, "grep": true, "read": true,
+				"playwright-test*browser_click":                true,
+				"playwright-test*browser_drag":                 true,
+				"playwright-test*browser_evaluate":             true,
+				"playwright-test*browser_file_upload":          true,
+				"playwright-test*browser_handle_dialog":        true,
+				"playwright-test*browser_hover":                true,
+				"playwright-test*browser_navigate":             true,
+				"playwright-test*browser_press_key":            true,
+				"playwright-test*browser_select_option":        true,
+				"playwright-test*browser_snapshot":             true,
+				"playwright-test*browser_type":                 true,
+				"playwright-test*browser_verify_element_visible": true,
+				"playwright-test*browser_verify_list_visible":   true,
+				"playwright-test*browser_verify_text_visible":   true,
+				"playwright-test*browser_verify_value":          true,
+				"playwright-test*browser_wait_for":              true,
+				"playwright-test*generator_read_log":            true,
+				"playwright-test*generator_setup_page":          true,
+				"playwright-test*generator_write_test":          true,
+			},
+		}
+	}
+	if _, ok := agentSection["playwright-test-healer"]; !ok {
+		agentSection["playwright-test-healer"] = map[string]any{
+			"description": "Use this agent when you need to debug and fix failing Playwright tests",
+			"mode":        "subagent",
+			"prompt":      "{file:.opencode/prompts/playwright-test-healer.md}",
+			"tools": map[string]any{
+				"ls": true, "glob": true, "grep": true, "read": true,
+				"edit": true, "write": true,
+				"playwright-test*browser_console_messages":  true,
+				"playwright-test*browser_evaluate":          true,
+				"playwright-test*browser_generate_locator":  true,
+				"playwright-test*browser_network_requests":  true,
+				"playwright-test*browser_snapshot":          true,
+				"playwright-test*test_debug":                true,
+				"playwright-test*test_list":                 true,
+				"playwright-test*test_run":                  true,
+			},
+		}
+	}
+	existing["agent"] = agentSection
 
 	// Remove stale "plugins" key from older Stratus versions — OpenCode
 	// auto-discovers local plugins from .opencode/plugins/.

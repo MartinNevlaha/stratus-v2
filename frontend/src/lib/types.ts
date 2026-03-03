@@ -17,7 +17,7 @@ export interface Event {
 
 export interface WorkflowState {
   id: string
-  type: 'spec' | 'bug'
+  type: 'spec' | 'bug' | 'e2e'
   phase: string
   complexity: 'simple' | 'complex'
   delegated_agents: Record<string, string[]>

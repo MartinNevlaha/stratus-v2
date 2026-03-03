@@ -1,6 +1,6 @@
 <script lang="ts">
   interface Props {
-    type: 'spec' | 'bug'
+    type: 'spec' | 'bug' | 'e2e'
     complexity?: 'simple' | 'complex'
     currentPhase: string
   }
@@ -10,8 +10,10 @@
   const specSimplePhases  = ['plan', 'implement', 'verify', 'learn', 'complete']
   const specComplexPhases = ['discovery', 'design', 'plan', 'implement', 'verify', 'learn', 'complete']
   const bugPhases         = ['analyze', 'fix', 'review', 'complete']
+  const e2ePhases         = ['setup', 'plan', 'generate', 'heal', 'complete']
 
   let phases = $derived(
+    type === 'e2e'           ? e2ePhases :
     type === 'bug'           ? bugPhases :
     complexity === 'complex' ? specComplexPhases :
     specSimplePhases
