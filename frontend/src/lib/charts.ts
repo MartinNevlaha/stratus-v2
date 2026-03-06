@@ -2,47 +2,122 @@ import {
   Chart,
   ChartConfiguration,
   ChartType,
-  DefaultDataPoint,
   registerables,
 } from 'chart.js';
-import type { ChartData } from 'chart.js/dist/types/index';
-import { onMount } from 'svelte';
+
+Chart.register(...registerables);
 
 export function createLineChart(
   labels: string[],
-  datasets: ChartData[]
+  datasets: any[]
 ): ChartConfiguration {
+  return {
+    type: 'line',
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+    },
+  };
+}
+
 export function createBarChart(
   labels: string[],
-  datasets: ChartData[]
+  datasets: any[]
 ): ChartConfiguration {
+  return {
+    type: 'bar',
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+    },
+  };
+}
+
 export function createPieChart(
   labels: string[],
-  datasets: ChartData[]
-): ChartConfiguration;
-
-const chartRegistry: Map<string, ChartType> = new Map();
-
-onMount(() => {
-  register(Chart, 'line', LineController);
-  register(Chart, 'bar', BarController);
-  register(Chart, 'pie', PieController);
-  register(Chart, 'doughnut', DoughnutController);
-  register(Chart, 'radar', RadarController);
-});
+  datasets: any[]
+): ChartConfiguration {
+  return {
+    type: 'pie',
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+    },
+  };
+}
 
 function getChartColors(): string[] {
   return [
     '#3b82f6',
-    '#10b9818',
-    '#6b728a7',
-    '#f59e0b0',
+    '#10b981',
+    '#6b7280',
+    '#f59e0b',
+    '#ef4444',
+    '#8b5cf6',
+    '#ec4899',
+    '#6366f1',
+    '#9333ea',
+  ];
+}
+
+export function createBarChart(
+  labels: string[],
+  datasets: ChartData[]
+): ChartConfiguration {
+  return {
+    type: 'bar',
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+    },
+  };
+}
+
+export function createPieChart(
+  labels: string[],
+  datasets: ChartData[]
+): ChartConfiguration {
+  return {
+    type: 'pie',
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+    },
+  };
+}
+
+export function getChartColors(): string[] {
+  return [
+    '#3b82f6',
+    '#10b981',
+    '#6b7280',
+    '#f59e0b',
     '#ef4444',
     '#8b5cf6',
     '#ec4899',
     '#6366f1',
     '#9333ea',
     '#78716c',
-    '#22c55e5',
+    '#22c55e',
   ];
 }

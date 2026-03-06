@@ -180,24 +180,3 @@ export const getProjectMetrics = (project?: string, days = 30) =>
     days: String(days)
   })
 
-export const getWorkflowMetrics = (id: string) =>
-  get<WorkflowMetricsResponse>(`/workflows/${id}/metrics`)
-
-export const getDailyMetrics = (limit = 30) =>
-  get<DailyMetricsResponse>('/metrics/daily', { limit: String(limit) })
-
-export const getAgentMetrics = (agentId?: string, days = 30) =>
-  get<AgentMetricsResponse>('/metrics/agents', {
-    ...(agentId ? { agent_id: agentId } : {}),
-    days: String(days)
-  })
-
-export const getProjectMetrics = (project?: string, days = 30) =>
-  get<ProjectMetricsResponse>('/metrics/projects', {
-    ...(project ? { project } : {}),
-    days: String(days)
-  })
-
-export const triggerAggregation = () =>
-  post<{ status: string }>('/metrics/aggregate', {})
-
