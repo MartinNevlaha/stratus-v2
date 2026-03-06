@@ -56,9 +56,3 @@ func (e *Engine) Start() error {
 func (e *Engine) Stop() {
 	close(e.stopCh)
 }
-
-func (e *Engine) RunAnalysis() error {
-	// TODO: Implement full analysis logic
-	fmt.Printf("OpenClaw analysis run at %s\n", time.Now().Format(time.RFC3339))
-	return nil
-}
