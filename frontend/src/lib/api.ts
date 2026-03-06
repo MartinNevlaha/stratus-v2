@@ -180,3 +180,25 @@ export const getProjectMetrics = (project?: string, days = 30) =>
     days: String(days)
   })
 
+// OpenClaw
+export const getOpenClawStatus = () =>
+  get<{ enabled: boolean; state: any; metrics: any; recent_patterns: any[]; recent_analyses: any[] }>('/openclaw/status')
+
+export const triggerOpenClawAnalysis = () =>
+  post<{ status: string; message: string }>('/openclaw/trigger', {})
+
+export const getOpenClawPatterns = (type?: string, minConfidence?: number, limit?: number) => {
+  const params: Record<string, string> = {}
+  if (type) params.type = type
+  if (minConfidence) params.min_confidence = String(minConfidence)
+  if (limit) params.limit = String(limit)
+  return get<{ patterns: any[]; count: number }>('/openclaw/patterns', params)
+}
+
+export const getOpenClawAnalyses = (type?: string, limit?: number) => {
+  const params: Record<string, string> = {}
+  if (type) params.type = type
+  if (limit) params.limit = String(limit)
+  return get<{ analyses: any[]; count: number }>('/openclaw/analyses', params)
+}
+
