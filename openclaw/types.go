@@ -42,10 +42,6 @@ func NewEngine(database *db.DB, cfg config.OpenClawConfig) *Engine {
 	}
 }
 
-func (e *Engine) RunAnalysis() error {
-	return nil
-}
-
 func (e *Engine) Start() error {
 	state, err := e.database.GetOpenClawState()
 	if err != nil {
