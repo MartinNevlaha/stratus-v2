@@ -207,6 +207,38 @@ export interface AgentMetric {
   last_active: string
 }
 
+export interface Anomaly {
+  id: string
+  type: string
+  metric_name: string
+  actual_value: number
+  expected_value: number
+  deviation: number
+  severity: string
+  detected_at: string
+  description: string
+}
+
+export interface LiveMetricsUpdate {
+  summary: MetricsSummary
+  daily: DailyMetric[]
+  agents: AgentMetric[]
+  ts: number
+}
+
+export interface MetricsAnomalyAlert {
+  anomaly: Anomaly
+  ts: number
+  alert_msg: string
+}
+
+export interface MetricsAlert {
+  message: string
+  severity: string
+  count: number
+  ts: number
+}
+
 export interface ProjectMetric {
   project: string
   total_workflows: number
