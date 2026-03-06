@@ -15,21 +15,21 @@ var ErrWorkflowNotFound = errors.New("workflow not found")
 
 // WorkflowState is the full state of a workflow.
 type WorkflowState struct {
-	ID         string            `json:"id"`
-	Type       WorkflowType      `json:"type"`
-	Phase      Phase             `json:"phase"`
-	Complexity Complexity        `json:"complexity"`
-	Delegated  map[string][]string `json:"delegated_agents"` // phase → agent list
-	Tasks      []Task            `json:"tasks"`
-	CurrentTask *int             `json:"current_task,omitempty"`
-	TotalTasks  int              `json:"total_tasks"`
-	Aborted    bool              `json:"aborted"`
-	Title      string            `json:"title"`
-	SessionID  string            `json:"session_id,omitempty"` // Claude Code session that owns this workflow
-	PlanContent   string         `json:"plan_content,omitempty"`
-	DesignContent string         `json:"design_content,omitempty"`
-	CreatedAt  string            `json:"created_at"`
-	UpdatedAt  string            `json:"updated_at"`
+	ID            string              `json:"id"`
+	Type          WorkflowType        `json:"type"`
+	Phase         Phase               `json:"phase"`
+	Complexity    Complexity          `json:"complexity"`
+	Delegated     map[string][]string `json:"delegated_agents"` // phase → agent list
+	Tasks         []Task              `json:"tasks"`
+	CurrentTask   *int                `json:"current_task,omitempty"`
+	TotalTasks    int                 `json:"total_tasks"`
+	Aborted       bool                `json:"aborted"`
+	Title         string              `json:"title"`
+	SessionID     string              `json:"session_id,omitempty"` // Claude Code session that owns this workflow
+	PlanContent   string              `json:"plan_content,omitempty"`
+	DesignContent string              `json:"design_content,omitempty"`
+	CreatedAt     string              `json:"created_at"`
+	UpdatedAt     string              `json:"updated_at"`
 }
 
 // Task is a single work item within a workflow.
@@ -41,12 +41,16 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db *db.DB
+	db      *db.DB
+	metrics *MetricsCollector
 }
 
 // NewCoordinator creates a new coordinator.
 func NewCoordinator(db *db.DB) *Coordinator {
-	return &Coordinator{db: db}
+	return &Coordinator{
+		db:      db,
+		metrics: NewMetricsCollector(db),
+	}
 }
 
 // Start creates a new workflow or returns an existing one with the same ID.

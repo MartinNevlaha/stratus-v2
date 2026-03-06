@@ -1,0 +1,153 @@
+package db
+
+import (
+	"database/sql"
+	"encoding/json"
+)
+
+type DailyMetrics struct {
+	TotalWorkflows        int
+	CompletedWorkflows    int
+	AvgWorkflowDurationMs int
+	TotalTasks            int
+	CompletedTasks        int
+	SuccessRate           float64
+	MetricsJSON           string
+}
+
+func (d *DB) RecordMetric(workflowID, metricType, metricName string, value float64, metadata map[string]any) error {
+	var metadataJSON []byte
+	if metadata != nil {
+		var err error
+		metadataJSON, err = json.Marshal(metadata)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err := d.sql.Exec(`
+		INSERT INTO workflow_metrics (workflow_id, metric_type, metric_name, metric_value, metadata)
+		VALUES (?, ?, ?, ?, ?)
+	`, workflowID, metricType, metricName, value, string(metadataJSON))
+
+	return err
+}
+
+func (d *DB) GetWorkflowMetrics(workflowID string) (map[string]any, error) {
+	rows, err := d.sql.Query(`
+		SELECT metric_type, metric_name, metric_value, metadata, recorded_at
+		FROM workflow_metrics
+		WHERE workflow_id = ?
+		ORDER BY recorded_at ASC
+	`, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	metrics := []map[string]any{}
+	for rows.Next() {
+		var mType, mName, recordedAt string
+		var value float64
+		var metadataJSON []byte
+		if err := rows.Scan(&mType, &mName, &value, &metadataJSON, &recordedAt); err != nil {
+			return nil, err
+		}
+
+		var metadata map[string]any
+		if len(metadataJSON) > 0 {
+			json.Unmarshal(metadataJSON, &metadata)
+		}
+
+		metrics = append(metrics, map[string]any{
+			"type":        mType,
+			"name":        mName,
+			"value":       value,
+			"metadata":    metadata,
+			"recorded_at": recordedAt,
+		})
+	}
+
+	return map[string]any{
+		"workflow_id": workflowID,
+		"metrics":     metrics,
+	}, nil
+}
+
+func (d *DB) GetMetricsSummary(days int) (map[string]any, error) {
+	query := `
+		SELECT 
+			COALESCE(SUM(total_workflows), 0) as total_workflows,
+			COALESCE(SUM(completed_workflows), 0) as completed_workflows,
+			COALESCE(AVG(avg_workflow_duration_ms), 0) as avg_workflow_duration_ms,
+			COALESCE(SUM(total_tasks), 0) as total_tasks,
+			COALESCE(SUM(completed_tasks), 0) as completed_tasks
+		FROM daily_metrics
+		WHERE date(metric_date) >= date('now', '-' || ? || ' days')
+	`
+
+	var totalWorkflows, completedWorkflows, totalTasks, completedTasks int
+	var avgDuration float64
+
+	err := d.sql.QueryRow(query, days).Scan(
+		&totalWorkflows,
+		&completedWorkflows,
+		&avgDuration,
+		&totalTasks,
+		&completedTasks,
+	)
+
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	var successRate float64
+	if totalTasks > 0 {
+		successRate = float64(completedTasks) / float64(totalTasks)
+	}
+
+	return map[string]any{
+		"total_workflows":          totalWorkflows,
+		"completed_workflows":      completedWorkflows,
+		"avg_workflow_duration_ms": int(avgDuration),
+		"total_tasks":              totalTasks,
+		"completed_tasks":          completedTasks,
+		"success_rate":             successRate,
+	}, nil
+}
+
+func (d *DB) GetRecentDailyMetrics(limit int) ([]map[string]any, error) {
+	rows, err := d.sql.Query(`
+		SELECT metric_date, total_workflows, completed_workflows, 
+		       avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate
+		FROM daily_metrics
+		ORDER BY metric_date DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var date string
+		var dm DailyMetrics
+		if err := rows.Scan(&date, &dm.TotalWorkflows, &dm.CompletedWorkflows,
+			&dm.AvgWorkflowDurationMs, &dm.TotalTasks, &dm.CompletedTasks, &dm.SuccessRate); err != nil {
+			return nil, err
+		}
+
+		results = append(results, map[string]any{
+			"date":                     date,
+			"total_workflows":          dm.TotalWorkflows,
+			"completed_workflows":      dm.CompletedWorkflows,
+			"avg_workflow_duration_ms": dm.AvgWorkflowDurationMs,
+			"total_tasks":              dm.TotalTasks,
+			"completed_tasks":          dm.CompletedTasks,
+			"success_rate":             dm.SuccessRate,
+		})
+	}
+
+	return results, nil
+}
