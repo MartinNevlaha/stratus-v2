@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
@@ -39,4 +40,42 @@ func NewEngine(database *db.DB, cfg config.OpenClawConfig) *Engine {
 		monitor:   &Monitor{},
 		stopCh:    make(chan struct{}),
 	}
+}
+
+func (e *Engine) RunAnalysis() error {
+	return nil
+}
+
+func (e *Engine) Start() error {
+	state, err := e.database.GetOpenClawState()
+	if err != nil {
+		return fmt.Errorf("get state: %w", err)
+	}
+
+	if state == nil {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		state = &db.OpenClawState{
+			LastAnalysis:       now,
+			NextAnalysis:       now,
+			PatternsDetected:   0,
+			ProposalsGenerated: 0,
+			ProposalsAccepted:  0,
+			AcceptanceRate:     0,
+			ModelVersion:       "v1",
+			ConfigJSON:         "{}",
+		}
+
+		if err := e.database.SaveOpenClawState(state); err != nil {
+			return fmt.Errorf("init state: %w", err)
+		}
+	}
+
+	go e.scheduler.Start()
+
+	return nil
+}
+
+func (e *Engine) Stop() {
+	close(e.stopCh)
+	e.scheduler.Stop()
 }
