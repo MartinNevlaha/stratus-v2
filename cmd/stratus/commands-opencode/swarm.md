@@ -253,20 +253,12 @@ curl -sS -X PUT $BASE/api/swarm/missions/<mission-id>/status \
 
 Delegate to reviewers:
 
-1. **Code review** — `@delivery-code-reviewer` for quality and correctness.
+**Code review** — `@delivery-code-reviewer` for quality and correctness.
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -H 'Content-Type: application/json' \
   -d '{"agent_id": "delivery-code-reviewer"}'
-```
-
-2. **Governance check** — `@delivery-governance-checker` for compliance.
-
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-governance-checker"}'
 ```
 
 If `[must_fix]` issues → transition back to implement, create fix-up tickets, assign to appropriate worker, re-verify.

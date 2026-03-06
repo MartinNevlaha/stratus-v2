@@ -246,7 +246,7 @@ curl -sS -X PUT $BASE/api/swarm/missions/<mission-id>/status \
   -d '{"status": "verifying"}'
 ```
 
-Delegate to `delivery-code-reviewer` and `delivery-governance-checker` — spawn them in parallel in a single message. They should review the changes across all worker branches.
+Delegate to `delivery-code-reviewer` — spawn in background. They should review the changes across all worker branches.
 
 If `[must_fix]` issues are found → transition back to implement, create fix-up tickets, re-dispatch.
 On pass → transition to learn.

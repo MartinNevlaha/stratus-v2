@@ -152,17 +152,8 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -d '{"agent_id": "delivery-code-reviewer"}'
 ```
 
-- Also delegate to `delivery-governance-checker` (Task tool) with prompt: "Review implementation for governance compliance."
-- Record delegation:
-
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-governance-checker"}'
-```
-
-- If **either** reviewer returns `[must_fix]` issues → fix loop: transition back to implement, fix, re-verify.
-- On pass from both, transition to learn:
+- If reviewer returns `[must_fix]` issues → fix loop: transition back to implement, fix, re-verify.
+- On pass, transition to learn:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \

@@ -121,8 +121,8 @@ Continue until all tasks are done, then transition to verify.
 ---
 
 ### spec — `verify` phase
-Delegate to `delivery-code-reviewer` and `delivery-governance-checker` (Task tool).
-Record each delegation. If `[must_fix]` issues found → transition back to implement, fix, re-verify.
+Delegate to `delivery-code-reviewer` (Task tool).
+Record delegation. If `[must_fix]` issues found → transition back to implement, fix, re-verify.
 On pass → transition to learn.
 
 ---

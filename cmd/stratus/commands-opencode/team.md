@@ -122,22 +122,12 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 3: Verify
 
-Delegate review to specialized agents:
-
-1. **Code review** — `@delivery-code-reviewer` for quality, correctness, security, and test adequacy.
+**Code review** — `@delivery-code-reviewer` for quality, correctness, security, and test adequacy.
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -H 'Content-Type: application/json' \
   -d '{"agent_id": "delivery-code-reviewer"}'
-```
-
-2. **Governance check** — `@delivery-governance-checker` for governance compliance.
-
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-governance-checker"}'
 ```
 
 If `[must_fix]` issues → transition back to implement, delegate fix to appropriate agent, re-verify.
