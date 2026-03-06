@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/openclaw"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
@@ -31,6 +32,7 @@ type Server struct {
 	syncedVersion string   // version when assets were last refreshed to disk
 	skippedFiles  []string // asset files skipped in last refresh (user-customized)
 	swarm         *swarm.Store
+	openclaw      *openclaw.Engine
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -54,6 +56,7 @@ func NewServer(
 	syncedVersion string,
 	skippedFiles []string,
 	swarmStore *swarm.Store,
+	openclawEngine *openclaw.Engine,
 ) *Server {
 	s := &Server{
 		db:            database,
@@ -69,6 +72,7 @@ func NewServer(
 		syncedVersion: syncedVersion,
 		skippedFiles:  skippedFiles,
 		swarm:         swarmStore,
+		openclaw:      openclawEngine,
 		dirtyFiles:    make(map[string]struct{}),
 		dirtyCh:       make(chan struct{}, 1),
 	}
@@ -219,6 +223,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/swarm/missions/{id}/checkpoint", s.handleSaveCheckpoint)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/checkpoint/latest", s.handleGetLatestCheckpoint)
 	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
+
+	// OpenClaw
+	mux.HandleFunc("GET /api/openclaw/status", s.handleGetOpenClawStatus)
+	mux.HandleFunc("POST /api/openclaw/trigger", s.handleTriggerOpenClawAnalysis)
+	mux.HandleFunc("GET /api/openclaw/patterns", s.handleGetOpenClawPatterns)
+	mux.HandleFunc("GET /api/openclaw/analyses", s.handleGetOpenClawAnalyses)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)
