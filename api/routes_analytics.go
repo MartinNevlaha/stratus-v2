@@ -1,8 +1,8 @@
 package api
 
 import (
+	"log"
 	"net/http"
-	"strconv"
 )
 
 func (s *Server) handleGetMetricsSummary(w http.ResponseWriter, r *http.Request) {
