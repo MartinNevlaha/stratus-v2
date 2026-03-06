@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -32,6 +33,7 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 	if useCode && s.vexor.Available() {
 		hits, err := s.vexor.Search(query, topK, "auto")
 		if err == nil {
+			log.Printf("[vexor search] query=%q results=%d", query, len(hits))
 			for _, h := range hits {
 				results = append(results, result{
 					Source:   "code",
@@ -41,12 +43,15 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 					Score:    h.Score,
 				})
 			}
+		} else {
+			log.Printf("[vexor search] query=%q error=%v", query, err)
 		}
 	}
 
 	if useGov {
 		docs, err := s.db.SearchDocs(query, "", s.projectRoot, topK)
 		if err == nil {
+			log.Printf("[governance search] query=%q results=%d", query, len(docs))
 			for _, d := range docs {
 				results = append(results, result{
 					Source:   "governance",
@@ -57,6 +62,8 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 					DocType:  d.DocType,
 				})
 			}
+		} else {
+			log.Printf("[governance search] query=%q error=%v", query, err)
 		}
 	}
 
