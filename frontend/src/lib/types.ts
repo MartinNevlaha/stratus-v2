@@ -207,6 +207,18 @@ export interface AgentMetric {
   last_active: string
 }
 
+export interface Anomaly {
+  id: string
+  type: string
+  metric_name: string
+  actual_value: number
+  expected_value: number
+  deviation: number
+  severity: string
+  detected_at: string
+  description: string
+}
+
 export interface ProjectMetric {
   project: string
   total_workflows: number
@@ -235,4 +247,35 @@ export interface AgentMetricsResponse {
 
 export interface ProjectMetricsResponse {
   projects: ProjectMetric[]
+}
+
+// Real-time metrics types
+export interface LiveMetricsUpdate {
+  summary: MetricsSummary
+  daily: DailyMetric[]
+  agents: AgentMetric[]
+  ts: number
+}
+
+export interface MetricsAnomalyAlert {
+  anomaly: {
+    id: string
+    type: string
+    metric_name: string
+    actual_value: number
+    expected_value: number
+    deviation: number
+    severity: string
+    detected_at: string
+    description: string
+  }
+  ts: number
+  alert_msg: string
+}
+
+export interface MetricsAlert {
+  message: string
+  severity: string
+  count: number
+  ts: number
 }

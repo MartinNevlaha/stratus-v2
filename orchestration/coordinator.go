@@ -71,7 +71,11 @@ func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 		UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+	c.metrics.RecordWorkflowStart(id, string(wtype))
+	return state, nil
 }
 
 // Get retrieves a workflow by ID.
@@ -115,8 +119,24 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	if err := ValidateTransition(state.Type, state.Phase, to); err != nil {
 		return nil, err
 	}
+	fromPhase := state.Phase
+	createdAt, _ := time.Parse(time.RFC3339Nano, state.CreatedAt)
+	updatedAt, _ := time.Parse(time.RFC3339Nano, state.UpdatedAt)
+	phaseDuration := updatedAt.Sub(createdAt)
+
 	state.Phase = to
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+
+	c.metrics.RecordPhaseTransition(id, string(fromPhase), string(to), phaseDuration)
+
+	if to == PhaseComplete {
+		totalDuration := time.Since(createdAt)
+		c.metrics.RecordWorkflowComplete(id, totalDuration, true)
+	}
+
+	return state, nil
 }
 
 // RecordDelegation records an agent delegation for the current phase.
@@ -132,7 +152,11 @@ func (c *Coordinator) RecordDelegation(id, agentID string) (*WorkflowState, erro
 		}
 	}
 	state.Delegated[phase] = append(state.Delegated[phase], agentID)
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+	c.metrics.RecordDelegation(id, agentID, state.Phase)
+	return state, nil
 }
 
 // SetTasks sets the task list for a workflow.
@@ -174,7 +198,11 @@ func (c *Coordinator) CompleteTask(id string, index int) (*WorkflowState, error)
 	}
 	state.Tasks[index].Status = "done"
 	state.CurrentTask = nil
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+	c.metrics.RecordTaskComplete(id, index, "", 0, true)
+	return state, nil
 }
 
 // Abort marks a workflow as aborted.

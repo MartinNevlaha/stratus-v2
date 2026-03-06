@@ -20,12 +20,13 @@ type SyncState struct {
 
 // Config holds the stratus configuration.
 type Config struct {
-	Port        int         `json:"port"`
-	DataDir     string      `json:"data_dir"`
-	ProjectRoot string      `json:"project_root"`
-	Vexor       VexorConfig `json:"vexor"`
-	STT         STTConfig   `json:"stt"`
-	SyncState   *SyncState  `json:"sync_state,omitempty"`
+	Port                     int         `json:"port"`
+	DataDir                  string      `json:"data_dir"`
+	ProjectRoot              string      `json:"project_root"`
+	Vexor                    VexorConfig `json:"vexor"`
+	STT                      STTConfig   `json:"stt"`
+	SyncState                *SyncState  `json:"sync_state,omitempty"`
+	MetricsBroadcastInterval int         `json:"metrics_broadcast_interval"`
 }
 
 // VexorConfig configures the Vexor code search backend.
@@ -58,6 +59,7 @@ func Default() Config {
 			Endpoint: "http://localhost:8011",
 			Model:    "Systran/faster-whisper-small",
 		},
+		MetricsBroadcastInterval: 30,
 	}
 }
 

@@ -45,6 +45,12 @@ func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
+	s.hub.BroadcastJSON("workflow_started", map[string]any{
+		"workflow_id": body.ID,
+		"type":        body.Type,
+		"complexity":  body.Complexity,
+		"title":       body.Title,
+	})
 	json200(w, state)
 }
 
@@ -73,6 +79,16 @@ func (s *Server) handleTransitionPhase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
+	s.hub.BroadcastJSON("phase_changed", map[string]any{
+		"workflow_id": id,
+		"phase":       body.Phase,
+	})
+	if body.Phase == "complete" {
+		s.hub.BroadcastJSON("workflow_completed", map[string]any{
+			"workflow_id": id,
+			"success":     true,
+		})
+	}
 	json200(w, state)
 }
 
@@ -141,6 +157,10 @@ func (s *Server) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
+	s.hub.BroadcastJSON("task_completed", map[string]any{
+		"workflow_id": id,
+		"task_index":  index,
+	})
 	json200(w, state)
 }
 
@@ -263,12 +283,12 @@ func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {
 		delegated = []string{}
 	}
 	json200(w, map[string]any{
-		"workflow_id":       id,
-		"type":              state.Type,
-		"phase":             phase,
-		"delegated_agents":  delegated,
-		"total_tasks":       state.TotalTasks,
-		"current_task":      state.CurrentTask,
-		"tasks":             state.Tasks,
+		"workflow_id":      id,
+		"type":             state.Type,
+		"phase":            phase,
+		"delegated_agents": delegated,
+		"total_tasks":      state.TotalTasks,
+		"current_task":     state.CurrentTask,
+		"tasks":            state.Tasks,
 	})
 }

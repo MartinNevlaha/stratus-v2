@@ -64,6 +64,91 @@ func (d *DB) migrate() error {
 var migrations = []string{
 	`ALTER TABLE missions ADD COLUMN strategy TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE missions ADD COLUMN strategy_outcome TEXT NOT NULL DEFAULT '{}'`,
+	`
+CREATE TABLE IF NOT EXISTS workflow_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id TEXT NOT NULL,
+    metric_type TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    metric_value REAL NOT NULL,
+    metadata TEXT,
+    recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_metrics_type ON workflow_metrics(metric_type)`,
+	`CREATE INDEX IF NOT EXISTS idx_metrics_name ON workflow_metrics(metric_name)`,
+	`CREATE INDEX IF NOT EXISTS idx_metrics_workflow ON workflow_metrics(workflow_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_metrics_recorded ON workflow_metrics(recorded_at)`,
+	`
+CREATE TABLE IF NOT EXISTS daily_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric_date TEXT NOT NULL UNIQUE,
+    total_workflows INTEGER DEFAULT 0,
+    completed_workflows INTEGER DEFAULT 0,
+    avg_workflow_duration_ms INTEGER DEFAULT 0,
+    total_tasks INTEGER DEFAULT 0,
+    completed_tasks INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0,
+    metrics_json TEXT,
+    computed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    last_analysis TEXT NOT NULL,
+    next_analysis TEXT NOT NULL,
+    patterns_detected INTEGER DEFAULT 0,
+    proposals_generated INTEGER DEFAULT 0,
+    proposals_accepted INTEGER DEFAULT 0,
+    acceptance_rate REAL DEFAULT 0,
+    model_version TEXT NOT NULL DEFAULT 'v1',
+    config_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M-%fZ', 'now'))
+)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_type TEXT NOT NULL,
+    pattern_name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    frequency INTEGER DEFAULT 1,
+    confidence REAL NOT NULL,
+    examples_json TEXT,
+    metadata_json TEXT,
+    last_seen TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_type ON openclaw_patterns(pattern_type)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_confidence ON openclaw_patterns(confidence DESC)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL,
+    feedback_type TEXT NOT NULL,
+    reason TEXT,
+    impact_score REAL,
+    measured_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (proposal_id) REFERENCES proposals(id)
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_feedback_proposal ON openclaw_feedback(proposal_id)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_analyses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_type TEXT NOT NULL,
+    scope TEXT,
+    findings_json TEXT NOT NULL,
+    recommendations_json TEXT,
+    patterns_found INTEGER DEFAULT 0,
+    proposals_created INTEGER DEFAULT 0,
+    execution_time_ms INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_type ON openclaw_analyses(analysis_type)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_created ON openclaw_analyses(created_at DESC)`,
 }
 
 func isDuplicateColumn(err error) bool {

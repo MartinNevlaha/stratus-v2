@@ -183,6 +183,18 @@ func (s *Server) Handler() http.Handler {
 	// Dashboard
 	mux.HandleFunc("GET /api/dashboard/state", s.handleDashboardState)
 
+	// Analytics & Metrics
+	mux.HandleFunc("GET /api/metrics/summary", s.handleGetMetricsSummary)
+	mux.HandleFunc("GET /api/metrics/daily", s.handleGetDailyMetrics)
+	mux.HandleFunc("GET /api/metrics/agents", s.handleGetAgentMetrics)
+	mux.HandleFunc("GET /api/metrics/workflows/{id}", s.handleGetWorkflowMetrics)
+	mux.HandleFunc("GET /api/metrics/export", s.handleExportMetrics)
+	mux.HandleFunc("POST /api/metrics/aggregate", s.handleTriggerAggregation)
+	mux.HandleFunc("GET /api/metrics/report/{type}", s.handleGetReport)
+	mux.HandleFunc("GET /api/metrics/predictions", s.handleGetPredictions)
+	mux.HandleFunc("GET /api/metrics/anomalies", s.handleGetAnomalies)
+	mux.HandleFunc("GET /api/metrics/trends", s.handleGetTrends)
+
 	// System
 	mux.HandleFunc("GET /api/system/version", s.handleVersion)
 	mux.HandleFunc("POST /api/system/update", s.handleUpdate)

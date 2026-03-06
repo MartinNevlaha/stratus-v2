@@ -1,4 +1,4 @@
-import type { DashboardState, VersionInfo } from './types'
+import type { DashboardState, VersionInfo, LiveMetricsUpdate, MetricsAnomalyAlert, MetricsAlert, Anomaly } from './types'
 import { getDashboardState, getVersion, triggerUpdate } from './api'
 import { wsClient } from './ws'
 
@@ -17,6 +17,11 @@ interface AppState {
   // Analytics real-time updates
   analyticsUpdateCounter: number
   lastMetricsUpdate: number
+  // Real-time metrics
+  liveMetrics: LiveMetricsUpdate | null
+  metricsLive: boolean
+  activeAnomalies: Anomaly[]
+  lastMetricsAlert: MetricsAlert | null
 }
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
@@ -34,7 +39,11 @@ export const appState: AppState = $state({
   swarmUpdateCounter: 0,
   lastHeartbeats: {},
   analyticsUpdateCounter: 0,
-  lastMetricsUpdate: 0
+  lastMetricsUpdate: 0,
+  liveMetrics: null,
+  metricsLive: false,
+  activeAnomalies: [],
+  lastMetricsAlert: null
 })
 
 export async function refreshDashboard() {
@@ -142,6 +151,24 @@ export function initStore() {
     const data = msg.payload as { id?: string; ts?: string } | undefined
     if (data?.id) appState.lastHeartbeats[data.id] = Date.now()
     emitSwarmUpdate()
+  })
+
+  // Real-time metrics updates
+  wsClient.on('metrics_update', (msg) => {
+    appState.liveMetrics = msg.payload as LiveMetricsUpdate
+    appState.metricsLive = true
+    appState.lastMetricsUpdate = Date.now()
+  })
+
+  wsClient.on('metrics_anomaly', (msg) => {
+    const data = msg.payload as MetricsAnomalyAlert
+    if (data.anomaly) {
+      appState.activeAnomalies.push(data.anomaly)
+    }
+  })
+
+  wsClient.on('metrics_alert', (msg) => {
+    appState.lastMetricsAlert = msg.payload as MetricsAlert
   })
 
   refreshDashboard()

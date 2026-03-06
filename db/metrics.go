@@ -151,3 +151,52 @@ func (d *DB) GetRecentDailyMetrics(limit int) ([]map[string]any, error) {
 
 	return results, nil
 }
+
+func (d *DB) GetAgentMetrics(days int) ([]map[string]any, error) {
+	query := `
+		SELECT 
+			metadata->>'$.agent_id' as agent_id,
+			COUNT(*) as tasks_completed,
+			AVG(metric_value) as avg_task_duration_ms,
+			SUM(CASE WHEN metric_value = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as success_rate,
+			MAX(recorded_at) as last_active
+		FROM workflow_metrics
+		WHERE metric_name = 'task_completed'
+		  AND metadata != ''
+		  AND metadata != 'null'
+		  AND metadata->>'$.agent_id' IS NOT NULL
+		  AND metadata->>'$.agent_id' != ''
+		  AND date(recorded_at) >= date('now', '-' || ? || ' days')
+		GROUP BY metadata->>'$.agent_id'
+		ORDER BY tasks_completed DESC
+	`
+
+	rows, err := d.sql.Query(query, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var agentID string
+		var tasksCompleted int
+		var avgDuration float64
+		var successRate float64
+		var lastActive string
+
+		if err := rows.Scan(&agentID, &tasksCompleted, &avgDuration, &successRate, &lastActive); err != nil {
+			return nil, err
+		}
+
+		results = append(results, map[string]any{
+			"agent_id":             agentID,
+			"tasks_completed":      tasksCompleted,
+			"avg_task_duration_ms": int(avgDuration),
+			"success_rate":         successRate,
+			"last_active":          lastActive,
+		})
+	}
+
+	return results, nil
+}
