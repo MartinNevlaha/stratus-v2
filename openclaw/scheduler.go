@@ -1,25 +1,27 @@
 package openclaw
 
 import (
-	"fmt"
 	"time"
 )
 
-func NewScheduler(engine *Engine) *Scheduler {
-	return &Scheduler{
-		engine: engine,
-		ticker: time.NewTicker(time.Duration(engine.config.Interval) * time.Hour),
-		stopCh: make(chan struct{}),
-	}
+type Scheduler struct {
+	engine *Engine
+	ticker *time.Ticker
+	stopCh chan struct{}
 }
 
 func (s *Scheduler) Start() {
+	if s.engine.config.Interval <= 0 {
+		s.engine.config.Interval = 1
+	}
+
+	s.ticker = time.NewTicker(time.Duration(s.engine.config.Interval) * time.Hour)
+	defer s.ticker.Stop()
+
 	for {
 		select {
 		case <-s.ticker.C:
-			if err := s.engine.RunAnalysis(); err != nil {
-				fmt.Printf("OpenClaw analysis error: %v\n", err)
-			}
+			s.engine.RunAnalysis()
 		case <-s.stopCh:
 			return
 		}
