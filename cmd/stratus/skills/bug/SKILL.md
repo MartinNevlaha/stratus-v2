@@ -27,6 +27,8 @@ curl -sS -X POST $BASE/api/workflows \
   -d "{\"id\": \"bug-$SLUG\", \"type\": \"bug\", \"title\": \"$ARGUMENTS\", \"session_id\": \"${CLAUDE_SESSION_ID}\"}"
 ```
 
+### 1a. Explore & Diagnose
+
 - Explore the codebase: Read error messages, stack traces, logs.
 - Delegate to `delivery-debugger` (Task tool) for root cause analysis.
 - Record delegation:
@@ -37,8 +39,55 @@ curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
   -d '{"agent_id": "delivery-debugger"}'
 ```
 
-- **Present diagnosis to user via AskUserQuestion. Get explicit approval before fixing.**
-- On approval, transition to fix:
+The debugger will return a structured diagnosis with symptom, root cause, classification, evidence, and recommended fix.
+
+### 1b. Assess Severity — Intelligent Decision
+
+Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
+
+**TRIVIAL (skip to fix):**
+- Single file change, isolated scope
+- No architecture or API changes
+- No database migrations or data transformations
+- No security implications
+- No cross-service dependencies
+- Fix is obvious and localized
+
+**COMPLEX (plan first):**
+- Multiple files or components affected
+- Architecture or design changes required
+- Database schema changes or data migrations
+- Security vulnerabilities or auth changes
+- Cross-service or cross-cutting concerns
+- Risk of regressions in other areas
+- Unclear fix approach or multiple options
+
+### 1c. Plan (if COMPLEX)
+
+If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "plan"`):
+
+Pass full context:
+- The bug description from `$ARGUMENTS`
+- Debugger's diagnosis and root cause
+- Affected files and components
+- Recommended fix approach
+
+The Plan agent will return:
+- Ordered fix steps
+- Files to modify with changes needed
+- Test coverage requirements
+- Risk mitigation strategies
+
+Present the plan to the user via AskUserQuestion. **Wait for explicit approval.**
+
+### 1d. User Approval & Transition
+
+**Present diagnosis to user via AskUserQuestion.**
+
+- If TRIVIAL: Get approval to proceed directly to fix
+- If COMPLEX: Get approval for the plan
+
+On approval, transition to fix:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
