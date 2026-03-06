@@ -33,24 +33,83 @@ curl -sS -X POST $BASE/api/workflows \
        \"session_id\": \"${CLAUDE_SESSION_ID}\"}"
 ```
 
-Then:
-1. Explore the codebase (Read, Glob, Grep) to understand the relevant context.
-2. Delegate planning to `delivery-system-architect` (Task tool) — task breakdown, dependencies, domain assignment.
-3. Design the ticket breakdown. Each ticket should have:
-   - **title**: concise name
-   - **description**: full implementation details, file paths, acceptance criteria
-   - **domain**: `backend` | `frontend` | `database` | `tests` | `infra` | `architecture` | `general`
-   - **priority**: 0 = highest (do first), higher = later
-   - **depends_on**: array of ticket IDs this ticket depends on (use for ordering)
+### 1a. Explore — built-in Explore agent
 
-4. Create the mission:
+**Delegate to the built-in `Explore` agent** (Task tool, `subagent_type: "explore"`) with thoroughness `"very thorough"`:
+
+Pass the requirement from `$ARGUMENTS` and ask it to:
+- Find all files, modules, and patterns relevant to the requirement
+- Identify existing conventions, utilities, and abstractions that should be reused
+- Map dependencies and integration points
+- Surface any architectural constraints or existing design decisions
+
+Do NOT write code during exploration.
+
+### 1b. Architecture — `delivery-system-architect`
+
+Pass the Explore agent's findings as context.
+
+**Delegate to `delivery-system-architect`** (Task tool) with prompt:
+- Task breakdown, dependencies, domain assignment
+- Component boundaries and API contracts
+- Data models and integration points
+- Identify which domains (backend/frontend/database/tests/infra) are needed
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-system-architect"}'
+```
+
+### 1c. UX Design — `delivery-ux-designer` (if needed)
+
+**Only if the feature has significant UI/UX components**, delegate to `delivery-ux-designer` (Task tool):
+
+- Component hierarchy and design system integration
+- User flow and interaction patterns
+- Design tokens and styling conventions
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-ux-designer"}'
+```
+
+Skip this step for backend-only, infra, or database-focused work.
+
+### 1d. Plan — built-in Plan agent
+
+**Delegate to the built-in `Plan` agent** (Task tool, `subagent_type: "plan"`):
+
+Pass full context:
+- The requirement from `$ARGUMENTS`
+- Explore agent's findings
+- System architect's component design
+- UX designer's component hierarchy (if applicable)
+
+The Plan agent will return:
+- Ordered implementation steps
+- Ticket breakdown with domains and priorities
+- Dependencies between tickets
+- Critical files for each ticket
+
+### 1e. Design the ticket breakdown
+
+Each ticket should have:
+- **title**: concise name
+- **description**: full implementation details, file paths, acceptance criteria
+- **domain**: `backend` | `frontend` | `database` | `tests` | `infra` | `architecture` | `general`
+- **priority**: 0 = highest (do first), higher = later
+- **depends_on**: array of ticket IDs this ticket depends on (use for ordering)
+
+### 1f. Create the mission
    ```bash
    curl -sS -X POST $BASE/api/swarm/missions \
      -H 'Content-Type: application/json' \
      -d '{"workflow_id": "<slug>", "title": "<title>", "base_branch": "main"}'
    ```
 
-5. Create tickets (batch):
+### 1g. Create tickets (batch):
    ```bash
    curl -sS -X POST $BASE/api/swarm/missions/<mission-id>/tickets/batch \
      -H 'Content-Type: application/json' \
@@ -60,7 +119,9 @@ Then:
      ]}'
    ```
 
-6. Present the plan to the user. **Wait for explicit approval** before proceeding.
+### 1h. Present the plan
+
+Present the plan to the user. **Wait for explicit approval** before proceeding.
 
 Transition to implement:
 ```bash

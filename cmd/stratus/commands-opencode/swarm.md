@@ -28,12 +28,27 @@ curl -sS -X POST $BASE/api/workflows \
   -d '{"id": "<slug>", "type": "spec", "complexity": "simple", "title": "[SWARM] $ARGUMENTS"}'
 ```
 
-### 1a. Explore & Analyze
+### 1a. Explore — built-in Explore agent
 
-1. Explore the codebase (read, glob, grep) to understand the relevant context.
-2. Use `retrieve` MCP tool (corpus: code) for pattern discovery.
-3. Use `retrieve` MCP tool (corpus: governance) for rules and ADRs.
-4. Delegate architecture exploration to `@delivery-system-architect` — task breakdown, dependencies, domain assignment.
+**Delegate to the built-in `Explore` agent** (Task tool, `subagent_type: "explore"`) with thoroughness `"very thorough"`:
+
+Pass the requirement from `$ARGUMENTS` and ask it to:
+- Find all files, modules, and patterns relevant to the requirement
+- Identify existing conventions, utilities, and abstractions that should be reused
+- Map dependencies and integration points
+- Surface any architectural constraints or existing design decisions
+
+Do NOT write code during exploration.
+
+### 1b. Architecture — `@delivery-system-architect`
+
+Pass the Explore agent's findings as context.
+
+**Delegate to `@delivery-system-architect`** with prompt:
+- Task breakdown, dependencies, domain assignment
+- Component boundaries and API contracts
+- Data models and integration points
+- Identify which domains (backend/frontend/database/tests/infra) are needed
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
@@ -41,7 +56,39 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -d '{"agent_id": "delivery-system-architect"}'
 ```
 
-### 1b. Choose decomposition strategy
+### 1c. UX Design — `@delivery-ux-designer` (if needed)
+
+**Only if the feature has significant UI/UX components**, delegate to `@delivery-ux-designer`:
+
+- Component hierarchy and design system integration
+- User flow and interaction patterns
+- Design tokens and styling conventions
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-ux-designer"}'
+```
+
+Skip this step for backend-only, infra, or database-focused work.
+
+### 1d. Plan — built-in Plan agent
+
+**Delegate to the built-in `Plan` agent** (Task tool, `subagent_type: "plan"`):
+
+Pass full context:
+- The requirement from `$ARGUMENTS`
+- Explore agent's findings
+- System architect's component design
+- UX designer's component hierarchy (if applicable)
+
+The Plan agent will return:
+- Ordered implementation steps
+- Ticket breakdown with domains and priorities
+- Dependencies between tickets
+- Critical files for each ticket
+
+### 1e. Choose decomposition strategy
 
 Pick the strategy that best fits the work:
 
@@ -52,7 +99,7 @@ Pick the strategy that best fits the work:
 | `risk-based` | High-risk changes first, low-risk last — fail fast |
 | `domain-based` | Work splits cleanly by backend/frontend/database/etc. |
 
-### 1c. Create the mission
+### 1f. Create the mission
 
 ```bash
 curl -sS -X POST $BASE/api/swarm/missions \
@@ -60,7 +107,7 @@ curl -sS -X POST $BASE/api/swarm/missions \
   -d '{"workflow_id": "<slug>", "title": "<title>", "base_branch": "main", "strategy": "<chosen-strategy>"}'
 ```
 
-### 1d. Create tickets (batch)
+### 1g. Create tickets (batch)
 
 Each ticket should have:
 - **title**: concise name
@@ -78,7 +125,7 @@ curl -sS -X POST $BASE/api/swarm/missions/<mission-id>/tickets/batch \
   ]}'
 ```
 
-### 1e. Present & Approve
+### 1h. Present & Approve
 
 Present the plan to the user using the `question` tool. Include:
 - Chosen decomposition strategy and why
