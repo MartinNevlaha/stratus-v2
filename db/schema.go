@@ -223,4 +223,67 @@ CREATE TABLE IF NOT EXISTS forge_entries (
     merged_at      TEXT,
     created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- OpenClaw: State tracking
+CREATE TABLE IF NOT EXISTS openclaw_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    last_analysis TEXT NOT NULL,
+    next_analysis TEXT NOT NULL,
+    patterns_detected INTEGER DEFAULT 0,
+    proposals_generated INTEGER DEFAULT 0,
+    proposals_accepted INTEGER DEFAULT 0,
+    acceptance_rate REAL DEFAULT 0,
+    model_version TEXT NOT NULL DEFAULT 'v1',
+    config_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- OpenClaw: Pattern library
+CREATE TABLE IF NOT EXISTS openclaw_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_type TEXT NOT NULL,
+    pattern_name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    frequency INTEGER DEFAULT 1,
+    confidence REAL NOT NULL,
+    examples_json TEXT DEFAULT '[]',
+    metadata_json TEXT DEFAULT '{}',
+    last_seen TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_type ON openclaw_patterns(pattern_type);
+CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_confidence ON openclaw_patterns(confidence DESC);
+
+-- OpenClaw: Proposal feedback
+CREATE TABLE IF NOT EXISTS openclaw_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL,
+    feedback_type TEXT NOT NULL,
+    reason TEXT,
+    impact_score REAL,
+    measured_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (proposal_id) REFERENCES proposals(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_openclaw_feedback_proposal ON openclaw_feedback(proposal_id);
+
+-- OpenClaw: Analysis history
+CREATE TABLE IF NOT EXISTS openclaw_analyses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_type TEXT NOT NULL,
+    scope TEXT,
+    findings_json TEXT NOT NULL DEFAULT '{}',
+    recommendations_json TEXT DEFAULT '{}',
+    patterns_found INTEGER DEFAULT 0,
+    proposals_created INTEGER DEFAULT 0,
+    execution_time_ms INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_type ON openclaw_analyses(analysis_type);
+CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_created ON openclaw_analyses(created_at DESC);
 `

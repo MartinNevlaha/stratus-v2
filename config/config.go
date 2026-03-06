@@ -9,39 +9,45 @@ import (
 	"strconv"
 )
 
-// SyncState tracks which version of the embedded assets was last written to disk
-// and the SHA-256 hash of each file at the time it was written.  This lets
-// smart-refresh detect user customizations and skip overwriting them.
 type SyncState struct {
 	SyncedVersion string            `json:"synced_version"`
 	AssetHashes   map[string]string `json:"asset_hashes,omitempty"`
 	SkippedFiles  []string          `json:"skipped_files,omitempty"`
 }
 
-// Config holds the stratus configuration.
-type Config struct {
-	Port        int         `json:"port"`
-	DataDir     string      `json:"data_dir"`
-	ProjectRoot string      `json:"project_root"`
-	Vexor       VexorConfig `json:"vexor"`
-	STT         STTConfig   `json:"stt"`
-	SyncState   *SyncState  `json:"sync_state,omitempty"`
+type OpenClawConfig struct {
+	Enabled       bool    `json:"enabled"`
+	Interval      int     `json:"interval"`
+	MaxProposals  int     `json:"max_proposals"`
+	MinConfidence float64 `json:"min_confidence"`
+	LLMProvider   string  `json:"llm_provider"`
+	LLMModel      string  `json:"llm_model"`
+	LLMAPIKey     string  `json:"llm_api_key"`
+	LLMTimeout    int     `json:"llm_timeout"`
 }
 
-// VexorConfig configures the Vexor code search backend.
+type Config struct {
+	Port                     int            `json:"port"`
+	DataDir                  string         `json:"data_dir"`
+	ProjectRoot              string         `json:"project_root"`
+	Vexor                    VexorConfig    `json:"vexor"`
+	STT                      STTConfig      `json:"stt"`
+	SyncState                *SyncState     `json:"sync_state,omitempty"`
+	MetricsBroadcastInterval int            `json:"metrics_broadcast_interval"`
+	OpenClaw                 OpenClawConfig `json:"openclaw"`
+}
+
 type VexorConfig struct {
 	BinaryPath string `json:"binary_path"`
 	Model      string `json:"model"`
 	TimeoutSec int    `json:"timeout_sec"`
 }
 
-// STTConfig configures speech-to-text.
 type STTConfig struct {
 	Endpoint string `json:"endpoint"`
 	Model    string `json:"model"`
 }
 
-// Default returns sensible defaults.
 func Default() Config {
 	home, _ := os.UserHomeDir()
 	wd, _ := os.Getwd()
@@ -58,12 +64,18 @@ func Default() Config {
 			Endpoint: "http://localhost:8011",
 			Model:    "Systran/faster-whisper-small",
 		},
+		MetricsBroadcastInterval: 30,
+		OpenClaw: OpenClawConfig{
+			Enabled:       true,
+			Interval:      1,
+			MaxProposals:  5,
+			MinConfidence: 0.7,
+			LLMProvider:   "claude",
+			LLMModel:      "claude-3-5-sonnet-20241022",
+		},
 	}
 }
 
-// Save marshals the config to JSON and atomically writes it to path.
-// It writes to a temp file first, then renames, so a crash mid-write never
-// produces a corrupted .stratus.json.
 func (c Config) Save(path string) error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -76,9 +88,6 @@ func (c Config) Save(path string) error {
 	return os.Rename(tmp, path)
 }
 
-// ProjectDataDir returns the project-specific data directory.
-// Each project gets its own subdirectory under DataDir, keyed by a
-// SHA-256 hash prefix of the resolved absolute ProjectRoot path.
 func (c Config) ProjectDataDir() string {
 	absRoot, err := filepath.Abs(c.ProjectRoot)
 	if err != nil {
@@ -93,7 +102,6 @@ func (c Config) ProjectDataDir() string {
 	return filepath.Join(c.DataDir, hash)
 }
 
-// Load loads config from .stratus.json in the current directory, merging with defaults.
 func Load() Config {
 	cfg := Default()
 
