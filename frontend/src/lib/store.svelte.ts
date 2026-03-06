@@ -10,10 +10,13 @@ interface AppState {
   version: VersionInfo | null
   updateInProgress: boolean
   updateLog: string[]
-  updateError: string | null  // set when update_failed, cleared on next attempt or success
+  updateError: string | null
   // Swarm real-time state
   swarmUpdateCounter: number
   lastHeartbeats: Record<string, number>
+  // Analytics real-time updates
+  analyticsUpdateCounter: number
+  lastMetricsUpdate: number
 }
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
@@ -30,6 +33,8 @@ export const appState: AppState = $state({
   updateError: null,
   swarmUpdateCounter: 0,
   lastHeartbeats: {},
+  analyticsUpdateCounter: 0,
+  lastMetricsUpdate: 0
 })
 
 export async function refreshDashboard() {
@@ -106,13 +111,33 @@ export function initStore() {
     if (data?.error) appState.updateLog.push(`Error: ${data.error}`)
   })
 
+  // Analytics real-time updates
+  wsClient.on('workflow_started', () => {
+    appState.analyticsUpdateCounter++
+    appState.lastMetricsUpdate = Date.now()
+  })
+  
+  wsClient.on('phase_changed', () => {
+    appState.analyticsUpdateCounter++
+    appState.lastMetricsUpdate = Date.now()
+  })
+  
+  wsClient.on('task_completed', () => {
+    appState.analyticsUpdateCounter++
+    appState.lastMetricsUpdate = Date.now()
+  })
+  
+  wsClient.on('workflow_completed', () => {
+    appState.analyticsUpdateCounter++
+    appState.lastMetricsUpdate = Date.now()
+  })
+  
   // Swarm real-time events — targeted refresh instead of full dashboard reload
   const swarmTypes = ['mission_status', 'worker_spawned', 'worker_status', 'ticket_status', 'forge_update', 'signal_sent']
   for (const type of swarmTypes) {
     wsClient.on(type, () => { emitSwarmUpdate() })
   }
-
-  // Worker heartbeat — track timestamps for live pulse display
+  
   wsClient.on('worker_heartbeat', (msg) => {
     const data = msg.payload as { id?: string; ts?: string } | undefined
     if (data?.id) appState.lastHeartbeats[data.id] = Date.now()

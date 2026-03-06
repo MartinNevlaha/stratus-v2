@@ -170,3 +170,69 @@ export interface SwarmMissionDetail {
   tickets: SwarmTicket[]
   forge: SwarmForgeEntry[]
 }
+
+// Analytics types
+export interface MetricsSummary {
+  total_workflows: number
+  completed_workflows: number
+  avg_workflow_duration_ms: number
+  total_tasks: number
+  completed_tasks: number
+  success_rate: number
+}
+
+export interface WorkflowMetric {
+  type: string
+  name: string
+  value: number
+  metadata: Record<string, any>
+  recorded_at: string
+}
+
+export interface DailyMetric {
+  date: string
+  total_workflows: number
+  completed_workflows: number
+  avg_workflow_duration_ms: number
+  total_tasks: number
+  completed_tasks: number
+  success_rate: number
+}
+
+export interface AgentMetric {
+  agent_id: string
+  tasks_completed: number
+  avg_task_duration_ms: number
+  success_rate: number
+  last_active: string
+}
+
+export interface ProjectMetric {
+  project: string
+  total_workflows: number
+  completed_workflows: number
+  avg_duration_ms: number
+  success_rate: number
+}
+
+export interface MetricsSummaryResponse {
+  period_days: number
+  summary: MetricsSummary
+}
+
+export interface WorkflowMetricsResponse {
+  workflow_id: string
+  metrics: WorkflowMetric[]
+}
+
+export interface DailyMetricsResponse {
+  metrics: DailyMetric[]
+}
+
+export interface AgentMetricsResponse {
+  agents: AgentMetric[]
+}
+
+export interface ProjectMetricsResponse {
+  projects: ProjectMetric[]
+}

@@ -1,4 +1,19 @@
-import type { DashboardState, Event, SearchResult, WorkflowState, Candidate, Proposal, VersionInfo, SwarmMission, SwarmMissionDetail } from './types'
+import type { 
+  DashboardState, 
+  Event, 
+  SearchResult, 
+  WorkflowState, 
+  Candidate, 
+  Proposal, 
+  VersionInfo, 
+  SwarmMission, 
+  SwarmMissionDetail,
+  MetricsSummaryResponse,
+  WorkflowMetricsResponse,
+  DailyMetricsResponse,
+  AgentMetricsResponse,
+  ProjectMetricsResponse
+} from './types'
 
 const BASE = '/api'
 
@@ -139,3 +154,50 @@ export async function uploadTerminalImage(blob: Blob, filename: string): Promise
   if (!res.ok) throw new Error(`Upload error: ${res.status}`)
   return res.json()
 }
+
+// Analytics
+export const getMetricsSummary = (days = 7) =>
+  get<MetricsSummaryResponse>('/metrics/summary', { days: String(days) })
+
+export const getWorkflowMetrics = (id: string) =>
+  get<WorkflowMetricsResponse>(`/workflows/${id}/metrics`)
+
+export const triggerAggregation = () =>
+  post<{ status: string }>('/metrics/aggregate', {})
+
+export const getDailyMetrics = (limit = 30) =>
+  get<DailyMetricsResponse>('/metrics/daily', { limit: String(limit) })
+
+export const getAgentMetrics = (agentId?: string, days = 30) =>
+  get<AgentMetricsResponse>('/metrics/agents', {
+    ...(agentId ? { agent_id: agentId } : {}),
+    days: String(days)
+  })
+
+export const getProjectMetrics = (project?: string, days = 30) =>
+  get<ProjectMetricsResponse>('/metrics/projects', {
+    ...(project ? { project } : {}),
+    days: String(days)
+  })
+
+export const getWorkflowMetrics = (id: string) =>
+  get<WorkflowMetricsResponse>(`/workflows/${id}/metrics`)
+
+export const getDailyMetrics = (limit = 30) =>
+  get<DailyMetricsResponse>('/metrics/daily', { limit: String(limit) })
+
+export const getAgentMetrics = (agentId?: string, days = 30) =>
+  get<AgentMetricsResponse>('/metrics/agents', {
+    ...(agentId ? { agent_id: agentId } : {}),
+    days: String(days)
+  })
+
+export const getProjectMetrics = (project?: string, days = 30) =>
+  get<ProjectMetricsResponse>('/metrics/projects', {
+    ...(project ? { project } : {}),
+    days: String(days)
+  })
+
+export const triggerAggregation = () =>
+  post<{ status: string }>('/metrics/aggregate', {})
+
