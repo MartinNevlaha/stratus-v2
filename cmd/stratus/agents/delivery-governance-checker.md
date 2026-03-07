@@ -17,7 +17,6 @@ Read, Grep, Glob
 ## Skills
 
 - Use the `governance-db` skill as your primary tool — retrieve rules, ADRs, CLAUDE.md standards before every finding.
-- Use the `vexor-cli` skill to locate relevant existing implementations when checking architectural compliance.
 
 ## Mode A: Plan / Design Review
 

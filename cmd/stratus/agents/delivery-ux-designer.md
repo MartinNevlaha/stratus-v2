@@ -16,12 +16,11 @@ Read, Grep, Glob, Edit, Write (design artifacts and spec documents only)
 
 ## Skills
 
-- Use the `vexor-cli` skill to locate existing components, design tokens, and UI patterns before designing new ones.
 - Use the `frontend-design` skill for design thinking guidance — distinctive aesthetics, typography, motion, layout patterns.
 
 ## Workflow
 
-1. **Audit existing design** — read existing components, CSS variables, and design tokens. Understand the current visual language.
+1. **Audit existing design** — read existing components, CSS variables, and design tokens. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find UI patterns. Understand the current visual language.
 2. **Define the design** — make deliberate decisions on typography, color, spacing, motion. Avoid generic defaults.
 3. **Produce component hierarchy** — which components are needed, how they compose.
 4. **Write design spec** — detailed spec for the frontend engineer including exact tokens, states, accessibility requirements.

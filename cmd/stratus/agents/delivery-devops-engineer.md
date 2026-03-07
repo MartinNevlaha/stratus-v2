@@ -14,7 +14,7 @@ Read, Grep, Glob, Edit, Write, Bash
 
 ## Workflow
 
-1. **Understand** — Read the task and explore existing CI/CD, Docker, and infra config.
+1. **Understand** — Read the task and explore existing CI/CD, Docker, and infra config. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns.
 2. **Implement** — Write or modify pipeline/infra files following existing patterns.
 3. **Validate** — Lint configs, dry-run where possible, verify syntax.
 

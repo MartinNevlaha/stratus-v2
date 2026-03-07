@@ -14,11 +14,11 @@ Read, Grep, Glob, Edit, Write, Bash
 
 ## Skills
 
-- Use the `vexor-cli` skill to locate relevant code by intent when file paths are unclear.
+- None defined.
 
 ## Workflow
 
-1. **Understand** — Read the task description and relevant code. Use `retrieve` MCP tool (corpus: code) to find existing patterns.
+1. **Understand** — Read the task description and relevant code. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns.
 2. **Implement** — Follow project conventions. Write clean, minimal code that satisfies the requirements.
 3. **Test** — Write tests alongside implementation. Ensure all tests pass before reporting completion.
 

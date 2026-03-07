@@ -14,12 +14,11 @@ Read, Grep, Glob, Edit, Write, Bash
 
 ## Skills
 
-- Use the `vexor-cli` skill to locate existing schema definitions, migration files, and query patterns by intent.
 - Use the `governance-db` skill to retrieve database design standards, naming conventions, and architectural constraints before schema changes.
 
 ## Workflow
 
-1. **Understand** — Read the task and explore existing schema, migrations, and queries.
+1. **Understand** — Read the task and explore existing schema, migrations, and queries. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns.
 2. **Design** — Plan schema changes with forward-only migrations.
 3. **Implement** — Write migration files, update models/queries, add indexes.
 4. **Test** — Write tests for queries and migrations. Run and confirm green.

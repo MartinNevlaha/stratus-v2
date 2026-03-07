@@ -16,12 +16,12 @@ Read, Grep, Glob, Bash (read-only: diagnostic commands only)
 
 ## Skills
 
-- Use the `vexor-cli` skill when the relevant file location is unclear — search by intent rather than exact filename.
+- None defined.
 
 ## Workflow
 
 1. **Reproduce** — Understand the symptoms. Find error messages, stack traces, logs.
-2. **Trace** — Follow the execution path from symptom to root cause. Use `retrieve` MCP tool to find related patterns.
+2. **Trace** — Follow the execution path from symptom to root cause. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find related patterns.
 3. **Classify** — Categorize the bug type.
 4. **Report** — Deliver a structured diagnosis.
 

@@ -16,12 +16,11 @@ Read, Grep, Glob
 
 ## Skills
 
-- Use the `vexor-cli` skill to locate implementation hotspots by intent when file paths are unclear.
 - Use the `governance-db` skill to retrieve project-specific standards, rules, and ADRs before issuing `[must_fix]` findings — do not invent standards that already exist in project docs.
 
 ## Workflow
 
-1. **Scope** — Identify all files changed in this workflow (use Grep/Glob to find recent changes).
+1. **Scope** — Identify all files changed in this workflow (use Grep/Glob to find recent changes). Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find implementation patterns.
 2. **Review** — Evaluate each file against the checklist below.
 3. **Verdict** — Issue a structured verdict.
 

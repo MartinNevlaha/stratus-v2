@@ -16,13 +16,12 @@ Read, Grep, Glob, Bash (read-only: git log, cat, ls), WebSearch
 
 ## Skills
 
-- Use the `vexor-cli` skill to locate existing architectural patterns, integration points, and technology usage across the codebase before making technology recommendations.
 - Use the `governance-db` skill to retrieve existing ADRs and architectural constraints — never propose decisions that contradict existing accepted ADRs.
 - Use the `create-architecture` skill for producing structured ADRs and component diagrams.
 
 ## Workflow
 
-1. **Assess the current state** — read CLAUDE.md, existing ADRs in `docs/decisions/` or `docs/adr/`, and relevant codebase sections.
+1. **Assess the current state** — read CLAUDE.md, existing ADRs in `docs/decisions/` or `docs/adr/`, and relevant codebase sections. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find architectural patterns.
 2. **Identify the decision space** — what technology or design decisions must be made? What are the constraints?
 3. **Evaluate alternatives** — for each significant decision, evaluate at least 2 options with trade-offs.
 4. **Produce ADRs** — one ADR per decision.
