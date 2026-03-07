@@ -271,11 +271,128 @@ func calculateConsistency(wf WorkflowMetrics) float64 {
 	return consistency
 }
 
+type KnowledgeProvider interface {
+	GetBestAgentForProblem(problemClass, repoType string) (string, float64, error)
+	GetProblemStatsByClass(problemClass string) (map[string]any, error)
+}
+
+type KnowledgeBasedAnalyzer struct {
+	knowledge KnowledgeProvider
+}
+
+func NewKnowledgeBasedAnalyzer(knowledge KnowledgeProvider) *KnowledgeBasedAnalyzer {
+	return &KnowledgeBasedAnalyzer{knowledge: knowledge}
+}
+
+func (a *KnowledgeBasedAnalyzer) Name() string {
+	return "knowledge_based"
+}
+
+func (a *KnowledgeBasedAnalyzer) Analyze(agentMetrics []AgentMetrics, workflowMetrics []WorkflowMetrics, config RoutingConfig) []RoutingRecommendation {
+	var recommendations []RoutingRecommendation
+
+	if a.knowledge == nil {
+		return recommendations
+	}
+
+	problemClassMap := map[string]string{
+		"bug":  "unknown",
+		"spec": "unknown",
+		"e2e":  "test_failure",
+	}
+
+	for _, wf := range workflowMetrics {
+		if wf.TotalRuns < config.MinObservations {
+			continue
+		}
+
+		problemClass := problemClassMap[wf.WorkflowType]
+		if problemClass == "" {
+			problemClass = "unknown"
+		}
+
+		bestAgent, successRate, err := a.knowledge.GetBestAgentForProblem(problemClass, "")
+		if err != nil || bestAgent == "" {
+			continue
+		}
+
+		var currentBestAgent *AgentMetrics
+		for i := range agentMetrics {
+			if agentMetrics[i].TotalRuns >= config.MinObservations {
+				if currentBestAgent == nil || agentMetrics[i].SuccessRate > currentBestAgent.SuccessRate {
+					currentBestAgent = &agentMetrics[i]
+				}
+			}
+		}
+
+		var foundInAgents bool
+		for _, agent := range agentMetrics {
+			if agent.AgentName == bestAgent {
+				foundInAgents = true
+				break
+			}
+		}
+
+		if !foundInAgents {
+			continue
+		}
+
+		if successRate < 0.6 {
+			continue
+		}
+
+		improvementThreshold := 0.10
+		if currentBestAgent != nil && successRate > currentBestAgent.SuccessRate+improvementThreshold {
+			rec := NewRoutingRecommendation(
+				wf.WorkflowType,
+				RecommendationBestAgent,
+				bestAgent,
+				"",
+			)
+
+			rec.Observations = wf.TotalRuns
+			rec.Evidence = map[string]any{
+				"knowledge_success_rate": successRate,
+				"problem_class":          problemClass,
+				"current_best_agent":     currentBestAgent.AgentName,
+				"current_success_rate":   currentBestAgent.SuccessRate,
+				"improvement":            successRate - currentBestAgent.SuccessRate,
+				"source":                 "knowledge_engine",
+			}
+			rec.Reason = fmt.Sprintf(
+				"Knowledge engine recommends agent %s for %s problems (%.1f%% success rate)",
+				bestAgent,
+				problemClass,
+				successRate*100,
+			)
+
+			rec.CalculateConfidence(config)
+			if successRate > 0.85 {
+				rec.Confidence = min(rec.Confidence+0.15, 0.95)
+			}
+			rec.DetermineRiskLevel()
+			recommendations = append(recommendations, rec)
+		}
+	}
+
+	return recommendations
+}
+
 func GetAllAnalyzers() []RoutingAnalyzer {
 	return []RoutingAnalyzer{
 		&BestAgentAnalyzer{},
 		&DeprioritizationAnalyzer{},
 		&FallbackAnalyzer{},
 		&InstabilityAnalyzer{},
+	}
+}
+
+func GetAllAnalyzersWithKnowledge(knowledge KnowledgeProvider) []RoutingAnalyzer {
+	return []RoutingAnalyzer{
+		&BestAgentAnalyzer{},
+		&DeprioritizationAnalyzer{},
+		&FallbackAnalyzer{},
+		&InstabilityAnalyzer{},
+		NewKnowledgeBasedAnalyzer(knowledge),
 	}
 }

@@ -405,4 +405,252 @@ CREATE INDEX IF NOT EXISTS idx_routing_workflow ON openclaw_routing_recommendati
 CREATE INDEX IF NOT EXISTS idx_routing_type ON openclaw_routing_recommendations(recommendation_type);
 CREATE INDEX IF NOT EXISTS idx_routing_confidence ON openclaw_routing_recommendations(confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_routing_created ON openclaw_routing_recommendations(created_at DESC);
+
+-- OpenClaw: Workflow Metrics (cached aggregated metrics)
+CREATE TABLE IF NOT EXISTS openclaw_workflow_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id TEXT NOT NULL,
+    workflow_type TEXT NOT NULL,
+    task_type TEXT,
+    agents_used_json TEXT DEFAULT '[]',
+    retry_count INTEGER DEFAULT 0,
+    cycle_time_ms INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0,
+    review_fail_rate REAL DEFAULT 0,
+    analysis_window TEXT NOT NULL,
+    computed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(workflow_id, analysis_window)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_metrics_type ON openclaw_workflow_metrics(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_workflow_metrics_window ON openclaw_workflow_metrics(analysis_window);
+CREATE INDEX IF NOT EXISTS idx_workflow_metrics_computed ON openclaw_workflow_metrics(computed_at DESC);
+
+-- OpenClaw: Engineering Knowledge Artifacts
+CREATE TABLE IF NOT EXISTS openclaw_artifacts (
+    id                 TEXT PRIMARY KEY,
+    workflow_id        TEXT NOT NULL,
+    task_type          TEXT NOT NULL DEFAULT '',
+    workflow_type      TEXT NOT NULL DEFAULT '',
+    repo_type          TEXT NOT NULL DEFAULT '',
+    problem_class      TEXT NOT NULL DEFAULT '',
+    agents_used_json   TEXT NOT NULL DEFAULT '[]',
+    root_cause         TEXT NOT NULL DEFAULT '',
+    solution_pattern   TEXT NOT NULL DEFAULT '',
+    files_changed_json TEXT NOT NULL DEFAULT '[]',
+    review_result      TEXT NOT NULL DEFAULT '',
+    cycle_time_minutes INTEGER DEFAULT 0,
+    success            INTEGER DEFAULT 0,
+    metadata_json      TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_id ON openclaw_artifacts(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_type ON openclaw_artifacts(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_artifacts_problem_class ON openclaw_artifacts(problem_class);
+CREATE INDEX IF NOT EXISTS idx_artifacts_repo_type ON openclaw_artifacts(repo_type);
+CREATE INDEX IF NOT EXISTS idx_artifacts_success ON openclaw_artifacts(success);
+CREATE INDEX IF NOT EXISTS idx_artifacts_created ON openclaw_artifacts(created_at DESC);
+
+-- OpenClaw: Solution Patterns (mined from artifacts)
+CREATE TABLE IF NOT EXISTS openclaw_solution_patterns (
+    id                      TEXT PRIMARY KEY,
+    problem_class           TEXT NOT NULL,
+    solution_pattern        TEXT NOT NULL,
+    repo_type               TEXT NOT NULL DEFAULT '',
+    success_rate            REAL DEFAULT 0,
+    occurrence_count        INTEGER DEFAULT 0,
+    example_artifacts_json  TEXT NOT NULL DEFAULT '[]',
+    confidence              REAL DEFAULT 0,
+    first_seen              TEXT NOT NULL,
+    last_seen               TEXT NOT NULL,
+    created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(problem_class, solution_pattern, repo_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_solution_patterns_problem ON openclaw_solution_patterns(problem_class);
+CREATE INDEX IF NOT EXISTS idx_solution_patterns_repo ON openclaw_solution_patterns(repo_type);
+CREATE INDEX IF NOT EXISTS idx_solution_patterns_success ON openclaw_solution_patterns(success_rate DESC);
+
+-- OpenClaw: Problem Statistics (aggregated knowledge)
+CREATE TABLE IF NOT EXISTS openclaw_problem_stats (
+    id                  TEXT PRIMARY KEY,
+    problem_class       TEXT NOT NULL,
+    repo_type           TEXT NOT NULL DEFAULT '',
+    best_agent          TEXT NOT NULL DEFAULT '',
+    best_workflow       TEXT NOT NULL DEFAULT '',
+    success_rate        REAL DEFAULT 0,
+    occurrence_count    INTEGER DEFAULT 0,
+    avg_cycle_time      INTEGER DEFAULT 0,
+    agents_success_json TEXT NOT NULL DEFAULT '{}',
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(problem_class, repo_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_problem_stats_problem ON openclaw_problem_stats(problem_class);
+CREATE INDEX IF NOT EXISTS idx_problem_stats_repo ON openclaw_problem_stats(repo_type);
+CREATE INDEX IF NOT EXISTS idx_problem_stats_success ON openclaw_problem_stats(success_rate DESC);
+
+-- OpenClaw: Trajectories (complete workflow execution paths)
+CREATE TABLE IF NOT EXISTS openclaw_trajectories (
+    id                  TEXT PRIMARY KEY,
+    workflow_id         TEXT NOT NULL,
+    task_type           TEXT NOT NULL DEFAULT '',
+    repo_type           TEXT NOT NULL DEFAULT '',
+    workflow_type       TEXT NOT NULL DEFAULT '',
+    steps_json          TEXT NOT NULL DEFAULT '[]',
+    step_count          INTEGER NOT NULL DEFAULT 0,
+    final_result        TEXT NOT NULL DEFAULT '',
+    cycle_time_minutes  INTEGER DEFAULT 0,
+    started_at          TEXT NOT NULL,
+    completed_at        TEXT,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_trajectories_workflow ON openclaw_trajectories(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_trajectories_task_type ON openclaw_trajectories(task_type);
+CREATE INDEX IF NOT EXISTS idx_trajectories_repo_type ON openclaw_trajectories(repo_type);
+CREATE INDEX IF NOT EXISTS idx_trajectories_result ON openclaw_trajectories(final_result);
+CREATE INDEX IF NOT EXISTS idx_trajectories_created ON openclaw_trajectories(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trajectories_started ON openclaw_trajectories(started_at);
+
+-- OpenClaw: Trajectory Patterns (mined optimal agent sequences)
+CREATE TABLE IF NOT EXISTS openclaw_trajectory_patterns (
+    id                       TEXT PRIMARY KEY,
+    problem_type             TEXT NOT NULL,
+    repo_type                TEXT NOT NULL DEFAULT '',
+    optimal_agent_sequence_json TEXT NOT NULL DEFAULT '[]',
+    success_rate             REAL NOT NULL DEFAULT 0,
+    occurrence_count         INTEGER NOT NULL DEFAULT 1,
+    avg_cycle_time_minutes   INTEGER DEFAULT 0,
+    example_trajectory_ids_json TEXT NOT NULL DEFAULT '[]',
+    confidence               REAL NOT NULL DEFAULT 0,
+    created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(problem_type, repo_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_problem ON openclaw_trajectory_patterns(problem_type);
+CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_repo ON openclaw_trajectory_patterns(repo_type);
+CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_success ON openclaw_trajectory_patterns(success_rate DESC);
+
+-- OpenClaw: Workflow Candidates (synthesized from trajectory patterns)
+CREATE TABLE IF NOT EXISTS openclaw_workflow_candidates (
+    id                      TEXT PRIMARY KEY,
+    workflow_name           TEXT NOT NULL,
+    task_type               TEXT NOT NULL,
+    repo_type               TEXT NOT NULL DEFAULT '',
+    base_workflow           TEXT NOT NULL,
+    steps_json              TEXT NOT NULL DEFAULT '[]',
+    phase_transitions_json  TEXT NOT NULL DEFAULT '{}',
+    confidence              REAL NOT NULL DEFAULT 0,
+    status                  TEXT NOT NULL DEFAULT 'candidate',
+    source_pattern_id       TEXT,
+    created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_candidates_status ON openclaw_workflow_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_candidates_task_repo ON openclaw_workflow_candidates(task_type, repo_type);
+CREATE INDEX IF NOT EXISTS idx_workflow_candidates_confidence ON openclaw_workflow_candidates(confidence DESC);
+
+-- OpenClaw: Workflow Experiments (A/B testing with bandit)
+CREATE TABLE IF NOT EXISTS openclaw_workflow_experiments (
+    id                TEXT PRIMARY KEY,
+    candidate_id      TEXT NOT NULL REFERENCES openclaw_workflow_candidates(id) ON DELETE CASCADE,
+    baseline_workflow TEXT NOT NULL,
+    traffic_percent   REAL NOT NULL DEFAULT 10,
+    status            TEXT NOT NULL DEFAULT 'running',
+    sample_size       INTEGER NOT NULL DEFAULT 100,
+    runs_candidate    INTEGER NOT NULL DEFAULT 0,
+    runs_baseline     INTEGER NOT NULL DEFAULT 0,
+    bandit_state_json TEXT NOT NULL DEFAULT '{}',
+    started_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at      TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_experiments_status ON openclaw_workflow_experiments(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_experiments_candidate ON openclaw_workflow_experiments(candidate_id);
+
+-- OpenClaw: Experiment Results (per-run metrics)
+CREATE TABLE IF NOT EXISTS openclaw_experiment_results (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id   TEXT NOT NULL REFERENCES openclaw_workflow_experiments(id) ON DELETE CASCADE,
+    workflow_id     TEXT NOT NULL,
+    used_candidate  INTEGER NOT NULL DEFAULT 0,
+    success         INTEGER NOT NULL DEFAULT 0,
+    cycle_time_min  INTEGER NOT NULL DEFAULT 0,
+    retry_count     INTEGER NOT NULL DEFAULT 0,
+    review_passes   INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_experiment_results_exp ON openclaw_experiment_results(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_results_workflow ON openclaw_experiment_results(workflow_id);
+
+-- OpenClaw: Agent Candidates (evolution proposals)
+CREATE TABLE IF NOT EXISTS openclaw_agent_candidates (
+    id                TEXT PRIMARY KEY,
+    agent_name        TEXT NOT NULL,
+    base_agent        TEXT NOT NULL,
+    specialization    TEXT NOT NULL,
+    reason            TEXT NOT NULL,
+    confidence        REAL NOT NULL DEFAULT 0,
+    prompt_diff_json  TEXT NOT NULL DEFAULT '{}',
+    status            TEXT NOT NULL DEFAULT 'pending',
+    evidence_json     TEXT NOT NULL DEFAULT '{}',
+    opportunity_type  TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(agent_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_status ON openclaw_agent_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_base ON openclaw_agent_candidates(base_agent);
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_specialization ON openclaw_agent_candidates(specialization);
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_confidence ON openclaw_agent_candidates(confidence DESC);
+
+-- OpenClaw: Agent Experiments (A/B testing for agent evolution)
+CREATE TABLE IF NOT EXISTS openclaw_agent_experiments (
+    id                TEXT PRIMARY KEY,
+    candidate_id      TEXT NOT NULL REFERENCES openclaw_agent_candidates(id) ON DELETE CASCADE,
+    candidate_agent   TEXT NOT NULL,
+    baseline_agent    TEXT NOT NULL,
+    traffic_percent   REAL NOT NULL DEFAULT 10,
+    status            TEXT NOT NULL DEFAULT 'running',
+    sample_size       INTEGER NOT NULL DEFAULT 100,
+    runs_candidate    INTEGER NOT NULL DEFAULT 0,
+    runs_baseline     INTEGER NOT NULL DEFAULT 0,
+    bandit_state_json TEXT NOT NULL DEFAULT '{}',
+    started_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at      TEXT,
+    winner            TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_experiments_status ON openclaw_agent_experiments(status);
+CREATE INDEX IF NOT EXISTS idx_agent_experiments_candidate ON openclaw_agent_experiments(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_agent_experiments_baseline ON openclaw_agent_experiments(baseline_agent);
+
+-- OpenClaw: Agent Experiment Results (per-run metrics)
+CREATE TABLE IF NOT EXISTS openclaw_agent_experiment_results (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id   TEXT NOT NULL REFERENCES openclaw_agent_experiments(id) ON DELETE CASCADE,
+    workflow_id     TEXT NOT NULL,
+    task_type       TEXT NOT NULL DEFAULT '',
+    used_candidate  INTEGER NOT NULL DEFAULT 0,
+    success         INTEGER NOT NULL DEFAULT 0,
+    cycle_time_ms   INTEGER NOT NULL DEFAULT 0,
+    review_passed   INTEGER NOT NULL DEFAULT 0,
+    rework_count    INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_exp_results_exp ON openclaw_agent_experiment_results(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_exp_results_workflow ON openclaw_agent_experiment_results(workflow_id);
 `

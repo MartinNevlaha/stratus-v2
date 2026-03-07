@@ -30,6 +30,9 @@ func NewEngine(eventQuery EventQuery, patternStore PatternStore, config Detectio
 			&AgentPerformanceDropDetector{},
 			&ReviewRejectionSpikeDetector{},
 			&WorkflowDurationSpikeDetector{},
+			&WorkflowLoopDetector{},
+			&WorkflowReviewFailureDetector{},
+			&WorkflowSlowExecutionDetector{},
 		},
 	}
 }

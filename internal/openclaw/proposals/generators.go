@@ -12,6 +12,32 @@ type ProposalGenerator interface {
 	Generate(pattern patterns.Pattern) (*Proposal, error)
 }
 
+func getIntFromEvidence(e map[string]any, key string, def int) int {
+	switch v := e[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	case int64:
+		return int(v)
+	default:
+		return def
+	}
+}
+
+func getFloatFromEvidence(e map[string]any, key string, def float64) float64 {
+	switch v := e[key].(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	default:
+		return def
+	}
+}
+
 type WorkflowFailureClusterGenerator struct{}
 
 func (g *WorkflowFailureClusterGenerator) Name() string {
@@ -214,6 +240,160 @@ func (g *WorkflowDurationSpikeGenerator) Generate(pattern patterns.Pattern) (*Pr
 			"workflow_type":    affectedWorkflow,
 			"suggested_action": "increase_retry_timeout",
 			"reason":           fmt.Sprintf("%.1fx duration increase", durationMultiplier),
+		}
+	}
+
+	proposal := NewProposal(proposalType, title, description, pattern, recommendation)
+	return &proposal, nil
+}
+
+type WorkflowLoopGenerator struct{}
+
+func (g *WorkflowLoopGenerator) Name() string {
+	return "workflow_loop"
+}
+
+func (g *WorkflowLoopGenerator) CanGenerate(patternType patterns.PatternType) bool {
+	return patternType == patterns.PatternWorkflowLoop
+}
+
+func (g *WorkflowLoopGenerator) Generate(pattern patterns.Pattern) (*Proposal, error) {
+	avgLoops := getFloatFromEvidence(pattern.Evidence, "avg_loops", 0)
+	if avgLoops == 0 {
+		return nil, fmt.Errorf("missing or invalid avg_loops in evidence")
+	}
+
+	affectedWorkflows, _ := pattern.Evidence["affected_workflows"].([]string)
+	affectedCount := getIntFromEvidence(pattern.Evidence, "affected_count", 0)
+
+	var proposalType ProposalType
+	var title, description string
+	var recommendation map[string]any
+
+	if avgLoops >= 4 {
+		proposalType = ProposalTypeWorkflowDebugger
+		title = "Insert debugger agent stage in looping workflows"
+		description = fmt.Sprintf("High loop count (avg %.1f) detected across %d workflows; insert debugger stage before review", avgLoops, affectedCount)
+		recommendation = map[string]any{
+			"suggested_action":     "insert_debugger_stage",
+			"stage_name":           "debug",
+			"insert_before":        "review",
+			"agent_type":           "debugger-agent",
+			"reason":               fmt.Sprintf("avg %.1f phase loops detected", avgLoops),
+			"affected_workflows":   affectedWorkflows,
+			"expected_improvement": "reduce loops by catching issues early",
+			"priority":             "high",
+		}
+	} else {
+		proposalType = ProposalTypeWorkflowInvestigation
+		title = "Investigate workflow loop patterns"
+		description = fmt.Sprintf("Loop patterns detected (avg %.1f) across %d workflows", avgLoops, affectedCount)
+		recommendation = map[string]any{
+			"suggested_action":   "investigate_loop_causes",
+			"affected_workflows": affectedWorkflows,
+			"reason":             fmt.Sprintf("avg %.1f phase loops detected", avgLoops),
+		}
+	}
+
+	proposal := NewProposal(proposalType, title, description, pattern, recommendation)
+	return &proposal, nil
+}
+
+type WorkflowReviewFailureGenerator struct{}
+
+func (g *WorkflowReviewFailureGenerator) Name() string {
+	return "workflow_review_failure_cluster"
+}
+
+func (g *WorkflowReviewFailureGenerator) CanGenerate(patternType patterns.PatternType) bool {
+	return patternType == patterns.PatternWorkflowReviewFailure
+}
+
+func (g *WorkflowReviewFailureGenerator) Generate(pattern patterns.Pattern) (*Proposal, error) {
+	avgFailRate := getFloatFromEvidence(pattern.Evidence, "avg_fail_rate", 0)
+	if avgFailRate == 0 {
+		return nil, fmt.Errorf("missing or invalid avg_fail_rate in evidence")
+	}
+
+	affectedWorkflows, _ := pattern.Evidence["affected_workflows"].([]string)
+	affectedCount := getIntFromEvidence(pattern.Evidence, "affected_count", 0)
+
+	var proposalType ProposalType
+	var title, description string
+	var recommendation map[string]any
+
+	if avgFailRate >= 0.60 {
+		proposalType = ProposalTypeWorkflowAutoReview
+		title = "Add auto-review/validation stage"
+		description = fmt.Sprintf("High review failure rate (%.1f%%) across %d workflows; add pre-validation stage", avgFailRate*100, affectedCount)
+		recommendation = map[string]any{
+			"suggested_action":     "add_auto_review_stage",
+			"stage_name":           "auto_review",
+			"insert_before":        "review",
+			"validation_checks":    []string{"lint", "type_check", "test"},
+			"reason":               fmt.Sprintf("%.1f%% review failure rate", avgFailRate*100),
+			"affected_workflows":   affectedWorkflows,
+			"expected_improvement": "catch issues before human review",
+			"priority":             "high",
+		}
+	} else {
+		proposalType = ProposalTypeReviewGateAddition
+		title = "Strengthen review gates in affected workflows"
+		description = fmt.Sprintf("Elevated review failure rate (%.1f%%) across %d workflows", avgFailRate*100, affectedCount)
+		recommendation = map[string]any{
+			"suggested_action":   "strengthen_review_gates",
+			"affected_workflows": affectedWorkflows,
+			"reason":             fmt.Sprintf("%.1f%% review failure rate", avgFailRate*100),
+		}
+	}
+
+	proposal := NewProposal(proposalType, title, description, pattern, recommendation)
+	return &proposal, nil
+}
+
+type WorkflowSlowExecutionGenerator struct{}
+
+func (g *WorkflowSlowExecutionGenerator) Name() string {
+	return "workflow_slow_execution"
+}
+
+func (g *WorkflowSlowExecutionGenerator) CanGenerate(patternType patterns.PatternType) bool {
+	return patternType == patterns.PatternWorkflowSlowExecution
+}
+
+func (g *WorkflowSlowExecutionGenerator) Generate(pattern patterns.Pattern) (*Proposal, error) {
+	avgMultiplier := getFloatFromEvidence(pattern.Evidence, "avg_multiplier", 0)
+	if avgMultiplier == 0 {
+		return nil, fmt.Errorf("missing or invalid avg_multiplier in evidence")
+	}
+
+	slowWorkflows, _ := pattern.Evidence["slow_workflows"].([]string)
+	affectedCount := getIntFromEvidence(pattern.Evidence, "affected_count", 0)
+
+	var proposalType ProposalType
+	var title, description string
+	var recommendation map[string]any
+
+	if avgMultiplier >= 2.5 {
+		proposalType = ProposalTypeWorkflowSplit
+		title = "Split slow workflows into sub-workflows"
+		description = fmt.Sprintf("Severe slowdown (%.1fx) across %d workflows; consider splitting into parallel sub-workflows", avgMultiplier, affectedCount)
+		recommendation = map[string]any{
+			"suggested_action":     "split_workflow",
+			"split_strategy":       "parallel_execution",
+			"reason":               fmt.Sprintf("%.1fx slower than baseline", avgMultiplier),
+			"slow_workflows":       slowWorkflows,
+			"expected_improvement": "reduce cycle time by 30-50%",
+			"priority":             "high",
+		}
+	} else {
+		proposalType = ProposalTypeWorkflowInvestigation
+		title = "Investigate slow workflow bottlenecks"
+		description = fmt.Sprintf("Workflow slowdown (%.1fx) detected across %d workflows", avgMultiplier, affectedCount)
+		recommendation = map[string]any{
+			"suggested_action": "investigate_bottlenecks",
+			"slow_workflows":   slowWorkflows,
+			"reason":           fmt.Sprintf("%.1fx slower than baseline", avgMultiplier),
 		}
 	}
 

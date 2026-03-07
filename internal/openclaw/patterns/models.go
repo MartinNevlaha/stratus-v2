@@ -12,6 +12,9 @@ const (
 	PatternAgentPerformanceDrop   PatternType = "agent.performance_drop"
 	PatternReviewRejectionSpike   PatternType = "review.rejection_spike"
 	PatternProposalRejectionSpike PatternType = "proposal.rejection_spike"
+	PatternWorkflowLoop           PatternType = "workflow.loop"
+	PatternWorkflowReviewFailure  PatternType = "workflow.review_failure_cluster"
+	PatternWorkflowSlowExecution  PatternType = "workflow.slow_execution"
 )
 
 type SeverityLevel string
@@ -37,12 +40,15 @@ type Pattern struct {
 }
 
 type DetectionConfig struct {
-	EventWindowHours         int     `json:"event_window_hours"`
-	MinEventsForDetection    int     `json:"min_events_for_detection"`
-	FailureRateThreshold     float64 `json:"failure_rate_threshold"`
-	PerformanceDropThreshold float64 `json:"performance_drop_threshold"`
-	RejectionRateThreshold   float64 `json:"rejection_rate_threshold"`
-	DurationSpikeMultiplier  float64 `json:"duration_spike_multiplier"`
+	EventWindowHours         int              `json:"event_window_hours"`
+	MinEventsForDetection    int              `json:"min_events_for_detection"`
+	FailureRateThreshold     float64          `json:"failure_rate_threshold"`
+	PerformanceDropThreshold float64          `json:"performance_drop_threshold"`
+	RejectionRateThreshold   float64          `json:"rejection_rate_threshold"`
+	DurationSpikeMultiplier  float64          `json:"duration_spike_multiplier"`
+	LoopThreshold            int              `json:"loop_threshold"`
+	ReviewFailThreshold      float64          `json:"review_fail_threshold"`
+	BaselineCycleTimesMs     map[string]int64 `json:"baseline_cycle_times_ms"`
 }
 
 func DefaultDetectionConfig() DetectionConfig {
@@ -53,6 +59,13 @@ func DefaultDetectionConfig() DetectionConfig {
 		PerformanceDropThreshold: 0.20,
 		RejectionRateThreshold:   0.40,
 		DurationSpikeMultiplier:  2.0,
+		LoopThreshold:            3,
+		ReviewFailThreshold:      0.50,
+		BaselineCycleTimesMs: map[string]int64{
+			"spec": 10 * 60 * 1000,
+			"bug":  5 * 60 * 1000,
+			"e2e":  15 * 60 * 1000,
+		},
 	}
 }
 

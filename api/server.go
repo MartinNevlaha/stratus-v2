@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/openclaw"
 	"github.com/MartinNevlaha/stratus-v2/openclaw/events"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
@@ -22,21 +23,22 @@ import (
 const emitEventTimeout = 5 * time.Second
 
 type Server struct {
-	db            *db.DB
-	coordinator   *orchestration.Coordinator
-	vexor         *vexor.Client
-	hub           *Hub
-	terminal      *terminal.Manager
-	projectRoot   string
-	sttEndpoint   string
-	sttModel      string
-	staticFiles   fs.FS
-	version       string
-	syncedVersion string
-	skippedFiles  []string
-	swarm         *swarm.Store
-	openclaw      *openclaw.Engine
-	eventBus      events.EventBus
+	db                   *db.DB
+	coordinator          *orchestration.Coordinator
+	vexor                *vexor.Client
+	hub                  *Hub
+	terminal             *terminal.Manager
+	projectRoot          string
+	sttEndpoint          string
+	sttModel             string
+	staticFiles          fs.FS
+	version              string
+	syncedVersion        string
+	skippedFiles         []string
+	swarm                *swarm.Store
+	openclaw             *openclaw.Engine
+	agentEvolutionEngine *agent_evolution.Engine
+	eventBus             events.EventBus
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -61,24 +63,26 @@ func NewServer(
 	skippedFiles []string,
 	swarmStore *swarm.Store,
 	openclawEngine *openclaw.Engine,
+	agentEvolutionEng *agent_evolution.Engine,
 ) *Server {
 	s := &Server{
-		db:            database,
-		coordinator:   coord,
-		vexor:         vexorClient,
-		hub:           hub,
-		terminal:      termMgr,
-		projectRoot:   projectRoot,
-		sttEndpoint:   sttEndpoint,
-		sttModel:      sttModel,
-		staticFiles:   staticFiles,
-		version:       version,
-		syncedVersion: syncedVersion,
-		skippedFiles:  skippedFiles,
-		swarm:         swarmStore,
-		openclaw:      openclawEngine,
-		dirtyFiles:    make(map[string]struct{}),
-		dirtyCh:       make(chan struct{}, 1),
+		db:                   database,
+		coordinator:          coord,
+		vexor:                vexorClient,
+		hub:                  hub,
+		terminal:             termMgr,
+		projectRoot:          projectRoot,
+		sttEndpoint:          sttEndpoint,
+		sttModel:             sttModel,
+		staticFiles:          staticFiles,
+		version:              version,
+		syncedVersion:        syncedVersion,
+		skippedFiles:         skippedFiles,
+		swarm:                swarmStore,
+		openclaw:             openclawEngine,
+		agentEvolutionEngine: agentEvolutionEng,
+		dirtyFiles:           make(map[string]struct{}),
+		dirtyCh:              make(chan struct{}, 1),
 	}
 	go s.indexWorker()
 	return s
@@ -261,6 +265,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/openclaw/routing/recommendations", s.handleGetRoutingRecommendations)
 	mux.HandleFunc("GET /api/openclaw/routing/recommendations/{id}", s.handleGetRoutingRecommendation)
 	mux.HandleFunc("POST /api/openclaw/routing/analyze", s.handleTriggerRoutingAnalysis)
+
+	// Agent Evolution
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/summary", s.handleGetAgentEvolutionSummary)
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/opportunities", s.handleGetAgentEvolutionOpportunities)
+	mux.HandleFunc("POST /api/openclaw/agent-evolution/trigger", s.handleTriggerAgentEvolution)
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/candidates", s.handleGetAgentCandidates)
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/candidates/{id}", s.handleGetAgentCandidateByID)
+	mux.HandleFunc("POST /api/openclaw/agent-evolution/candidates/{id}/approve", s.handleApproveAgentCandidate)
+	mux.HandleFunc("POST /api/openclaw/agent-evolution/candidates/{id}/reject", s.handleRejectAgentCandidate)
+	mux.HandleFunc("POST /api/openclaw/agent-evolution/candidates/{id}/experiment", s.handleStartAgentExperiment)
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/candidates/{id}/markdown", s.handleGetAgentCandidateMarkdown)
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/experiments", s.handleGetAgentExperiments)
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/experiments/{id}", s.handleGetAgentExperimentByID)
+	mux.HandleFunc("GET /api/openclaw/agent-evolution/experiments/{id}/results", s.handleGetAgentExperimentResults)
+	mux.HandleFunc("POST /api/openclaw/agent-evolution/experiments/{id}/cancel", s.handleCancelAgentExperiment)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

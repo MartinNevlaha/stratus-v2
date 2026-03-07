@@ -364,3 +364,302 @@ func average(values []float64) float64 {
 	}
 	return sum / float64(len(values))
 }
+
+type WorkflowLoopDetector struct{}
+
+func (d *WorkflowLoopDetector) Name() string {
+	return "workflow_loop"
+}
+
+func (d *WorkflowLoopDetector) Detect(ctx context.Context, events []EventForDetection, config DetectionConfig) *Pattern {
+	loopThreshold := config.LoopThreshold
+	if loopThreshold <= 0 {
+		loopThreshold = 3
+	}
+	workflowLoops := make(map[string]int)
+	workflowTransitions := make(map[string][]string)
+
+	for _, e := range events {
+		if e.Type != "workflow.phase_transition" {
+			continue
+		}
+
+		wfID, _ := e.Payload["workflow_id"].(string)
+		if wfID == "" {
+			continue
+		}
+
+		from, _ := e.Payload["from_phase"].(string)
+		to, _ := e.Payload["to_phase"].(string)
+		if from == "" || to == "" {
+			continue
+		}
+
+		transition := from + "->" + to
+		workflowTransitions[wfID] = append(workflowTransitions[wfID], transition)
+	}
+
+	for wfID, transitions := range workflowTransitions {
+		transitionCount := make(map[string]int)
+		for _, t := range transitions {
+			transitionCount[t]++
+			if transitionCount[t] > 1 {
+				workflowLoops[wfID]++
+			}
+		}
+	}
+
+	if len(workflowLoops) < config.MinEventsForDetection {
+		slog.Debug("workflow_loop: insufficient loop patterns", "count", len(workflowLoops))
+		return nil
+	}
+
+	var totalLoops int
+	var maxLoops int
+	var affectedWorkflows []string
+	for wfID, loopCount := range workflowLoops {
+		totalLoops += loopCount
+		if loopCount > maxLoops {
+			maxLoops = loopCount
+		}
+		if loopCount >= loopThreshold && len(affectedWorkflows) < 5 {
+			affectedWorkflows = append(affectedWorkflows, wfID)
+		}
+	}
+
+	if len(affectedWorkflows) == 0 {
+		return nil
+	}
+
+	avgLoops := float64(totalLoops) / float64(len(workflowLoops))
+	severity := SeverityMedium
+	if avgLoops >= 4 {
+		severity = SeverityHigh
+	}
+	if avgLoops >= 5 {
+		severity = SeverityCritical
+	}
+
+	confidence := 0.6 + (avgLoops * 0.08)
+	if confidence > 0.95 {
+		confidence = 0.95
+	}
+
+	return &Pattern{
+		Type:        PatternWorkflowLoop,
+		Timestamp:   time.Now().UTC(),
+		Severity:    severity,
+		Description: fmt.Sprintf("Workflow loop patterns detected: avg %.1f loops, %d workflows affected", avgLoops, len(affectedWorkflows)),
+		Evidence: map[string]any{
+			"avg_loops":          avgLoops,
+			"max_loops":          maxLoops,
+			"affected_count":     len(affectedWorkflows),
+			"affected_workflows": affectedWorkflows,
+			"detection_window_h": config.EventWindowHours,
+		},
+		Frequency:  len(affectedWorkflows),
+		Confidence: confidence,
+		FirstSeen:  time.Now().UTC(),
+		LastSeen:   time.Now().UTC(),
+	}
+}
+
+type WorkflowReviewFailureDetector struct{}
+
+func (d *WorkflowReviewFailureDetector) Name() string {
+	return "workflow_review_failure_cluster"
+}
+
+func (d *WorkflowReviewFailureDetector) Detect(ctx context.Context, events []EventForDetection, config DetectionConfig) *Pattern {
+	workflowReviews := make(map[string]struct{ passed, failed int })
+
+	for _, e := range events {
+		wfID, _ := e.Payload["workflow_id"].(string)
+		if wfID == "" {
+			continue
+		}
+
+		stats := workflowReviews[wfID]
+		switch e.Type {
+		case "review.passed":
+			stats.passed++
+		case "review.failed":
+			stats.failed++
+		}
+		workflowReviews[wfID] = stats
+	}
+
+	if len(workflowReviews) < config.MinEventsForDetection {
+		slog.Debug("workflow_review_failure_cluster: insufficient review data", "count", len(workflowReviews))
+		return nil
+	}
+
+	var totalFailRate float64
+	var affectedWorkflows []string
+	var highFailureCount int
+	threshold := config.ReviewFailThreshold
+	if threshold <= 0 {
+		threshold = 0.50
+	}
+
+	for wfID, stats := range workflowReviews {
+		total := stats.passed + stats.failed
+		if total == 0 {
+			continue
+		}
+
+		failRate := float64(stats.failed) / float64(total)
+		totalFailRate += failRate
+
+		if failRate >= threshold {
+			highFailureCount++
+			if len(affectedWorkflows) < 5 {
+				affectedWorkflows = append(affectedWorkflows, fmt.Sprintf("%s:%.0f%%", wfID, failRate*100))
+			}
+		}
+	}
+
+	if highFailureCount < config.MinEventsForDetection {
+		return nil
+	}
+
+	avgFailRate := totalFailRate / float64(len(workflowReviews))
+	severity := SeverityMedium
+	if avgFailRate >= 0.6 {
+		severity = SeverityHigh
+	}
+	if avgFailRate >= 0.7 {
+		severity = SeverityCritical
+	}
+
+	confidence := 0.55 + (avgFailRate * 0.35)
+	if confidence > 0.95 {
+		confidence = 0.95
+	}
+
+	return &Pattern{
+		Type:        PatternWorkflowReviewFailure,
+		Timestamp:   time.Now().UTC(),
+		Severity:    severity,
+		Description: fmt.Sprintf("High review failure cluster: %.1f%% avg failure rate, %d workflows affected", avgFailRate*100, highFailureCount),
+		Evidence: map[string]any{
+			"avg_fail_rate":      avgFailRate,
+			"affected_count":     highFailureCount,
+			"total_workflows":    len(workflowReviews),
+			"affected_workflows": affectedWorkflows,
+			"threshold":          threshold,
+			"detection_window_h": config.EventWindowHours,
+		},
+		Frequency:  highFailureCount,
+		Confidence: confidence,
+		FirstSeen:  time.Now().UTC(),
+		LastSeen:   time.Now().UTC(),
+	}
+}
+
+type WorkflowSlowExecutionDetector struct{}
+
+func (d *WorkflowSlowExecutionDetector) Name() string {
+	return "workflow_slow_execution"
+}
+
+func (d *WorkflowSlowExecutionDetector) Detect(ctx context.Context, events []EventForDetection, config DetectionConfig) *Pattern {
+	workflowDurations := make(map[string]float64)
+	workflowTypes := make(map[string]string)
+	baselineByType := config.BaselineCycleTimesMs
+	if baselineByType == nil || len(baselineByType) == 0 {
+		baselineByType = map[string]int64{
+			"spec": 10 * 60 * 1000,
+			"bug":  5 * 60 * 1000,
+			"e2e":  15 * 60 * 1000,
+		}
+	}
+
+	startTimes := make(map[string]time.Time)
+	for _, e := range events {
+		wfID, _ := e.Payload["workflow_id"].(string)
+		if wfID == "" {
+			continue
+		}
+
+		switch e.Type {
+		case "workflow.started":
+			startTimes[wfID] = e.Timestamp
+			if wt, ok := e.Payload["workflow_type"].(string); ok {
+				workflowTypes[wfID] = wt
+			}
+		case "workflow.completed", "workflow.failed":
+			if start, exists := startTimes[wfID]; exists {
+				duration := e.Timestamp.Sub(start).Milliseconds()
+				workflowDurations[wfID] = float64(duration)
+			}
+		}
+	}
+
+	if len(workflowDurations) < config.MinEventsForDetection {
+		slog.Debug("workflow_slow_execution: insufficient completed workflows", "count", len(workflowDurations))
+		return nil
+	}
+
+	slowThreshold := config.DurationSpikeMultiplier
+	var slowWorkflows []string
+	var totalMultiplier float64
+	var slowCount int
+
+	for wfID, duration := range workflowDurations {
+		wfType := workflowTypes[wfID]
+		baseline := float64(baselineByType[wfType])
+		if baseline == 0 {
+			baseline = float64(baselineByType["spec"])
+		}
+
+		multiplier := duration / baseline
+		if multiplier >= slowThreshold {
+			slowCount++
+			totalMultiplier += multiplier
+			if len(slowWorkflows) < 5 {
+				slowWorkflows = append(slowWorkflows, fmt.Sprintf("%s:%.1fx", wfID, multiplier))
+			}
+		}
+	}
+
+	if slowCount < config.MinEventsForDetection {
+		return nil
+	}
+
+	avgMultiplier := totalMultiplier / float64(slowCount)
+	severity := SeverityMedium
+	if avgMultiplier >= 2.5 {
+		severity = SeverityHigh
+	}
+	if avgMultiplier >= 3.0 {
+		severity = SeverityCritical
+	}
+
+	confidence := 0.5 + ((avgMultiplier - 1.5) * 0.2)
+	if confidence > 0.90 {
+		confidence = 0.90
+	}
+	if confidence < 0.25 {
+		confidence = 0.25
+	}
+
+	return &Pattern{
+		Type:        PatternWorkflowSlowExecution,
+		Timestamp:   time.Now().UTC(),
+		Severity:    severity,
+		Description: fmt.Sprintf("Slow workflow execution detected: %.1fx avg slowdown, %d workflows affected", avgMultiplier, slowCount),
+		Evidence: map[string]any{
+			"avg_multiplier":     avgMultiplier,
+			"affected_count":     slowCount,
+			"total_workflows":    len(workflowDurations),
+			"slow_workflows":     slowWorkflows,
+			"slow_threshold":     slowThreshold,
+			"detection_window_h": config.EventWindowHours,
+		},
+		Frequency:  slowCount,
+		Confidence: confidence,
+		FirstSeen:  time.Now().UTC(),
+		LastSeen:   time.Now().UTC(),
+	}
+}

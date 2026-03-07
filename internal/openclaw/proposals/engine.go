@@ -59,6 +59,9 @@ func NewEngine(patternStore patterns.PatternStore, proposalStore ProposalStore, 
 			&AgentPerformanceDropGenerator{},
 			&ReviewRejectionSpikeGenerator{},
 			&WorkflowDurationSpikeGenerator{},
+			&WorkflowLoopGenerator{},
+			&WorkflowReviewFailureGenerator{},
+			&WorkflowSlowExecutionGenerator{},
 		},
 	}
 }

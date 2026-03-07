@@ -15,6 +15,14 @@ const (
 	ProposalTypeWorkflowInvestigation ProposalType = "workflow.investigate"
 	ProposalTypeAgentDeprioritize     ProposalType = "agent.deprioritize"
 	ProposalTypeRetryPolicyAdjust     ProposalType = "retry_policy.adjust"
+	ProposalTypeWorkflowStageAdd      ProposalType = "workflow.stage_add"
+	ProposalTypeWorkflowSplit         ProposalType = "workflow.split"
+	ProposalTypeWorkflowDebugger      ProposalType = "workflow.add_debugger"
+	ProposalTypeWorkflowAutoReview    ProposalType = "workflow.add_auto_review"
+	ProposalTypeAgentSpecialize       ProposalType = "agent.specialize"
+	ProposalTypeAgentPromptUpdate     ProposalType = "agent.improve_prompt"
+	ProposalTypeAgentDeprecate        ProposalType = "agent.deprecate"
+	ProposalTypeAgentPromote          ProposalType = "agent.promote"
 )
 
 type ProposalStatus string

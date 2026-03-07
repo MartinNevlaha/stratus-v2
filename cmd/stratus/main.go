@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/hooks"
+	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/mcp"
 	"github.com/MartinNevlaha/stratus-v2/openclaw"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
@@ -150,7 +152,13 @@ func cmdServe() {
 		}
 	}
 
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, openclawEngine)
+	// Initialize Agent Evolution engine
+	logger := slog.Default()
+	claudeAgentsDir := filepath.Join(cfg.ProjectRoot, ".claude", "agents")
+	opencodeAgentsDir := filepath.Join(cfg.ProjectRoot, ".opencode", "agents")
+	agentEvolutionEngine := agent_evolution.NewEngine(database, agent_evolution.DefaultConfig(), claudeAgentsDir, opencodeAgentsDir, logger)
+
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, openclawEngine, agentEvolutionEngine)
 
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)

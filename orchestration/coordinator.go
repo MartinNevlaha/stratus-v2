@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/workflow_synthesis"
 	"github.com/MartinNevlaha/stratus-v2/openclaw/events"
 )
 
@@ -45,9 +46,10 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db       *db.DB
-	metrics  *MetricsCollector
-	eventBus events.EventBus
+	db              *db.DB
+	metrics         *MetricsCollector
+	eventBus        events.EventBus
+	synthesisRouter *SynthesisRouter
 }
 
 func NewCoordinator(db *db.DB) *Coordinator {
@@ -63,6 +65,21 @@ func NewCoordinatorWithEvents(db *db.DB, eventBus events.EventBus) *Coordinator 
 		metrics:  NewMetricsCollector(db),
 		eventBus: eventBus,
 	}
+}
+
+func NewCoordinatorWithSynthesis(db *db.DB, eventBus events.EventBus) *Coordinator {
+	c := &Coordinator{
+		db:       db,
+		metrics:  NewMetricsCollector(db),
+		eventBus: eventBus,
+	}
+	c.initSynthesisRouter()
+	return c
+}
+
+func (c *Coordinator) initSynthesisRouter() {
+	store := workflow_synthesis.NewDBStore(c.db)
+	c.synthesisRouter = NewSynthesisRouter(store)
 }
 
 func (c *Coordinator) SetEventBus(bus events.EventBus) {
@@ -391,4 +408,52 @@ func (c *Coordinator) save(state *WorkflowState) error {
 		state.ID, state.Type, state.Phase, state.Complexity, string(data), state.CreatedAt, state.UpdatedAt,
 	)
 	return err
+}
+
+func (c *Coordinator) RouteWorkflow(ctx context.Context, taskType, repoType string) (*RoutingDecision, error) {
+	if c.synthesisRouter == nil {
+		return &RoutingDecision{
+			UseCandidate:     false,
+			BaselineWorkflow: c.getDefaultWorkflow(taskType),
+		}, nil
+	}
+	return c.synthesisRouter.Route(ctx, taskType, repoType)
+}
+
+func (c *Coordinator) RecordSynthesisResult(
+	ctx context.Context,
+	experimentID string,
+	workflowID string,
+	useCandidate bool,
+	success bool,
+	cycleTimeMin int,
+	retryCount int,
+	reviewPasses int,
+) error {
+	if c.synthesisRouter == nil {
+		return nil
+	}
+	return c.synthesisRouter.RecordResult(ctx, experimentID, workflowID, useCandidate, success, cycleTimeMin, retryCount, reviewPasses)
+}
+
+func (c *Coordinator) GetSynthesizedWorkflow(ctx context.Context, taskType, repoType string) (*db.WorkflowCandidate, error) {
+	if c.synthesisRouter == nil {
+		return nil, nil
+	}
+	return c.synthesisRouter.GetPromotedWorkflow(ctx, taskType, repoType)
+}
+
+func (c *Coordinator) getDefaultWorkflow(taskType string) string {
+	switch taskType {
+	case "bug_fix", "hotfix":
+		return "bug"
+	case "e2e", "test":
+		return "e2e"
+	default:
+		return "spec"
+	}
+}
+
+func (c *Coordinator) SynthesisRouter() *SynthesisRouter {
+	return c.synthesisRouter
 }
