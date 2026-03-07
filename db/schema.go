@@ -286,4 +286,123 @@ CREATE TABLE IF NOT EXISTS openclaw_analyses (
 
 CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_type ON openclaw_analyses(analysis_type);
 CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_created ON openclaw_analyses(created_at DESC);
+
+-- OpenClaw: Event log for real-time observability
+CREATE TABLE IF NOT EXISTS openclaw_events (
+    id         TEXT PRIMARY KEY,
+    type       TEXT NOT NULL,
+    timestamp  TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    payload    TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_openclaw_events_type ON openclaw_events(type);
+CREATE INDEX IF NOT EXISTS idx_openclaw_events_timestamp ON openclaw_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_openclaw_events_source ON openclaw_events(source);
+
+-- Daily aggregated metrics
+CREATE TABLE IF NOT EXISTS daily_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric_date TEXT NOT NULL UNIQUE,
+    total_workflows INTEGER DEFAULT 0,
+    completed_workflows INTEGER DEFAULT 0,
+    avg_workflow_duration_ms INTEGER DEFAULT 0,
+    total_tasks INTEGER DEFAULT 0,
+    completed_tasks INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0,
+    computed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date);
+
+-- OpenClaw: Improvement proposals
+CREATE TABLE IF NOT EXISTS openclaw_proposals (
+    id                TEXT PRIMARY KEY,
+    type              TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'detected',
+    title             TEXT NOT NULL,
+    description       TEXT NOT NULL,
+    confidence        REAL NOT NULL,
+    risk_level        TEXT NOT NULL DEFAULT 'medium',
+    source_pattern_id TEXT NOT NULL,
+    evidence          TEXT NOT NULL DEFAULT '{}',
+    recommendation    TEXT NOT NULL DEFAULT '{}',
+    decision_reason   TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_type ON openclaw_proposals(type);
+CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_status ON openclaw_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_pattern ON openclaw_proposals(source_pattern_id);
+CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_created ON openclaw_proposals(created_at DESC);
+
+-- OpenClaw: Agent Scorecards
+CREATE TABLE IF NOT EXISTS openclaw_agent_scorecards (
+    id TEXT PRIMARY KEY,
+    agent_name TEXT NOT NULL,
+    window TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    total_runs INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0,
+    failure_rate REAL DEFAULT 0,
+    review_pass_rate REAL DEFAULT 0,
+    rework_rate REAL DEFAULT 0,
+    avg_cycle_time_ms INTEGER DEFAULT 0,
+    regression_rate REAL DEFAULT 0,
+    confidence_score REAL DEFAULT 0,
+    trend TEXT DEFAULT 'stable',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(agent_name, window)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_scorecards_name ON openclaw_agent_scorecards(agent_name);
+CREATE INDEX IF NOT EXISTS idx_agent_scorecards_window ON openclaw_agent_scorecards(window);
+
+-- OpenClaw: Workflow Scorecards
+CREATE TABLE IF NOT EXISTS openclaw_workflow_scorecards (
+    id TEXT PRIMARY KEY,
+    workflow_type TEXT NOT NULL,
+    window TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    total_runs INTEGER DEFAULT 0,
+    completion_rate REAL DEFAULT 0,
+    failure_rate REAL DEFAULT 0,
+    review_rejection_rate REAL DEFAULT 0,
+    rework_rate REAL DEFAULT 0,
+    avg_duration_ms INTEGER DEFAULT 0,
+    confidence_score REAL DEFAULT 0,
+    trend TEXT DEFAULT 'stable',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(workflow_type, window)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_scorecards_type ON openclaw_workflow_scorecards(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_workflow_scorecards_window ON openclaw_workflow_scorecards(window);
+
+-- OpenClaw: Routing Recommendations
+CREATE TABLE IF NOT EXISTS openclaw_routing_recommendations (
+    id TEXT PRIMARY KEY,
+    workflow_type TEXT NOT NULL,
+    recommendation_type TEXT NOT NULL,
+    recommended_agent TEXT,
+    current_agent TEXT,
+    confidence REAL NOT NULL,
+    risk_level TEXT NOT NULL DEFAULT 'medium',
+    reason TEXT NOT NULL,
+    evidence TEXT NOT NULL DEFAULT '{}',
+    observations INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_routing_workflow ON openclaw_routing_recommendations(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_routing_type ON openclaw_routing_recommendations(recommendation_type);
+CREATE INDEX IF NOT EXISTS idx_routing_confidence ON openclaw_routing_recommendations(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_routing_created ON openclaw_routing_recommendations(created_at DESC);
 `

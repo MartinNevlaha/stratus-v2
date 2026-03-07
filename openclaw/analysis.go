@@ -2,13 +2,18 @@ package openclaw
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 )
 
 func (e *Engine) RunAnalysis() error {
+	e.analysisMu.Lock()
+	defer e.analysisMu.Unlock()
+
 	start := time.Now()
+	log.Println("openclaw: analysis started")
 
 	findings := map[string]any{}
 	recommendations := map[string]any{}
@@ -22,7 +27,7 @@ func (e *Engine) RunAnalysis() error {
 	}
 
 	if len(dailyMetrics) == 0 {
-		fmt.Println("OpenClaw: No metrics data available")
+		log.Println("openclaw: no metrics data available")
 		return nil
 	}
 
@@ -230,10 +235,10 @@ func (e *Engine) RunAnalysis() error {
 	//	 findAgentPatterns(agentMetrics, findings, patterns)
 	// }
 
-	// Save patterns
+	// Save patterns with idempotency check
 	for _, pattern := range patterns {
-		if err := e.database.SaveOpenClawPattern(pattern); err != nil {
-			fmt.Printf("warning: failed to save pattern: %v\n", err)
+		if err := e.savePatternIfNew(pattern); err != nil {
+			log.Printf("openclaw: failed to save pattern: %v", err)
 		}
 	}
 
@@ -244,7 +249,7 @@ func (e *Engine) RunAnalysis() error {
 
 	for _, proposal := range proposals {
 		if _, err := e.database.SaveProposal(proposal); err != nil {
-			fmt.Printf("warning: failed to save proposal: %v\n", err)
+			log.Printf("openclaw: failed to save proposal: %v", err)
 		}
 	}
 
@@ -281,11 +286,11 @@ func (e *Engine) RunAnalysis() error {
 		}
 
 		if err := e.database.UpdateOpenClawState(state); err != nil {
-			fmt.Printf("warning: failed to update openclaw state: %v\n", err)
+			log.Printf("openclaw: failed to update state: %v", err)
 		}
 	}
 
-	fmt.Printf("OpenClaw analysis complete: %d patterns found, %d proposals created, %dms\n",
+	log.Printf("openclaw: analysis complete: patterns=%d proposals=%d duration=%dms",
 		len(patterns), len(proposals), executionTime)
 	return nil
 }
@@ -339,6 +344,31 @@ Frequency: Recurring
 - Document 3+ actionable insights
 
 ## Measurement
-Track daily and report weekly
+ Track daily and report weekly
 `, title, rate*100, category)
+}
+
+func (e *Engine) savePatternIfNew(pattern *db.OpenClawPattern) error {
+	existing, err := e.database.FindPatternByName(pattern.PatternName)
+	if err != nil {
+		return fmt.Errorf("check existing pattern: %w", err)
+	}
+
+	if existing != nil {
+		existing.Frequency++
+		existing.LastSeen = time.Now().UTC().Format(time.RFC3339Nano)
+		if err := e.database.UpdateOpenClawPattern(existing); err != nil {
+			return fmt.Errorf("update pattern: %w", err)
+		}
+		log.Printf("openclaw: updated existing pattern: name=%s frequency=%d", pattern.PatternName, existing.Frequency)
+		return nil
+	}
+
+	if err := e.database.SaveOpenClawPattern(pattern); err != nil {
+		return fmt.Errorf("save pattern: %w", err)
+	}
+
+	log.Printf("openclaw: detected new pattern: type=%s name=%s confidence=%.2f",
+		pattern.PatternType, pattern.PatternName, pattern.Confidence)
+	return nil
 }

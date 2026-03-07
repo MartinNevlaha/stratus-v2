@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -11,13 +12,15 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/openclaw"
+	"github.com/MartinNevlaha/stratus-v2/openclaw/events"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
 	"github.com/MartinNevlaha/stratus-v2/vexor"
 )
 
-// Server holds all dependencies and the HTTP mux.
+const emitEventTimeout = 5 * time.Second
+
 type Server struct {
 	db            *db.DB
 	coordinator   *orchestration.Coordinator
@@ -29,16 +32,17 @@ type Server struct {
 	sttModel      string
 	staticFiles   fs.FS
 	version       string
-	syncedVersion string   // version when assets were last refreshed to disk
-	skippedFiles  []string // asset files skipped in last refresh (user-customized)
+	syncedVersion string
+	skippedFiles  []string
 	swarm         *swarm.Store
 	openclaw      *openclaw.Engine
+	eventBus      events.EventBus
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
-	dirtyCh    chan struct{} // buffered(1) signal channel
+	dirtyCh    chan struct{}
 
-	updateMu sync.Mutex // guards runUpdate — prevents concurrent update runs
+	updateMu sync.Mutex
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -93,10 +97,20 @@ func (s *Server) markDirty(paths []string) {
 	}
 }
 
-// indexWorker runs a debounced background loop that calls vexor.Index whenever
-// files are marked dirty. It waits for a 5s quiet period after the last dirty
-// signal before indexing, and falls back to a full reindex when the batch
-// exceeds 20 files.
+func (s *Server) emitEvent(eventType events.EventType, source string, payload map[string]any) {
+	if s.eventBus == nil {
+		return
+	}
+	evt := events.NewEvent(eventType, source, payload)
+	ctx, cancel := context.WithTimeout(context.Background(), emitEventTimeout)
+	defer cancel()
+	s.eventBus.Publish(ctx, evt)
+}
+
+func (s *Server) SetEventBus(bus events.EventBus) {
+	s.eventBus = bus
+}
+
 func (s *Server) indexWorker() {
 	const quietPeriod = 5 * time.Second
 	const maxBatch = 20
@@ -229,6 +243,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/openclaw/trigger", s.handleTriggerOpenClawAnalysis)
 	mux.HandleFunc("GET /api/openclaw/patterns", s.handleGetOpenClawPatterns)
 	mux.HandleFunc("GET /api/openclaw/analyses", s.handleGetOpenClawAnalyses)
+	mux.HandleFunc("GET /api/openclaw/proposals", s.handleGetOpenClawProposals)
+	mux.HandleFunc("GET /api/openclaw/proposals/{id}", s.handleGetOpenClawProposal)
+	mux.HandleFunc("POST /api/openclaw/proposals/generate", s.handleTriggerOpenClawProposalGeneration)
+	mux.HandleFunc("GET /api/openclaw/dashboard", s.handleGetOpenClawDashboard)
+	mux.HandleFunc("PATCH /api/openclaw/proposals/{id}/status", s.handleUpdateOpenClawProposalStatus)
+
+	// OpenClaw Scorecards
+	mux.HandleFunc("GET /api/openclaw/scorecards/agents", s.handleGetAgentScorecards)
+	mux.HandleFunc("GET /api/openclaw/scorecards/agents/{name}", s.handleGetAgentScorecardByName)
+	mux.HandleFunc("GET /api/openclaw/scorecards/workflows", s.handleGetWorkflowScorecards)
+	mux.HandleFunc("GET /api/openclaw/scorecards/workflows/{type}", s.handleGetWorkflowScorecardByType)
+	mux.HandleFunc("POST /api/openclaw/scorecards/compute", s.handleTriggerScorecardComputation)
+	mux.HandleFunc("GET /api/openclaw/scorecards/highlights", s.handleGetScorecardHighlights)
+
+	// OpenClaw Routing Recommendations
+	mux.HandleFunc("GET /api/openclaw/routing/recommendations", s.handleGetRoutingRecommendations)
+	mux.HandleFunc("GET /api/openclaw/routing/recommendations/{id}", s.handleGetRoutingRecommendation)
+	mux.HandleFunc("POST /api/openclaw/routing/analyze", s.handleTriggerRoutingAnalysis)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

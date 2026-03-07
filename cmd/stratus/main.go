@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -139,12 +140,13 @@ func cmdServe() {
 
 	// Initialize OpenClaw engine
 	var openclawEngine *openclaw.Engine
+	var openclawCancel context.CancelFunc
 	if cfg.OpenClaw.Enabled {
 		openclawEngine = openclaw.NewEngine(database, cfg.OpenClaw)
-		if err := openclawEngine.Start(); err != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		openclawCancel = cancel
+		if err := openclawEngine.Start(ctx); err != nil {
 			log.Printf("warning: failed to start OpenClaw engine: %v", err)
-		} else {
-			log.Println("OpenClaw engine started")
 		}
 	}
 
@@ -159,6 +161,12 @@ func cmdServe() {
 	go func() {
 		<-sigCh
 		log.Println("stratus shutting down…")
+		if openclawEngine != nil {
+			openclawEngine.Stop()
+		}
+		if openclawCancel != nil {
+			openclawCancel()
+		}
 		if sttOwned {
 			sttStop()
 		}

@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,10 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/openclaw/events"
 )
+
+const emitEventTimeout = 5 * time.Second
 
 // ErrWorkflowNotFound is returned when a workflow ID does not exist in the database.
 var ErrWorkflowNotFound = errors.New("workflow not found")
@@ -41,11 +45,11 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db      *db.DB
-	metrics *MetricsCollector
+	db       *db.DB
+	metrics  *MetricsCollector
+	eventBus events.EventBus
 }
 
-// NewCoordinator creates a new coordinator.
 func NewCoordinator(db *db.DB) *Coordinator {
 	return &Coordinator{
 		db:      db,
@@ -53,7 +57,28 @@ func NewCoordinator(db *db.DB) *Coordinator {
 	}
 }
 
-// Start creates a new workflow or returns an existing one with the same ID.
+func NewCoordinatorWithEvents(db *db.DB, eventBus events.EventBus) *Coordinator {
+	return &Coordinator{
+		db:       db,
+		metrics:  NewMetricsCollector(db),
+		eventBus: eventBus,
+	}
+}
+
+func (c *Coordinator) SetEventBus(bus events.EventBus) {
+	c.eventBus = bus
+}
+
+func (c *Coordinator) emitEvent(eventType events.EventType, source string, payload map[string]any) {
+	if c.eventBus == nil {
+		return
+	}
+	evt := events.NewEvent(eventType, source, payload)
+	ctx, cancel := context.WithTimeout(context.Background(), emitEventTimeout)
+	defer cancel()
+	c.eventBus.Publish(ctx, evt)
+}
+
 func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity, title string) (*WorkflowState, error) {
 	existing, err := c.Get(id)
 	if err == nil {
@@ -71,7 +96,16 @@ func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 		UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+	c.emitEvent(events.EventWorkflowStarted, "orchestration", map[string]any{
+		"workflow_id": id,
+		"type":        string(wtype),
+		"complexity":  string(complexity),
+		"title":       title,
+	})
+	return state, nil
 }
 
 // Get retrieves a workflow by ID.
@@ -115,8 +149,23 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	if err := ValidateTransition(state.Type, state.Phase, to); err != nil {
 		return nil, err
 	}
+	from := state.Phase
 	state.Phase = to
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+	c.emitEvent(events.EventPhaseTransition, "orchestration", map[string]any{
+		"workflow_id": id,
+		"from_phase":  string(from),
+		"to_phase":    string(to),
+	})
+	if to == PhaseComplete {
+		c.emitEvent(events.EventWorkflowCompleted, "orchestration", map[string]any{
+			"workflow_id": id,
+			"type":        string(state.Type),
+		})
+	}
+	return state, nil
 }
 
 // RecordDelegation records an agent delegation for the current phase.
@@ -184,7 +233,14 @@ func (c *Coordinator) Abort(id string) (*WorkflowState, error) {
 		return nil, err
 	}
 	state.Aborted = true
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+	c.emitEvent(events.EventWorkflowAborted, "orchestration", map[string]any{
+		"workflow_id": id,
+		"type":        string(state.Type),
+	})
+	return state, nil
 }
 
 // SetPlanContent stores the plan markdown content in the workflow state.
