@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -110,6 +112,177 @@ func (c *Coordinator) Get(id string) (*WorkflowState, error) {
 	return &state, nil
 }
 
+func validatePhaseReadiness(state *WorkflowState, to Phase) []string {
+	var warnings []string
+
+	switch state.Type {
+	case WorkflowSpec:
+		warnings = append(warnings, validateSpecPhaseReadiness(state, to)...)
+	case WorkflowBug:
+		warnings = append(warnings, validateBugPhaseReadiness(state, to)...)
+	case WorkflowE2E:
+		warnings = append(warnings, validateE2EPhaseReadiness(state, to)...)
+	}
+
+	return warnings
+}
+
+func validateSpecPhaseReadiness(state *WorkflowState, to Phase) []string {
+	var warnings []string
+
+	switch state.Phase {
+	case PhasePlan:
+		if to == PhaseImplement {
+			if len(state.Tasks) == 0 {
+				warnings = append(warnings,
+					"transitioning to implement with no tasks defined")
+			}
+			if state.PlanContent == "" {
+				warnings = append(warnings,
+					"transitioning to implement without plan content")
+			}
+		}
+
+	case PhaseImplement:
+		if to == PhaseVerify {
+			var incompleteTasks []string
+			for i, task := range state.Tasks {
+				if task.Status != "done" {
+					incompleteTasks = append(incompleteTasks,
+						fmt.Sprintf("task %d: %s", i+1, task.Title))
+				}
+			}
+			if len(incompleteTasks) > 0 {
+				warnings = append(warnings,
+					fmt.Sprintf("transitioning to verify with incomplete tasks: %s",
+						strings.Join(incompleteTasks, ", ")))
+			}
+		}
+
+	case PhaseVerify:
+		if to == PhaseLearn {
+			phaseDelegations := state.Delegated[string(state.Phase)]
+			if phaseDelegations == nil {
+				phaseDelegations = []string{}
+			}
+			hasReviewer := false
+			for _, agent := range phaseDelegations {
+				if agent == "delivery-code-reviewer" {
+					hasReviewer = true
+					break
+				}
+			}
+			if !hasReviewer {
+				warnings = append(warnings,
+					"transitioning to learn without code review delegation")
+			}
+		}
+
+	case PhaseLearn:
+		if to == PhaseComplete {
+			// TODO: Add validation for learning artifacts when implemented
+		}
+	}
+
+	return warnings
+}
+
+func validateBugPhaseReadiness(state *WorkflowState, to Phase) []string {
+	var warnings []string
+
+	switch state.Phase {
+	case PhaseAnalyze:
+		if to == PhaseFix {
+			if len(state.Tasks) == 0 {
+				warnings = append(warnings,
+					"transitioning to fix with no tasks defined from analysis")
+			}
+		}
+
+	case PhaseFix:
+		if to == PhaseReview {
+			var incompleteTasks []string
+			for i, task := range state.Tasks {
+				if task.Status != "done" {
+					incompleteTasks = append(incompleteTasks,
+						fmt.Sprintf("task %d: %s", i+1, task.Title))
+				}
+			}
+			if len(incompleteTasks) > 0 {
+				warnings = append(warnings,
+					fmt.Sprintf("transitioning to review with incomplete fixes: %s",
+						strings.Join(incompleteTasks, ", ")))
+			}
+		}
+
+	case PhaseReview:
+		if to == PhaseComplete {
+			phaseDelegations := state.Delegated[string(state.Phase)]
+			if phaseDelegations == nil {
+				phaseDelegations = []string{}
+			}
+			hasReviewer := false
+			for _, agent := range phaseDelegations {
+				if agent == "delivery-code-reviewer" {
+					hasReviewer = true
+					break
+				}
+			}
+			if !hasReviewer {
+				warnings = append(warnings,
+					"transitioning to complete without code review delegation")
+			}
+		}
+	}
+
+	return warnings
+}
+
+func validateE2EPhaseReadiness(state *WorkflowState, to Phase) []string {
+	var warnings []string
+
+	switch state.Phase {
+	case PhaseSetup:
+		if to == PhasePlan {
+			// TODO: Validate setup completion
+		}
+
+	case PhasePlan:
+		if to == PhaseGenerate {
+			if state.PlanContent == "" {
+				warnings = append(warnings,
+					"transitioning to generate without test plan")
+			}
+		}
+
+	case PhaseGenerate:
+		if to == PhaseHeal {
+			if len(state.Tasks) == 0 {
+				warnings = append(warnings,
+					"transitioning to heal with no tests generated")
+			}
+		}
+
+	case PhaseHeal:
+		if to == PhaseComplete {
+			var incompleteTasks []string
+			for i, task := range state.Tasks {
+				if task.Status != "done" {
+					incompleteTasks = append(incompleteTasks,
+						fmt.Sprintf("test %d: %s", i+1, task.Title))
+				}
+			}
+			if len(incompleteTasks) > 0 {
+				warnings = append(warnings,
+					fmt.Sprintf("transitioning to complete with failing tests: %s",
+						strings.Join(incompleteTasks, ", ")))
+			}
+		}
+	}
+
+	return warnings
+}
+
 // Transition moves a workflow to a new phase.
 func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	state, err := c.Get(id)
@@ -119,6 +292,12 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	if err := ValidateTransition(state.Type, state.Phase, to); err != nil {
 		return nil, err
 	}
+
+	warnings := validatePhaseReadiness(state, to)
+	for _, w := range warnings {
+		log.Printf("warning: workflow %s phase transition: %s", id, w)
+	}
+
 	fromPhase := state.Phase
 	createdAt, _ := time.Parse(time.RFC3339Nano, state.CreatedAt)
 	updatedAt, _ := time.Parse(time.RFC3339Nano, state.UpdatedAt)
