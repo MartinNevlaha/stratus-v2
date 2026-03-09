@@ -1,6 +1,7 @@
 ---
 name: sync-stratus
 description: "Stratus health check + integration. Audits agents, skills, rules, hooks, config, discovers custom skills, detects tech stack, mines conventions — then offers to apply integration patches."
+context: fork
 ---
 
 # /sync-stratus — Health Check & Integration

@@ -172,19 +172,7 @@ curl -sS -X POST $BASE/api/workflows/<slug>/tasks/<index>/start
 TaskUpdate(taskId=..., status="in_progress")
 ```
 
-Route to the appropriate delivery agent:
-
-| Task Type | Agent |
-|-----------|-------|
-| API, backend, handlers | `delivery-backend-engineer` |
-| UI, components, pages | `delivery-frontend-engineer` |
-| UI/UX design, design system | `delivery-ux-designer` |
-| Migrations, schema | `delivery-database-engineer` |
-| Infra, CI/CD | `delivery-devops-engineer` |
-| Mobile, React Native, iOS/Android | `delivery-mobile-engineer` |
-| Architecture docs, ADRs | `delivery-system-architect` |
-| Tests | `delivery-qa-engineer` |
-| General/unclear | `delivery-implementation-expert` |
+Route to the appropriate delivery agent (same routing table as /spec — backend/frontend/ux/database/infra/mobile/architecture/tests/general).
 
 Delegate via Task tool with full context from the design doc, then on completion:
 
@@ -231,46 +219,19 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 6: Learn
 
-**Step 1 — Save memory events** (session discoveries, decisions):
+**Step 1 — Save memory events:** `save_memory(text="...", type="decision|discovery|bugfix", tags=[...], importance=0.8)`
 
-```bash
-# Via MCP tool (preferred)
-save_memory(text="...", type="decision|discovery|bugfix", tags=[...], importance=0.8)
+**Step 2 — Write governance artifacts** (rules to `.claude/rules/`, ADRs to `docs/decisions/`, architecture to `docs/architecture/`). Only write for insights worth preserving long-term.
 
-# Or direct API
-curl -sS -X POST $BASE/api/events \
-  -H 'Content-Type: application/json' \
-  -d '{"text": "...", "type": "decision", "title": "...", "tags": ["..."]}'
-```
-
-**Step 2 — Write governance artifacts** (permanent, retrievable by future agents):
-
-| Artifact type | Write to |
-|--------------|----------|
-| New coding rule | `.claude/rules/<name>.md` |
-| Decision / ADR | `docs/decisions/<slug>-adr.md` |
-| Architecture note | `docs/architecture/<slug>.md` |
-
-Only write files for insights worth preserving long-term.
-
-**Step 2b — Register pattern candidates** (for patterns needing human review before becoming rules):
+**Step 2b — Register pattern candidates** (for human review):
 
 ```bash
 curl -sS -X POST $BASE/api/learning/candidates \
   -H 'Content-Type: application/json' \
-  -d '{
-    "detection_type": "pattern|antipattern|convention",
-    "description": "...",
-    "confidence": 0.8,
-    "files": ["path/to/relevant/file"]
-  }'
+  -d '{"detection_type": "pattern|antipattern|convention", "description": "...", "confidence": 0.8, "files": ["..."]}'
 ```
 
-**Step 3 — Re-index governance** (only if you wrote files in Step 2):
-
-```bash
-curl -sS -X POST $BASE/api/retrieve/index
-```
+**Step 3 — Re-index governance** (if files written): `curl -sS -X POST $BASE/api/retrieve/index`
 
 **Step 4 — Complete workflow**:
 

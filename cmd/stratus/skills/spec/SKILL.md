@@ -171,59 +171,25 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 4: Learn
 
-**Step 1 — Save memory events** (session discoveries, decisions):
+**Step 1 — Save memory events:** `save_memory(text="...", type="decision|discovery|bugfix", tags=[...], importance=0.8)`
+
+**Step 2 — Create learning candidates + proposals** for each significant pattern:
 
 ```bash
-# Via MCP tool (preferred)
-save_memory(text="...", type="decision|discovery|bugfix", tags=[...], importance=0.8)
-```
-
-**Step 2 — Create learning candidates + proposals** for each significant pattern, rule, or decision:
-
-```bash
-# 2a. Save candidate
 CANDIDATE_ID=$(curl -sS -X POST $BASE/api/learning/candidates \
   -H 'Content-Type: application/json' \
-  -d '{
-    "detection_type": "pattern|decision|anti_pattern",
-    "description": "Short description of what was found",
-    "confidence": 0.85,
-    "files": ["path/to/relevant/file.ts"],
-    "count": 1
-  }' | jq -r '.id')
+  -d '{"detection_type": "pattern|decision|anti_pattern", "description": "...", "confidence": 0.85, "files": ["..."], "count": 1}' | jq -r '.id')
 
-# 2b. Generate proposal from candidate
 curl -sS -X POST $BASE/api/learning/proposals \
   -H 'Content-Type: application/json' \
-  -d '{
-    "candidate_id": "'$CANDIDATE_ID'",
-    "type": "rule|adr|template|skill",
-    "title": "Short proposal title",
-    "description": "Why this matters",
-    "proposed_content": "Full content of the rule/ADR/template",
-    "proposed_path": ".claude/rules/<name>.md",
-    "confidence": 0.85,
-    "session_id": "<workflow-slug>"
-  }'
+  -d '{"candidate_id": "'$CANDIDATE_ID'", "type": "rule|adr|template|skill", "title": "...", "description": "...", "proposed_content": "...", "proposed_path": ".claude/rules/<name>.md", "confidence": 0.85, "session_id": "<workflow-slug>"}'
 ```
 
-Create a proposal for every insight worth preserving. The user will review proposals in the Learning tab and accept/reject them. **Do not write governance files directly** — proposals are the gate.
+User reviews proposals in the Learning tab.
 
-**Step 3 — Write governance artifacts directly** only for clear, unambiguous decisions that need no review:
+**Step 3 — Write governance artifacts** (only clear, unambiguous decisions): rules to `.claude/rules/`, ADRs to `docs/decisions/`, architecture to `docs/architecture/`. If files written: `curl -sS -X POST $BASE/api/retrieve/index`
 
-| Artifact type | Write to |
-|--------------|----------|
-| New coding rule | `.claude/rules/<name>.md` |
-| Decision / ADR | `docs/decisions/<slug>-adr.md` |
-| Architecture note | `docs/architecture/<slug>.md` |
-
-**Step 4 — Re-index governance** (only if you wrote files in Step 3):
-
-```bash
-curl -sS -X POST $BASE/api/retrieve/index
-```
-
-**Step 5 — Complete workflow**:
+**Step 4 — Complete workflow**:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
