@@ -78,6 +78,21 @@ The Plan agent will return:
 - Test coverage requirements
 - Risk mitigation strategies
 
+**Governance check (if COMPLEX) — delegate to `delivery-governance-checker` (Task tool):**
+
+Ask the agent to review the fix plan against project governance:
+- Does the proposed fix violate any architectural constraints?
+- Are there security or data handling requirements to consider?
+- Will this fix require updates to ADRs or documentation?
+
+```bash
+curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+If checker returns `[must_update]` findings → incorporate into the plan before user approval.
+
 Present the plan to the user via AskUserQuestion. **Wait for explicit approval.**
 
 ### 1d. User Approval & Transition

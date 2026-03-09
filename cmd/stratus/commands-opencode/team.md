@@ -33,20 +33,25 @@ Then:
 2. Use `retrieve` MCP tool (corpus: code) for pattern discovery.
 3. Use `retrieve` MCP tool (corpus: governance) for rules and ADRs.
 
-**Delegate planning to `@delivery-system-architect`** — task breakdown, dependencies, component boundaries.
-
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-system-architect"}'
-```
-
-**Governance check** — delegate to `@delivery-governance-checker` to verify the plan.
+**Governance check** — delegate to `@delivery-governance-checker` to review the requirement against project rules and ADRs:
+- Does this requirement conflict with any accepted ADRs?
+- Are there mandatory practices that must be followed for this type of feature?
+- Are there architectural constraints to consider?
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -H 'Content-Type: application/json' \
   -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+If checker returns `[must_update]` findings → share findings with user and adjust requirements before proceeding.
+
+**Delegate planning to `@delivery-system-architect`** — task breakdown, dependencies, component boundaries. Pass governance findings as context.
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-system-architect"}'
 ```
 
 Set tasks on the workflow:

@@ -39,12 +39,28 @@ Delegate to the `Explore` agent via Agent tool (`subagent_type: "Explore"`) with
 
 Do NOT write code during exploration.
 
+**Governance check — delegate to `delivery-governance-checker` (Task tool):**
+
+Ask the agent to review the requirement from `$ARGUMENTS` against project governance rules and ADRs:
+- Does this requirement conflict with any accepted ADRs?
+- Are there mandatory practices that must be followed for this type of feature?
+- Are there architectural constraints to consider?
+
+```bash
+curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+If checker returns `[must_update]` findings → share findings with user and adjust requirements before proceeding.
+
 **Task planning — use the built-in Plan subagent:**
 
 Delegate to the `Plan` subagent via Agent tool (`subagent_type: "Plan"`). Pass full context:
 - The requirement from `$ARGUMENTS`
 - Key files, directories, and patterns discovered by the Explore agent
 - Relevant architecture, patterns, and constraints found in the codebase
+- Any governance findings from the checker
 
 The Plan agent will return a step-by-step implementation plan with individual tasks and critical files.
 
@@ -60,16 +76,6 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/plan \
 
 3. Extract the ordered task list
 
-- Delegate to `delivery-governance-checker` (Task tool) with prompt: "Review plan at docs/plans/<slug>.md for governance compliance."
-- Record delegation:
-
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-governance-checker"}'
-```
-
-- If checker returns `[must_update]` findings → update the plan accordingly before proceeding.
 - Set tasks once finalized:
 
 ```bash
