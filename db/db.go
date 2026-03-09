@@ -64,9 +64,9 @@ func (d *DB) migrate() error {
 var migrations = []string{
 	`ALTER TABLE missions ADD COLUMN strategy TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE missions ADD COLUMN strategy_outcome TEXT NOT NULL DEFAULT '{}'`,
-	`ALTER TABLE openclaw_patterns ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium'`,
-	`ALTER TABLE openclaw_patterns ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'`,
-	`CREATE INDEX IF NOT EXISTS idx_openclaw_events_source ON openclaw_events(source)`,
+	`ALTER TABLE insight_patterns ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium'`,
+	`ALTER TABLE insight_patterns ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'`,
+	`CREATE INDEX IF NOT EXISTS idx_insight_events_source ON insight_events(source)`,
 }
 
 func isDuplicateColumn(err error) bool {

@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/agent_evolution"
-	"github.com/MartinNevlaha/stratus-v2/openclaw"
-	"github.com/MartinNevlaha/stratus-v2/openclaw/events"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
+	"github.com/MartinNevlaha/stratus-v2/insight"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
@@ -36,9 +37,10 @@ type Server struct {
 	syncedVersion        string
 	skippedFiles         []string
 	swarm                *swarm.Store
-	openclaw             *openclaw.Engine
+	insight             *insight.Engine
 	agentEvolutionEngine *agent_evolution.Engine
 	eventBus             events.EventBus
+	piEngine             *product_intelligence.Engine
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -62,7 +64,7 @@ func NewServer(
 	syncedVersion string,
 	skippedFiles []string,
 	swarmStore *swarm.Store,
-	openclawEngine *openclaw.Engine,
+	insightEngine *insight.Engine,
 	agentEvolutionEng *agent_evolution.Engine,
 ) *Server {
 	s := &Server{
@@ -79,7 +81,7 @@ func NewServer(
 		syncedVersion:        syncedVersion,
 		skippedFiles:         skippedFiles,
 		swarm:                swarmStore,
-		openclaw:             openclawEngine,
+		insight:             insightEngine,
 		agentEvolutionEngine: agentEvolutionEng,
 		dirtyFiles:           make(map[string]struct{}),
 		dirtyCh:              make(chan struct{}, 1),
@@ -113,6 +115,10 @@ func (s *Server) emitEvent(eventType events.EventType, source string, payload ma
 
 func (s *Server) SetEventBus(bus events.EventBus) {
 	s.eventBus = bus
+}
+
+func (s *Server) SetProductIntelligenceEngine(engine *product_intelligence.Engine) {
+	s.piEngine = engine
 }
 
 func (s *Server) indexWorker() {
@@ -242,44 +248,63 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/swarm/missions/{id}/checkpoint/latest", s.handleGetLatestCheckpoint)
 	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
 
-	// OpenClaw
-	mux.HandleFunc("GET /api/openclaw/status", s.handleGetOpenClawStatus)
-	mux.HandleFunc("POST /api/openclaw/trigger", s.handleTriggerOpenClawAnalysis)
-	mux.HandleFunc("GET /api/openclaw/patterns", s.handleGetOpenClawPatterns)
-	mux.HandleFunc("GET /api/openclaw/analyses", s.handleGetOpenClawAnalyses)
-	mux.HandleFunc("GET /api/openclaw/proposals", s.handleGetOpenClawProposals)
-	mux.HandleFunc("GET /api/openclaw/proposals/{id}", s.handleGetOpenClawProposal)
-	mux.HandleFunc("POST /api/openclaw/proposals/generate", s.handleTriggerOpenClawProposalGeneration)
-	mux.HandleFunc("GET /api/openclaw/dashboard", s.handleGetOpenClawDashboard)
-	mux.HandleFunc("PATCH /api/openclaw/proposals/{id}/status", s.handleUpdateOpenClawProposalStatus)
+	// Insight
+	mux.HandleFunc("GET /api/insight/status", s.handleGetInsightStatus)
+	mux.HandleFunc("POST /api/insight/trigger", s.handleTriggerInsightAnalysis)
+	mux.HandleFunc("GET /api/insight/patterns", s.handleGetInsightPatterns)
+	mux.HandleFunc("GET /api/insight/analyses", s.handleGetInsightAnalyses)
+	mux.HandleFunc("GET /api/insight/proposals", s.handleGetInsightProposals)
+	mux.HandleFunc("GET /api/insight/proposals/{id}", s.handleGetInsightProposal)
+	mux.HandleFunc("POST /api/insight/proposals/generate", s.handleTriggerInsightProposalGeneration)
+	mux.HandleFunc("GET /api/insight/dashboard", s.handleGetInsightDashboard)
+	mux.HandleFunc("PATCH /api/insight/proposals/{id}/status", s.handleUpdateInsightProposalStatus)
 
-	// OpenClaw Scorecards
-	mux.HandleFunc("GET /api/openclaw/scorecards/agents", s.handleGetAgentScorecards)
-	mux.HandleFunc("GET /api/openclaw/scorecards/agents/{name}", s.handleGetAgentScorecardByName)
-	mux.HandleFunc("GET /api/openclaw/scorecards/workflows", s.handleGetWorkflowScorecards)
-	mux.HandleFunc("GET /api/openclaw/scorecards/workflows/{type}", s.handleGetWorkflowScorecardByType)
-	mux.HandleFunc("POST /api/openclaw/scorecards/compute", s.handleTriggerScorecardComputation)
-	mux.HandleFunc("GET /api/openclaw/scorecards/highlights", s.handleGetScorecardHighlights)
+	// Insight Scorecards
+	mux.HandleFunc("GET /api/insight/scorecards/agents", s.handleGetAgentScorecards)
+	mux.HandleFunc("GET /api/insight/scorecards/agents/{name}", s.handleGetAgentScorecardByName)
+	mux.HandleFunc("GET /api/insight/scorecards/workflows", s.handleGetWorkflowScorecards)
+	mux.HandleFunc("GET /api/insight/scorecards/workflows/{type}", s.handleGetWorkflowScorecardByType)
+	mux.HandleFunc("POST /api/insight/scorecards/compute", s.handleTriggerScorecardComputation)
+	mux.HandleFunc("GET /api/insight/scorecards/highlights", s.handleGetScorecardHighlights)
 
-	// OpenClaw Routing Recommendations
-	mux.HandleFunc("GET /api/openclaw/routing/recommendations", s.handleGetRoutingRecommendations)
-	mux.HandleFunc("GET /api/openclaw/routing/recommendations/{id}", s.handleGetRoutingRecommendation)
-	mux.HandleFunc("POST /api/openclaw/routing/analyze", s.handleTriggerRoutingAnalysis)
+	// Insight Routing Recommendations
+	mux.HandleFunc("GET /api/insight/routing/recommendations", s.handleGetRoutingRecommendations)
+	mux.HandleFunc("GET /api/insight/routing/recommendations/{id}", s.handleGetRoutingRecommendation)
+	mux.HandleFunc("POST /api/insight/routing/analyze", s.handleTriggerRoutingAnalysis)
+
+	// Insight LLM
+	mux.HandleFunc("POST /api/insight/llm/test", s.handleTestLLMConnection)
 
 	// Agent Evolution
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/summary", s.handleGetAgentEvolutionSummary)
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/opportunities", s.handleGetAgentEvolutionOpportunities)
-	mux.HandleFunc("POST /api/openclaw/agent-evolution/trigger", s.handleTriggerAgentEvolution)
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/candidates", s.handleGetAgentCandidates)
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/candidates/{id}", s.handleGetAgentCandidateByID)
-	mux.HandleFunc("POST /api/openclaw/agent-evolution/candidates/{id}/approve", s.handleApproveAgentCandidate)
-	mux.HandleFunc("POST /api/openclaw/agent-evolution/candidates/{id}/reject", s.handleRejectAgentCandidate)
-	mux.HandleFunc("POST /api/openclaw/agent-evolution/candidates/{id}/experiment", s.handleStartAgentExperiment)
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/candidates/{id}/markdown", s.handleGetAgentCandidateMarkdown)
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/experiments", s.handleGetAgentExperiments)
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/experiments/{id}", s.handleGetAgentExperimentByID)
-	mux.HandleFunc("GET /api/openclaw/agent-evolution/experiments/{id}/results", s.handleGetAgentExperimentResults)
-	mux.HandleFunc("POST /api/openclaw/agent-evolution/experiments/{id}/cancel", s.handleCancelAgentExperiment)
+	mux.HandleFunc("GET /api/insight/agent-evolution/summary", s.handleGetAgentEvolutionSummary)
+	mux.HandleFunc("GET /api/insight/agent-evolution/opportunities", s.handleGetAgentEvolutionOpportunities)
+	mux.HandleFunc("POST /api/insight/agent-evolution/trigger", s.handleTriggerAgentEvolution)
+	mux.HandleFunc("GET /api/insight/agent-evolution/candidates", s.handleGetAgentCandidates)
+	mux.HandleFunc("GET /api/insight/agent-evolution/candidates/{id}", s.handleGetAgentCandidateByID)
+	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/approve", s.handleApproveAgentCandidate)
+	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/reject", s.handleRejectAgentCandidate)
+	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/experiment", s.handleStartAgentExperiment)
+	mux.HandleFunc("GET /api/insight/agent-evolution/candidates/{id}/markdown", s.handleGetAgentCandidateMarkdown)
+	mux.HandleFunc("GET /api/insight/agent-evolution/experiments", s.handleGetAgentExperiments)
+	mux.HandleFunc("GET /api/insight/agent-evolution/experiments/{id}", s.handleGetAgentExperimentByID)
+	mux.HandleFunc("GET /api/insight/agent-evolution/experiments/{id}/results", s.handleGetAgentExperimentResults)
+	mux.HandleFunc("POST /api/insight/agent-evolution/experiments/{id}/cancel", s.handleCancelAgentExperiment)
+
+	// Product Intelligence
+	mux.HandleFunc("GET /api/pi/projects", s.handlePIListProjects)
+	mux.HandleFunc("POST /api/pi/projects", s.handlePIRegisterProject)
+	mux.HandleFunc("GET /api/pi/projects/{id}", s.handlePIGetProject)
+	mux.HandleFunc("DELETE /api/pi/projects/{id}", s.handlePIDeleteProject)
+	mux.HandleFunc("POST /api/pi/projects/{id}/analyze", s.handlePIAnalyzeProject)
+	mux.HandleFunc("GET /api/pi/projects/{id}/features", s.handlePIGetProjectFeatures)
+	mux.HandleFunc("GET /api/pi/projects/{id}/gaps", s.handlePIGetProjectGaps)
+	mux.HandleFunc("GET /api/pi/projects/{id}/proposals", s.handlePIGetProjectProposals)
+	mux.HandleFunc("GET /api/pi/proposals/{id}", s.handlePIGetProposal)
+	mux.HandleFunc("POST /api/pi/proposals/{id}/accept", s.handlePIAcceptProposal)
+	mux.HandleFunc("POST /api/pi/proposals/{id}/reject", s.handlePIRejectProposal)
+	mux.HandleFunc("GET /api/pi/market-features", s.handlePIGetMarketFeatures)
+	mux.HandleFunc("POST /api/pi/market-research/refresh", s.handlePIRefreshMarketResearch)
+	mux.HandleFunc("GET /api/pi/dashboard", s.handlePIGetDashboard)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

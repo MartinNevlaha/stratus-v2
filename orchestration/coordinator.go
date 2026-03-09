@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/workflow_synthesis"
-	"github.com/MartinNevlaha/stratus-v2/openclaw/events"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
 )
 
 const emitEventTimeout = 5 * time.Second

@@ -72,7 +72,7 @@ func (d *DB) SaveSolutionPattern(pattern *SolutionPattern) error {
 	}
 
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_solution_patterns 
+		INSERT INTO insight_solution_patterns 
 		(id, problem_class, solution_pattern, repo_type, success_rate, occurrence_count,
 		 example_artifacts_json, confidence, first_seen, last_seen, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -97,7 +97,7 @@ func (d *DB) GetSolutionPatternByID(id string) (*SolutionPattern, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, problem_class, solution_pattern, repo_type, success_rate, occurrence_count,
 		       example_artifacts_json, confidence, first_seen, last_seen, created_at, updated_at
-		FROM openclaw_solution_patterns
+		FROM insight_solution_patterns
 		WHERE id = ?
 	`, id)
 
@@ -112,7 +112,7 @@ func (d *DB) ListSolutionPatterns(filters SolutionPatternFilters) ([]SolutionPat
 	query := `
 		SELECT id, problem_class, solution_pattern, repo_type, success_rate, occurrence_count,
 		       example_artifacts_json, confidence, first_seen, last_seen, created_at, updated_at
-		FROM openclaw_solution_patterns
+		FROM insight_solution_patterns
 		WHERE 1=1
 	`
 	args := []any{}
@@ -152,7 +152,7 @@ func (d *DB) GetSolutionPatternsByProblem(problemClass string, limit int) ([]Sol
 func (d *DB) DeleteOldSolutionPatterns(olderThan time.Duration) (int64, error) {
 	threshold := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
 	result, err := d.sql.Exec(`
-		DELETE FROM openclaw_solution_patterns
+		DELETE FROM insight_solution_patterns
 		WHERE last_seen < ? AND occurrence_count < 3
 	`, threshold)
 	if err != nil {
@@ -177,7 +177,7 @@ func (d *DB) SaveProblemStats(stats *ProblemStats) error {
 	now := time.Now().UTC()
 
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_problem_stats 
+		INSERT INTO insight_problem_stats 
 		(id, problem_class, repo_type, best_agent, best_workflow, success_rate,
 		 occurrence_count, avg_cycle_time, agents_success_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -202,7 +202,7 @@ func (d *DB) GetProblemStatsByID(id string) (*ProblemStats, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, problem_class, repo_type, best_agent, best_workflow, success_rate,
 		       occurrence_count, avg_cycle_time, agents_success_json, created_at, updated_at
-		FROM openclaw_problem_stats
+		FROM insight_problem_stats
 		WHERE id = ?
 	`, id)
 
@@ -213,7 +213,7 @@ func (d *DB) GetProblemStatsByClass(problemClass string) (*ProblemStats, error) 
 	row := d.sql.QueryRow(`
 		SELECT id, problem_class, repo_type, best_agent, best_workflow, success_rate,
 		       occurrence_count, avg_cycle_time, agents_success_json, created_at, updated_at
-		FROM openclaw_problem_stats
+		FROM insight_problem_stats
 		WHERE problem_class = ? AND repo_type = ''
 	`, problemClass)
 
@@ -224,7 +224,7 @@ func (d *DB) GetProblemStatsByClassAndRepo(problemClass, repoType string) (*Prob
 	row := d.sql.QueryRow(`
 		SELECT id, problem_class, repo_type, best_agent, best_workflow, success_rate,
 		       occurrence_count, avg_cycle_time, agents_success_json, created_at, updated_at
-		FROM openclaw_problem_stats
+		FROM insight_problem_stats
 		WHERE problem_class = ? AND repo_type = ?
 	`, problemClass, repoType)
 
@@ -239,7 +239,7 @@ func (d *DB) ListProblemStats(filters ProblemStatsFilters) ([]ProblemStats, erro
 	query := `
 		SELECT id, problem_class, repo_type, best_agent, best_workflow, success_rate,
 		       occurrence_count, avg_cycle_time, agents_success_json, created_at, updated_at
-		FROM openclaw_problem_stats
+		FROM insight_problem_stats
 		WHERE 1=1
 	`
 	args := []any{}
@@ -271,20 +271,20 @@ func (d *DB) GetAllProblemStats(limit int) ([]ProblemStats, error) {
 
 func (d *DB) CountProblemStats() (int, error) {
 	var count int
-	err := d.sql.QueryRow(`SELECT COUNT(*) FROM openclaw_problem_stats`).Scan(&count)
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM insight_problem_stats`).Scan(&count)
 	return count, err
 }
 
 func (d *DB) CountSolutionPatterns() (int, error) {
 	var count int
-	err := d.sql.QueryRow(`SELECT COUNT(*) FROM openclaw_solution_patterns`).Scan(&count)
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM insight_solution_patterns`).Scan(&count)
 	return count, err
 }
 
 func (d *DB) GetBestAgentForProblem(problemClass, repoType string) (string, float64, error) {
 	row := d.sql.QueryRow(`
 		SELECT best_agent, success_rate
-		FROM openclaw_problem_stats
+		FROM insight_problem_stats
 		WHERE problem_class = ? AND repo_type = ?
 		ORDER BY success_rate DESC
 		LIMIT 1
@@ -296,7 +296,7 @@ func (d *DB) GetBestAgentForProblem(problemClass, repoType string) (string, floa
 	if err == sql.ErrNoRows {
 		row = d.sql.QueryRow(`
 			SELECT best_agent, success_rate
-			FROM openclaw_problem_stats
+			FROM insight_problem_stats
 			WHERE problem_class = ? AND repo_type = ''
 			ORDER BY success_rate DESC
 			LIMIT 1
@@ -320,7 +320,7 @@ func (d *DB) GetBestSolutionForProblem(problemClass, repoType string) (*Solution
 		row = d.sql.QueryRow(`
 			SELECT id, problem_class, solution_pattern, repo_type, success_rate, occurrence_count,
 			       example_artifacts_json, confidence, first_seen, last_seen, created_at, updated_at
-			FROM openclaw_solution_patterns
+			FROM insight_solution_patterns
 			WHERE problem_class = ? AND repo_type = ?
 			ORDER BY success_rate DESC, occurrence_count DESC
 			LIMIT 1
@@ -329,7 +329,7 @@ func (d *DB) GetBestSolutionForProblem(problemClass, repoType string) (*Solution
 		row = d.sql.QueryRow(`
 			SELECT id, problem_class, solution_pattern, repo_type, success_rate, occurrence_count,
 			       example_artifacts_json, confidence, first_seen, last_seen, created_at, updated_at
-			FROM openclaw_solution_patterns
+			FROM insight_solution_patterns
 			WHERE problem_class = ?
 			ORDER BY success_rate DESC, occurrence_count DESC
 			LIMIT 1

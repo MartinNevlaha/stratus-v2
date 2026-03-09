@@ -66,7 +66,7 @@ func (d *DB) SaveArtifact(artifact *Artifact) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_artifacts 
+		INSERT INTO insight_artifacts 
 		(id, workflow_id, task_type, workflow_type, repo_type, problem_class,
 		 agents_used_json, root_cause, solution_pattern, files_changed_json,
 		 review_result, cycle_time_minutes, success, metadata_json, created_at)
@@ -99,7 +99,7 @@ func (d *DB) GetArtifactByID(id string) (*Artifact, error) {
 		SELECT id, workflow_id, task_type, workflow_type, repo_type, problem_class,
 		       agents_used_json, root_cause, solution_pattern, files_changed_json,
 		       review_result, cycle_time_minutes, success, metadata_json, created_at
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE id = ?
 	`, id)
 
@@ -111,7 +111,7 @@ func (d *DB) GetArtifactByWorkflowID(workflowID string) (*Artifact, error) {
 		SELECT id, workflow_id, task_type, workflow_type, repo_type, problem_class,
 		       agents_used_json, root_cause, solution_pattern, files_changed_json,
 		       review_result, cycle_time_minutes, success, metadata_json, created_at
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE workflow_id = ?
 	`, workflowID)
 
@@ -130,7 +130,7 @@ func (d *DB) ListArtifacts(filters ArtifactFilters) ([]Artifact, error) {
 		SELECT id, workflow_id, task_type, workflow_type, repo_type, problem_class,
 		       agents_used_json, root_cause, solution_pattern, files_changed_json,
 		       review_result, cycle_time_minutes, success, metadata_json, created_at
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE 1=1
 	`
 	args := []any{}
@@ -177,7 +177,7 @@ func (d *DB) GetArtifactsByProblemClass(problemClass string, limit int) ([]Artif
 		SELECT id, workflow_id, task_type, workflow_type, repo_type, problem_class,
 		       agents_used_json, root_cause, solution_pattern, files_changed_json,
 		       review_result, cycle_time_minutes, success, metadata_json, created_at
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE problem_class = ?
 		ORDER BY created_at DESC
 		LIMIT ?
@@ -199,7 +199,7 @@ func (d *DB) GetArtifactsByRepoType(repoType string, limit int) ([]Artifact, err
 		SELECT id, workflow_id, task_type, workflow_type, repo_type, problem_class,
 		       agents_used_json, root_cause, solution_pattern, files_changed_json,
 		       review_result, cycle_time_minutes, success, metadata_json, created_at
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE repo_type = ?
 		ORDER BY created_at DESC
 		LIMIT ?
@@ -221,7 +221,7 @@ func (d *DB) GetSuccessfulArtifactsWithSolution(limit int) ([]Artifact, error) {
 		SELECT id, workflow_id, task_type, workflow_type, repo_type, problem_class,
 		       agents_used_json, root_cause, solution_pattern, files_changed_json,
 		       review_result, cycle_time_minutes, success, metadata_json, created_at
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE success = 1 AND solution_pattern != '' AND problem_class != ''
 		ORDER BY created_at DESC
 		LIMIT ?
@@ -236,13 +236,13 @@ func (d *DB) GetSuccessfulArtifactsWithSolution(limit int) ([]Artifact, error) {
 
 func (d *DB) CountArtifacts() (int, error) {
 	var count int
-	err := d.sql.QueryRow(`SELECT COUNT(*) FROM openclaw_artifacts`).Scan(&count)
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM insight_artifacts`).Scan(&count)
 	return count, err
 }
 
 func (d *DB) CountArtifactsByProblemClass(problemClass string) (int, error) {
 	var count int
-	err := d.sql.QueryRow(`SELECT COUNT(*) FROM openclaw_artifacts WHERE problem_class = ?`, problemClass).Scan(&count)
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM insight_artifacts WHERE problem_class = ?`, problemClass).Scan(&count)
 	return count, err
 }
 
@@ -251,7 +251,7 @@ func (d *DB) GetProblemClassStats() ([]map[string]any, error) {
 		SELECT problem_class, COUNT(*) as count,
 		       SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
 		       AVG(cycle_time_minutes) as avg_cycle_time
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE problem_class != ''
 		GROUP BY problem_class
 		ORDER BY count DESC
@@ -291,7 +291,7 @@ func (d *DB) GetProblemClassStats() ([]map[string]any, error) {
 func (d *DB) GetAgentSuccessByProblem() ([]map[string]any, error) {
 	rows, err := d.sql.Query(`
 		SELECT problem_class, agents_used_json, success
-		FROM openclaw_artifacts
+		FROM insight_artifacts
 		WHERE problem_class != '' AND agents_used_json != '[]'
 	`)
 	if err != nil {

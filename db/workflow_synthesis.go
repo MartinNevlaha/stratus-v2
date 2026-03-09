@@ -106,7 +106,7 @@ func (d *DB) SaveWorkflowCandidate(c *WorkflowCandidate) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_workflow_candidates 
+		INSERT INTO insight_workflow_candidates 
 		(id, workflow_name, task_type, repo_type, base_workflow, steps_json,
 		 phase_transitions_json, confidence, status, source_pattern_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -134,7 +134,7 @@ func (d *DB) GetWorkflowCandidateByID(id string) (*WorkflowCandidate, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, workflow_name, task_type, repo_type, base_workflow, steps_json,
 		       phase_transitions_json, confidence, status, source_pattern_id, created_at, updated_at
-		FROM openclaw_workflow_candidates
+		FROM insight_workflow_candidates
 		WHERE id = ?
 	`, id)
 
@@ -144,7 +144,7 @@ func (d *DB) GetWorkflowCandidateByID(id string) (*WorkflowCandidate, error) {
 func (d *DB) GetWorkflowCandidatesByTaskType(taskType, repoType string) ([]WorkflowCandidate, error) {
 	query := `SELECT id, workflow_name, task_type, repo_type, base_workflow, steps_json,
 	          phase_transitions_json, confidence, status, source_pattern_id, created_at, updated_at
-	          FROM openclaw_workflow_candidates WHERE task_type = ?`
+	          FROM insight_workflow_candidates WHERE task_type = ?`
 	args := []any{taskType}
 
 	if repoType != "" {
@@ -167,7 +167,7 @@ func (d *DB) GetCandidateWorkflowForTask(taskType, repoType string) (*WorkflowCa
 	row := d.sql.QueryRow(`
 		SELECT id, workflow_name, task_type, repo_type, base_workflow, steps_json,
 		       phase_transitions_json, confidence, status, source_pattern_id, created_at, updated_at
-		FROM openclaw_workflow_candidates
+		FROM insight_workflow_candidates
 		WHERE task_type = ? AND (repo_type = ? OR repo_type = '') AND status = 'promoted'
 		ORDER BY repo_type DESC, confidence DESC
 		LIMIT 1
@@ -183,8 +183,8 @@ func (d *DB) GetExperimentForTask(taskType, repoType string) (*WorkflowExperimen
 		       e.started_at, e.completed_at, e.created_at, e.updated_at,
 		       c.id, c.workflow_name, c.task_type, c.repo_type, c.base_workflow, c.steps_json,
 		       c.phase_transitions_json, c.confidence, c.status, c.source_pattern_id, c.created_at, c.updated_at
-		FROM openclaw_workflow_experiments e
-		JOIN openclaw_workflow_candidates c ON e.candidate_id = c.id
+		FROM insight_workflow_experiments e
+		JOIN insight_workflow_candidates c ON e.candidate_id = c.id
 		WHERE c.task_type = ? AND (c.repo_type = ? OR c.repo_type = '') AND e.status = 'running'
 		ORDER BY c.repo_type DESC, c.confidence DESC
 		LIMIT 1
@@ -193,14 +193,17 @@ func (d *DB) GetExperimentForTask(taskType, repoType string) (*WorkflowExperimen
 	var e WorkflowExperiment
 	var c WorkflowCandidate
 	var banditJSON string
+	var startedAt string
 	var completedAt sql.NullString
+	var stepsJSON string
+	var transitionsJSON string
 
 	err := row.Scan(
 		&e.ID, &e.CandidateID, &e.BaselineWorkflow, &e.TrafficPercent, &e.Status,
 		&e.SampleSize, &e.RunsCandidate, &e.RunsBaseline, &banditJSON,
-		&e.StartedAt, &completedAt, &e.CreatedAt, &e.UpdatedAt,
+		&startedAt, &completedAt, &e.CreatedAt, &e.UpdatedAt,
 		&c.ID, &c.WorkflowName, &c.TaskType, &c.RepoType, &c.BaseWorkflow,
-		&c.Steps, &c.PhaseTransitions, &c.Confidence, &c.Status, &c.SourcePatternID, &c.CreatedAt, &c.UpdatedAt,
+		&stepsJSON, &transitionsJSON, &c.Confidence, &c.Status, &c.SourcePatternID, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil, nil
@@ -215,12 +218,24 @@ func (d *DB) GetExperimentForTask(taskType, repoType string) (*WorkflowExperimen
 		}
 	}
 
-	if completedAt.Valid {
-		t, err := time.Parse(time.RFC3339Nano, completedAt.String)
-		if err == nil {
-			e.CompletedAt = &t
-		}
+	if err := unmarshalJSONField("steps", stepsJSON, &c.Steps); err != nil {
+		return nil, nil, err
 	}
+	if err := unmarshalJSONField("phase_transitions", transitionsJSON, &c.PhaseTransitions); err != nil {
+		return nil, nil, err
+	}
+
+	parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+	if err != nil {
+		return nil, nil, err
+	}
+	e.StartedAt = parsedStartedAt
+
+	parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
+	if err != nil {
+		return nil, nil, err
+	}
+	e.CompletedAt = parsedCompletedAt
 
 	return &e, &c, nil
 }
@@ -228,7 +243,7 @@ func (d *DB) GetExperimentForTask(taskType, repoType string) (*WorkflowExperimen
 func (d *DB) UpdateWorkflowCandidateStatus(id, status string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := d.sql.Exec(`
-		UPDATE openclaw_workflow_candidates
+		UPDATE insight_workflow_candidates
 		SET status = ?, updated_at = ?
 		WHERE id = ?
 	`, status, now, id)
@@ -242,7 +257,7 @@ func (d *DB) ListWorkflowCandidates(status string, limit int) ([]WorkflowCandida
 
 	query := `SELECT id, workflow_name, task_type, repo_type, base_workflow, steps_json,
 	          phase_transitions_json, confidence, status, source_pattern_id, created_at, updated_at
-	          FROM openclaw_workflow_candidates`
+	          FROM insight_workflow_candidates`
 	args := []any{}
 
 	if status != "" {
@@ -289,7 +304,7 @@ func (d *DB) SaveWorkflowExperiment(e *WorkflowExperiment) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_workflow_experiments 
+		INSERT INTO insight_workflow_experiments 
 		(id, candidate_id, baseline_workflow, traffic_percent, status, sample_size,
 		 runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -316,7 +331,7 @@ func (d *DB) GetWorkflowExperimentByID(id string) (*WorkflowExperiment, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, candidate_id, baseline_workflow, traffic_percent, status, sample_size,
 		       runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, created_at, updated_at
-		FROM openclaw_workflow_experiments
+		FROM insight_workflow_experiments
 		WHERE id = ?
 	`, id)
 
@@ -327,7 +342,7 @@ func (d *DB) ListRunningExperiments() ([]WorkflowExperiment, error) {
 	rows, err := d.sql.Query(`
 		SELECT id, candidate_id, baseline_workflow, traffic_percent, status, sample_size,
 		       runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, created_at, updated_at
-		FROM openclaw_workflow_experiments
+		FROM insight_workflow_experiments
 		WHERE status = 'running'
 		ORDER BY started_at DESC
 	`)
@@ -347,7 +362,7 @@ func (d *DB) UpdateExperimentBandit(id string, bandit BanditState, runsCandidate
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		UPDATE openclaw_workflow_experiments
+		UPDATE insight_workflow_experiments
 		SET bandit_state_json = ?, runs_candidate = ?, runs_baseline = ?, updated_at = ?
 		WHERE id = ?
 	`, string(banditBytes), runsCandidate, runsBaseline, now, id)
@@ -364,7 +379,7 @@ func (d *DB) UpdateExperimentStatus(id, status string) error {
 	}
 
 	_, err := d.sql.Exec(`
-		UPDATE openclaw_workflow_experiments
+		UPDATE insight_workflow_experiments
 		SET status = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
 	`, status, completedAt, now, id)
@@ -383,7 +398,7 @@ func (d *DB) SaveExperimentResult(r *ExperimentResult) error {
 	}
 
 	result, err := d.sql.Exec(`
-		INSERT INTO openclaw_experiment_results 
+		INSERT INTO insight_experiment_results 
 		(experiment_id, workflow_id, used_candidate, success, cycle_time_min, retry_count, review_passes, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`,
@@ -404,7 +419,7 @@ func (d *DB) SaveExperimentResult(r *ExperimentResult) error {
 func (d *DB) GetExperimentResults(experimentID string) ([]ExperimentResult, error) {
 	rows, err := d.sql.Query(`
 		SELECT id, experiment_id, workflow_id, used_candidate, success, cycle_time_min, retry_count, review_passes, created_at
-		FROM openclaw_experiment_results
+		FROM insight_experiment_results
 		WHERE experiment_id = ?
 		ORDER BY created_at DESC
 	`, experimentID)
@@ -419,7 +434,7 @@ func (d *DB) GetExperimentResults(experimentID string) ([]ExperimentResult, erro
 func (d *DB) GetExperimentMetrics(experimentID string) (candidate, baseline EvaluationMetrics, err error) {
 	rows, err := d.sql.Query(`
 		SELECT used_candidate, success, cycle_time_min, retry_count, review_passes
-		FROM openclaw_experiment_results
+		FROM insight_experiment_results
 		WHERE experiment_id = ?
 	`, experimentID)
 	if err != nil {
@@ -490,12 +505,12 @@ func (d *DB) GetExperimentMetrics(experimentID string) (candidate, baseline Eval
 }
 
 func (d *DB) DeleteWorkflowCandidate(id string) error {
-	_, err := d.sql.Exec("DELETE FROM openclaw_workflow_candidates WHERE id = ?", id)
+	_, err := d.sql.Exec("DELETE FROM insight_workflow_candidates WHERE id = ?", id)
 	return err
 }
 
 func (d *DB) DeleteWorkflowExperiment(id string) error {
-	_, err := d.sql.Exec("DELETE FROM openclaw_workflow_experiments WHERE id = ?", id)
+	_, err := d.sql.Exec("DELETE FROM insight_workflow_experiments WHERE id = ?", id)
 	return err
 }
 
@@ -515,16 +530,12 @@ func scanWorkflowCandidate(row *sql.Row) (*WorkflowCandidate, error) {
 		return nil, fmt.Errorf("scan workflow candidate: %w", err)
 	}
 
-	if stepsJSON != "" {
-		if err := json.Unmarshal([]byte(stepsJSON), &c.Steps); err != nil {
-			return nil, fmt.Errorf("unmarshal steps: %w", err)
-		}
+	if err := unmarshalJSONField("steps", stepsJSON, &c.Steps); err != nil {
+		return nil, err
 	}
 
-	if transitionsJSON != "" {
-		if err := json.Unmarshal([]byte(transitionsJSON), &c.PhaseTransitions); err != nil {
-			return nil, fmt.Errorf("unmarshal transitions: %w", err)
-		}
+	if err := unmarshalJSONField("phase_transitions", transitionsJSON, &c.PhaseTransitions); err != nil {
+		return nil, err
 	}
 
 	return &c, nil
@@ -545,16 +556,12 @@ func scanWorkflowCandidates(rows *sql.Rows) ([]WorkflowCandidate, error) {
 			return nil, fmt.Errorf("scan workflow candidate row: %w", err)
 		}
 
-		if stepsJSON != "" {
-			if err := json.Unmarshal([]byte(stepsJSON), &c.Steps); err != nil {
-				return nil, fmt.Errorf("unmarshal steps: %w", err)
-			}
+		if err := unmarshalJSONField("steps", stepsJSON, &c.Steps); err != nil {
+			return nil, err
 		}
 
-		if transitionsJSON != "" {
-			if err := json.Unmarshal([]byte(transitionsJSON), &c.PhaseTransitions); err != nil {
-				return nil, fmt.Errorf("unmarshal transitions: %w", err)
-			}
+		if err := unmarshalJSONField("phase_transitions", transitionsJSON, &c.PhaseTransitions); err != nil {
+			return nil, err
 		}
 
 		candidates = append(candidates, c)
@@ -570,12 +577,13 @@ func scanWorkflowCandidates(rows *sql.Rows) ([]WorkflowCandidate, error) {
 func scanWorkflowExperiment(row *sql.Row) (*WorkflowExperiment, error) {
 	var e WorkflowExperiment
 	var banditJSON string
+	var startedAt string
 	var completedAt sql.NullString
 
 	err := row.Scan(
 		&e.ID, &e.CandidateID, &e.BaselineWorkflow, &e.TrafficPercent, &e.Status,
 		&e.SampleSize, &e.RunsCandidate, &e.RunsBaseline, &banditJSON,
-		&e.StartedAt, &completedAt, &e.CreatedAt, &e.UpdatedAt,
+		&startedAt, &completedAt, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -590,12 +598,17 @@ func scanWorkflowExperiment(row *sql.Row) (*WorkflowExperiment, error) {
 		}
 	}
 
-	if completedAt.Valid {
-		t, err := time.Parse(time.RFC3339Nano, completedAt.String)
-		if err == nil {
-			e.CompletedAt = &t
-		}
+	parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+	if err != nil {
+		return nil, err
 	}
+	e.StartedAt = parsedStartedAt
+
+	parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
+	if err != nil {
+		return nil, err
+	}
+	e.CompletedAt = parsedCompletedAt
 
 	return &e, nil
 }
@@ -605,12 +618,13 @@ func scanWorkflowExperiments(rows *sql.Rows) ([]WorkflowExperiment, error) {
 	for rows.Next() {
 		var e WorkflowExperiment
 		var banditJSON string
+		var startedAt string
 		var completedAt sql.NullString
 
 		err := rows.Scan(
 			&e.ID, &e.CandidateID, &e.BaselineWorkflow, &e.TrafficPercent, &e.Status,
 			&e.SampleSize, &e.RunsCandidate, &e.RunsBaseline, &banditJSON,
-			&e.StartedAt, &completedAt, &e.CreatedAt, &e.UpdatedAt,
+			&startedAt, &completedAt, &e.CreatedAt, &e.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan workflow experiment row: %w", err)
@@ -622,12 +636,17 @@ func scanWorkflowExperiments(rows *sql.Rows) ([]WorkflowExperiment, error) {
 			}
 		}
 
-		if completedAt.Valid {
-			t, err := time.Parse(time.RFC3339Nano, completedAt.String)
-			if err == nil {
-				e.CompletedAt = &t
-			}
+		parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+		if err != nil {
+			return nil, err
 		}
+		e.StartedAt = parsedStartedAt
+
+		parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
+		if err != nil {
+			return nil, err
+		}
+		e.CompletedAt = parsedCompletedAt
 
 		experiments = append(experiments, e)
 	}

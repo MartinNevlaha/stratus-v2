@@ -224,8 +224,8 @@ CREATE TABLE IF NOT EXISTS forge_entries (
     created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
--- OpenClaw: State tracking
-CREATE TABLE IF NOT EXISTS openclaw_state (
+-- Insight: State tracking
+CREATE TABLE IF NOT EXISTS insight_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     last_analysis TEXT NOT NULL,
     next_analysis TEXT NOT NULL,
@@ -239,8 +239,8 @@ CREATE TABLE IF NOT EXISTS openclaw_state (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
--- OpenClaw: Pattern library
-CREATE TABLE IF NOT EXISTS openclaw_patterns (
+-- Insight: Pattern library
+CREATE TABLE IF NOT EXISTS insight_patterns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pattern_type TEXT NOT NULL,
     pattern_name TEXT NOT NULL,
@@ -254,11 +254,11 @@ CREATE TABLE IF NOT EXISTS openclaw_patterns (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_type ON openclaw_patterns(pattern_type);
-CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_confidence ON openclaw_patterns(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_insight_patterns_type ON insight_patterns(pattern_type);
+CREATE INDEX IF NOT EXISTS idx_insight_patterns_confidence ON insight_patterns(confidence DESC);
 
--- OpenClaw: Proposal feedback
-CREATE TABLE IF NOT EXISTS openclaw_feedback (
+-- Insight: Proposal feedback
+CREATE TABLE IF NOT EXISTS insight_feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     proposal_id TEXT NOT NULL,
     feedback_type TEXT NOT NULL,
@@ -269,10 +269,10 @@ CREATE TABLE IF NOT EXISTS openclaw_feedback (
     FOREIGN KEY (proposal_id) REFERENCES proposals(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_openclaw_feedback_proposal ON openclaw_feedback(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_insight_feedback_proposal ON insight_feedback(proposal_id);
 
--- OpenClaw: Analysis history
-CREATE TABLE IF NOT EXISTS openclaw_analyses (
+-- Insight: Analysis history
+CREATE TABLE IF NOT EXISTS insight_analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     analysis_type TEXT NOT NULL,
     scope TEXT,
@@ -284,11 +284,11 @@ CREATE TABLE IF NOT EXISTS openclaw_analyses (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_type ON openclaw_analyses(analysis_type);
-CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_created ON openclaw_analyses(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_insight_analyses_type ON insight_analyses(analysis_type);
+CREATE INDEX IF NOT EXISTS idx_insight_analyses_created ON insight_analyses(created_at DESC);
 
--- OpenClaw: Event log for real-time observability
-CREATE TABLE IF NOT EXISTS openclaw_events (
+-- Insight: Event log for real-time observability
+CREATE TABLE IF NOT EXISTS insight_events (
     id         TEXT PRIMARY KEY,
     type       TEXT NOT NULL,
     timestamp  TEXT NOT NULL,
@@ -297,9 +297,9 @@ CREATE TABLE IF NOT EXISTS openclaw_events (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_openclaw_events_type ON openclaw_events(type);
-CREATE INDEX IF NOT EXISTS idx_openclaw_events_timestamp ON openclaw_events(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_openclaw_events_source ON openclaw_events(source);
+CREATE INDEX IF NOT EXISTS idx_insight_events_type ON insight_events(type);
+CREATE INDEX IF NOT EXISTS idx_insight_events_timestamp ON insight_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_insight_events_source ON insight_events(source);
 
 -- Daily aggregated metrics
 CREATE TABLE IF NOT EXISTS daily_metrics (
@@ -317,8 +317,8 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date);
 
--- OpenClaw: Improvement proposals
-CREATE TABLE IF NOT EXISTS openclaw_proposals (
+-- Insight: Improvement proposals
+CREATE TABLE IF NOT EXISTS insight_proposals (
     id                TEXT PRIMARY KEY,
     type              TEXT NOT NULL,
     status            TEXT NOT NULL DEFAULT 'detected',
@@ -334,13 +334,13 @@ CREATE TABLE IF NOT EXISTS openclaw_proposals (
     updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_type ON openclaw_proposals(type);
-CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_status ON openclaw_proposals(status);
-CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_pattern ON openclaw_proposals(source_pattern_id);
-CREATE INDEX IF NOT EXISTS idx_openclaw_proposals_created ON openclaw_proposals(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_insight_proposals_type ON insight_proposals(type);
+CREATE INDEX IF NOT EXISTS idx_insight_proposals_status ON insight_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_insight_proposals_pattern ON insight_proposals(source_pattern_id);
+CREATE INDEX IF NOT EXISTS idx_insight_proposals_created ON insight_proposals(created_at DESC);
 
--- OpenClaw: Agent Scorecards
-CREATE TABLE IF NOT EXISTS openclaw_agent_scorecards (
+-- Insight: Agent Scorecards
+CREATE TABLE IF NOT EXISTS insight_agent_scorecards (
     id TEXT PRIMARY KEY,
     agent_name TEXT NOT NULL,
     window TEXT NOT NULL,
@@ -360,11 +360,11 @@ CREATE TABLE IF NOT EXISTS openclaw_agent_scorecards (
     UNIQUE(agent_name, window)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_scorecards_name ON openclaw_agent_scorecards(agent_name);
-CREATE INDEX IF NOT EXISTS idx_agent_scorecards_window ON openclaw_agent_scorecards(window);
+CREATE INDEX IF NOT EXISTS idx_agent_scorecards_name ON insight_agent_scorecards(agent_name);
+CREATE INDEX IF NOT EXISTS idx_agent_scorecards_window ON insight_agent_scorecards(window);
 
--- OpenClaw: Workflow Scorecards
-CREATE TABLE IF NOT EXISTS openclaw_workflow_scorecards (
+-- Insight: Workflow Scorecards
+CREATE TABLE IF NOT EXISTS insight_workflow_scorecards (
     id TEXT PRIMARY KEY,
     workflow_type TEXT NOT NULL,
     window TEXT NOT NULL,
@@ -383,11 +383,11 @@ CREATE TABLE IF NOT EXISTS openclaw_workflow_scorecards (
     UNIQUE(workflow_type, window)
 );
 
-CREATE INDEX IF NOT EXISTS idx_workflow_scorecards_type ON openclaw_workflow_scorecards(workflow_type);
-CREATE INDEX IF NOT EXISTS idx_workflow_scorecards_window ON openclaw_workflow_scorecards(window);
+CREATE INDEX IF NOT EXISTS idx_workflow_scorecards_type ON insight_workflow_scorecards(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_workflow_scorecards_window ON insight_workflow_scorecards(window);
 
--- OpenClaw: Routing Recommendations
-CREATE TABLE IF NOT EXISTS openclaw_routing_recommendations (
+-- Insight: Routing Recommendations
+CREATE TABLE IF NOT EXISTS insight_routing_recommendations (
     id TEXT PRIMARY KEY,
     workflow_type TEXT NOT NULL,
     recommendation_type TEXT NOT NULL,
@@ -401,13 +401,13 @@ CREATE TABLE IF NOT EXISTS openclaw_routing_recommendations (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_routing_workflow ON openclaw_routing_recommendations(workflow_type);
-CREATE INDEX IF NOT EXISTS idx_routing_type ON openclaw_routing_recommendations(recommendation_type);
-CREATE INDEX IF NOT EXISTS idx_routing_confidence ON openclaw_routing_recommendations(confidence DESC);
-CREATE INDEX IF NOT EXISTS idx_routing_created ON openclaw_routing_recommendations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_routing_workflow ON insight_routing_recommendations(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_routing_type ON insight_routing_recommendations(recommendation_type);
+CREATE INDEX IF NOT EXISTS idx_routing_confidence ON insight_routing_recommendations(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_routing_created ON insight_routing_recommendations(created_at DESC);
 
--- OpenClaw: Workflow Metrics (cached aggregated metrics)
-CREATE TABLE IF NOT EXISTS openclaw_workflow_metrics (
+-- Insight: Workflow Metrics (cached aggregated metrics)
+CREATE TABLE IF NOT EXISTS insight_workflow_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workflow_id TEXT NOT NULL,
     workflow_type TEXT NOT NULL,
@@ -422,12 +422,12 @@ CREATE TABLE IF NOT EXISTS openclaw_workflow_metrics (
     UNIQUE(workflow_id, analysis_window)
 );
 
-CREATE INDEX IF NOT EXISTS idx_workflow_metrics_type ON openclaw_workflow_metrics(workflow_type);
-CREATE INDEX IF NOT EXISTS idx_workflow_metrics_window ON openclaw_workflow_metrics(analysis_window);
-CREATE INDEX IF NOT EXISTS idx_workflow_metrics_computed ON openclaw_workflow_metrics(computed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_metrics_type ON insight_workflow_metrics(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_workflow_metrics_window ON insight_workflow_metrics(analysis_window);
+CREATE INDEX IF NOT EXISTS idx_workflow_metrics_computed ON insight_workflow_metrics(computed_at DESC);
 
--- OpenClaw: Engineering Knowledge Artifacts
-CREATE TABLE IF NOT EXISTS openclaw_artifacts (
+-- Insight: Engineering Knowledge Artifacts
+CREATE TABLE IF NOT EXISTS insight_artifacts (
     id                 TEXT PRIMARY KEY,
     workflow_id        TEXT NOT NULL,
     task_type          TEXT NOT NULL DEFAULT '',
@@ -445,15 +445,15 @@ CREATE TABLE IF NOT EXISTS openclaw_artifacts (
     created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_id ON openclaw_artifacts(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_type ON openclaw_artifacts(workflow_type);
-CREATE INDEX IF NOT EXISTS idx_artifacts_problem_class ON openclaw_artifacts(problem_class);
-CREATE INDEX IF NOT EXISTS idx_artifacts_repo_type ON openclaw_artifacts(repo_type);
-CREATE INDEX IF NOT EXISTS idx_artifacts_success ON openclaw_artifacts(success);
-CREATE INDEX IF NOT EXISTS idx_artifacts_created ON openclaw_artifacts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_id ON insight_artifacts(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_workflow_type ON insight_artifacts(workflow_type);
+CREATE INDEX IF NOT EXISTS idx_artifacts_problem_class ON insight_artifacts(problem_class);
+CREATE INDEX IF NOT EXISTS idx_artifacts_repo_type ON insight_artifacts(repo_type);
+CREATE INDEX IF NOT EXISTS idx_artifacts_success ON insight_artifacts(success);
+CREATE INDEX IF NOT EXISTS idx_artifacts_created ON insight_artifacts(created_at DESC);
 
--- OpenClaw: Solution Patterns (mined from artifacts)
-CREATE TABLE IF NOT EXISTS openclaw_solution_patterns (
+-- Insight: Solution Patterns (mined from artifacts)
+CREATE TABLE IF NOT EXISTS insight_solution_patterns (
     id                      TEXT PRIMARY KEY,
     problem_class           TEXT NOT NULL,
     solution_pattern        TEXT NOT NULL,
@@ -469,12 +469,12 @@ CREATE TABLE IF NOT EXISTS openclaw_solution_patterns (
     UNIQUE(problem_class, solution_pattern, repo_type)
 );
 
-CREATE INDEX IF NOT EXISTS idx_solution_patterns_problem ON openclaw_solution_patterns(problem_class);
-CREATE INDEX IF NOT EXISTS idx_solution_patterns_repo ON openclaw_solution_patterns(repo_type);
-CREATE INDEX IF NOT EXISTS idx_solution_patterns_success ON openclaw_solution_patterns(success_rate DESC);
+CREATE INDEX IF NOT EXISTS idx_solution_patterns_problem ON insight_solution_patterns(problem_class);
+CREATE INDEX IF NOT EXISTS idx_solution_patterns_repo ON insight_solution_patterns(repo_type);
+CREATE INDEX IF NOT EXISTS idx_solution_patterns_success ON insight_solution_patterns(success_rate DESC);
 
--- OpenClaw: Problem Statistics (aggregated knowledge)
-CREATE TABLE IF NOT EXISTS openclaw_problem_stats (
+-- Insight: Problem Statistics (aggregated knowledge)
+CREATE TABLE IF NOT EXISTS insight_problem_stats (
     id                  TEXT PRIMARY KEY,
     problem_class       TEXT NOT NULL,
     repo_type           TEXT NOT NULL DEFAULT '',
@@ -489,12 +489,12 @@ CREATE TABLE IF NOT EXISTS openclaw_problem_stats (
     UNIQUE(problem_class, repo_type)
 );
 
-CREATE INDEX IF NOT EXISTS idx_problem_stats_problem ON openclaw_problem_stats(problem_class);
-CREATE INDEX IF NOT EXISTS idx_problem_stats_repo ON openclaw_problem_stats(repo_type);
-CREATE INDEX IF NOT EXISTS idx_problem_stats_success ON openclaw_problem_stats(success_rate DESC);
+CREATE INDEX IF NOT EXISTS idx_problem_stats_problem ON insight_problem_stats(problem_class);
+CREATE INDEX IF NOT EXISTS idx_problem_stats_repo ON insight_problem_stats(repo_type);
+CREATE INDEX IF NOT EXISTS idx_problem_stats_success ON insight_problem_stats(success_rate DESC);
 
--- OpenClaw: Trajectories (complete workflow execution paths)
-CREATE TABLE IF NOT EXISTS openclaw_trajectories (
+-- Insight: Trajectories (complete workflow execution paths)
+CREATE TABLE IF NOT EXISTS insight_trajectories (
     id                  TEXT PRIMARY KEY,
     workflow_id         TEXT NOT NULL,
     task_type           TEXT NOT NULL DEFAULT '',
@@ -509,15 +509,15 @@ CREATE TABLE IF NOT EXISTS openclaw_trajectories (
     created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_trajectories_workflow ON openclaw_trajectories(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_trajectories_task_type ON openclaw_trajectories(task_type);
-CREATE INDEX IF NOT EXISTS idx_trajectories_repo_type ON openclaw_trajectories(repo_type);
-CREATE INDEX IF NOT EXISTS idx_trajectories_result ON openclaw_trajectories(final_result);
-CREATE INDEX IF NOT EXISTS idx_trajectories_created ON openclaw_trajectories(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_trajectories_started ON openclaw_trajectories(started_at);
+CREATE INDEX IF NOT EXISTS idx_trajectories_workflow ON insight_trajectories(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_trajectories_task_type ON insight_trajectories(task_type);
+CREATE INDEX IF NOT EXISTS idx_trajectories_repo_type ON insight_trajectories(repo_type);
+CREATE INDEX IF NOT EXISTS idx_trajectories_result ON insight_trajectories(final_result);
+CREATE INDEX IF NOT EXISTS idx_trajectories_created ON insight_trajectories(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trajectories_started ON insight_trajectories(started_at);
 
--- OpenClaw: Trajectory Patterns (mined optimal agent sequences)
-CREATE TABLE IF NOT EXISTS openclaw_trajectory_patterns (
+-- Insight: Trajectory Patterns (mined optimal agent sequences)
+CREATE TABLE IF NOT EXISTS insight_trajectory_patterns (
     id                       TEXT PRIMARY KEY,
     problem_type             TEXT NOT NULL,
     repo_type                TEXT NOT NULL DEFAULT '',
@@ -532,12 +532,12 @@ CREATE TABLE IF NOT EXISTS openclaw_trajectory_patterns (
     UNIQUE(problem_type, repo_type)
 );
 
-CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_problem ON openclaw_trajectory_patterns(problem_type);
-CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_repo ON openclaw_trajectory_patterns(repo_type);
-CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_success ON openclaw_trajectory_patterns(success_rate DESC);
+CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_problem ON insight_trajectory_patterns(problem_type);
+CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_repo ON insight_trajectory_patterns(repo_type);
+CREATE INDEX IF NOT EXISTS idx_trajectory_patterns_success ON insight_trajectory_patterns(success_rate DESC);
 
--- OpenClaw: Workflow Candidates (synthesized from trajectory patterns)
-CREATE TABLE IF NOT EXISTS openclaw_workflow_candidates (
+-- Insight: Workflow Candidates (synthesized from trajectory patterns)
+CREATE TABLE IF NOT EXISTS insight_workflow_candidates (
     id                      TEXT PRIMARY KEY,
     workflow_name           TEXT NOT NULL,
     task_type               TEXT NOT NULL,
@@ -552,14 +552,14 @@ CREATE TABLE IF NOT EXISTS openclaw_workflow_candidates (
     updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_workflow_candidates_status ON openclaw_workflow_candidates(status);
-CREATE INDEX IF NOT EXISTS idx_workflow_candidates_task_repo ON openclaw_workflow_candidates(task_type, repo_type);
-CREATE INDEX IF NOT EXISTS idx_workflow_candidates_confidence ON openclaw_workflow_candidates(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_candidates_status ON insight_workflow_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_candidates_task_repo ON insight_workflow_candidates(task_type, repo_type);
+CREATE INDEX IF NOT EXISTS idx_workflow_candidates_confidence ON insight_workflow_candidates(confidence DESC);
 
--- OpenClaw: Workflow Experiments (A/B testing with bandit)
-CREATE TABLE IF NOT EXISTS openclaw_workflow_experiments (
+-- Insight: Workflow Experiments (A/B testing with bandit)
+CREATE TABLE IF NOT EXISTS insight_workflow_experiments (
     id                TEXT PRIMARY KEY,
-    candidate_id      TEXT NOT NULL REFERENCES openclaw_workflow_candidates(id) ON DELETE CASCADE,
+    candidate_id      TEXT NOT NULL REFERENCES insight_workflow_candidates(id) ON DELETE CASCADE,
     baseline_workflow TEXT NOT NULL,
     traffic_percent   REAL NOT NULL DEFAULT 10,
     status            TEXT NOT NULL DEFAULT 'running',
@@ -573,13 +573,13 @@ CREATE TABLE IF NOT EXISTS openclaw_workflow_experiments (
     updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_workflow_experiments_status ON openclaw_workflow_experiments(status);
-CREATE INDEX IF NOT EXISTS idx_workflow_experiments_candidate ON openclaw_workflow_experiments(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_experiments_status ON insight_workflow_experiments(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_experiments_candidate ON insight_workflow_experiments(candidate_id);
 
--- OpenClaw: Experiment Results (per-run metrics)
-CREATE TABLE IF NOT EXISTS openclaw_experiment_results (
+-- Insight: Experiment Results (per-run metrics)
+CREATE TABLE IF NOT EXISTS insight_experiment_results (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    experiment_id   TEXT NOT NULL REFERENCES openclaw_workflow_experiments(id) ON DELETE CASCADE,
+    experiment_id   TEXT NOT NULL REFERENCES insight_workflow_experiments(id) ON DELETE CASCADE,
     workflow_id     TEXT NOT NULL,
     used_candidate  INTEGER NOT NULL DEFAULT 0,
     success         INTEGER NOT NULL DEFAULT 0,
@@ -589,11 +589,11 @@ CREATE TABLE IF NOT EXISTS openclaw_experiment_results (
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_experiment_results_exp ON openclaw_experiment_results(experiment_id);
-CREATE INDEX IF NOT EXISTS idx_experiment_results_workflow ON openclaw_experiment_results(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_results_exp ON insight_experiment_results(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_results_workflow ON insight_experiment_results(workflow_id);
 
--- OpenClaw: Agent Candidates (evolution proposals)
-CREATE TABLE IF NOT EXISTS openclaw_agent_candidates (
+-- Insight: Agent Candidates (evolution proposals)
+CREATE TABLE IF NOT EXISTS insight_agent_candidates (
     id                TEXT PRIMARY KEY,
     agent_name        TEXT NOT NULL,
     base_agent        TEXT NOT NULL,
@@ -609,15 +609,15 @@ CREATE TABLE IF NOT EXISTS openclaw_agent_candidates (
     UNIQUE(agent_name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_candidates_status ON openclaw_agent_candidates(status);
-CREATE INDEX IF NOT EXISTS idx_agent_candidates_base ON openclaw_agent_candidates(base_agent);
-CREATE INDEX IF NOT EXISTS idx_agent_candidates_specialization ON openclaw_agent_candidates(specialization);
-CREATE INDEX IF NOT EXISTS idx_agent_candidates_confidence ON openclaw_agent_candidates(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_status ON insight_agent_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_base ON insight_agent_candidates(base_agent);
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_specialization ON insight_agent_candidates(specialization);
+CREATE INDEX IF NOT EXISTS idx_agent_candidates_confidence ON insight_agent_candidates(confidence DESC);
 
--- OpenClaw: Agent Experiments (A/B testing for agent evolution)
-CREATE TABLE IF NOT EXISTS openclaw_agent_experiments (
+-- Insight: Agent Experiments (A/B testing for agent evolution)
+CREATE TABLE IF NOT EXISTS insight_agent_experiments (
     id                TEXT PRIMARY KEY,
-    candidate_id      TEXT NOT NULL REFERENCES openclaw_agent_candidates(id) ON DELETE CASCADE,
+    candidate_id      TEXT NOT NULL REFERENCES insight_agent_candidates(id) ON DELETE CASCADE,
     candidate_agent   TEXT NOT NULL,
     baseline_agent    TEXT NOT NULL,
     traffic_percent   REAL NOT NULL DEFAULT 10,
@@ -633,14 +633,14 @@ CREATE TABLE IF NOT EXISTS openclaw_agent_experiments (
     updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_experiments_status ON openclaw_agent_experiments(status);
-CREATE INDEX IF NOT EXISTS idx_agent_experiments_candidate ON openclaw_agent_experiments(candidate_id);
-CREATE INDEX IF NOT EXISTS idx_agent_experiments_baseline ON openclaw_agent_experiments(baseline_agent);
+CREATE INDEX IF NOT EXISTS idx_agent_experiments_status ON insight_agent_experiments(status);
+CREATE INDEX IF NOT EXISTS idx_agent_experiments_candidate ON insight_agent_experiments(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_agent_experiments_baseline ON insight_agent_experiments(baseline_agent);
 
--- OpenClaw: Agent Experiment Results (per-run metrics)
-CREATE TABLE IF NOT EXISTS openclaw_agent_experiment_results (
+-- Insight: Agent Experiment Results (per-run metrics)
+CREATE TABLE IF NOT EXISTS insight_agent_experiment_results (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    experiment_id   TEXT NOT NULL REFERENCES openclaw_agent_experiments(id) ON DELETE CASCADE,
+    experiment_id   TEXT NOT NULL REFERENCES insight_agent_experiments(id) ON DELETE CASCADE,
     workflow_id     TEXT NOT NULL,
     task_type       TEXT NOT NULL DEFAULT '',
     used_candidate  INTEGER NOT NULL DEFAULT 0,
@@ -651,6 +651,100 @@ CREATE TABLE IF NOT EXISTS openclaw_agent_experiment_results (
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_exp_results_exp ON openclaw_agent_experiment_results(experiment_id);
-CREATE INDEX IF NOT EXISTS idx_agent_exp_results_workflow ON openclaw_agent_experiment_results(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_agent_exp_results_exp ON insight_agent_experiment_results(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_exp_results_workflow ON insight_agent_experiment_results(workflow_id);
+
+-- Product Intelligence: Tracked projects
+CREATE TABLE IF NOT EXISTS pi_projects (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    path            TEXT NOT NULL,
+    domain          TEXT NOT NULL DEFAULT '',
+    domain_confidence REAL DEFAULT 0,
+    readme_hash     TEXT,
+    last_analyzed   TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pi_projects_domain ON pi_projects(domain);
+CREATE INDEX IF NOT EXISTS idx_pi_projects_path ON pi_projects(path);
+
+-- Product Intelligence: Features detected in projects
+CREATE TABLE IF NOT EXISTS pi_project_features (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES pi_projects(id) ON DELETE CASCADE,
+    feature_name    TEXT NOT NULL,
+    feature_type    TEXT NOT NULL DEFAULT 'capability',
+    description     TEXT NOT NULL DEFAULT '',
+    evidence_json   TEXT NOT NULL DEFAULT '{}',
+    confidence      REAL DEFAULT 0.5,
+    source          TEXT NOT NULL DEFAULT 'code_analysis',
+    detected_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(project_id, feature_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pi_features_project ON pi_project_features(project_id);
+CREATE INDEX IF NOT EXISTS idx_pi_features_type ON pi_project_features(feature_type);
+
+-- Product Intelligence: Market/competitor features
+CREATE TABLE IF NOT EXISTS pi_market_features (
+    id              TEXT PRIMARY KEY,
+    domain          TEXT NOT NULL,
+    feature_name    TEXT NOT NULL,
+    feature_type    TEXT NOT NULL DEFAULT 'capability',
+    prevalence      REAL DEFAULT 0,
+    importance      REAL DEFAULT 0.5,
+    sources_json    TEXT NOT NULL DEFAULT '[]',
+    discovered_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(domain, feature_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pi_market_domain ON pi_market_features(domain);
+CREATE INDEX IF NOT EXISTS idx_pi_market_prevalence ON pi_market_features(prevalence DESC);
+
+-- Product Intelligence: Feature gap analysis results
+CREATE TABLE IF NOT EXISTS pi_feature_gaps (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES pi_projects(id) ON DELETE CASCADE,
+    feature_name    TEXT NOT NULL,
+    gap_type        TEXT NOT NULL DEFAULT 'missing',
+    impact_score    REAL DEFAULT 0,
+    complexity_score REAL DEFAULT 0,
+    strategic_fit   REAL DEFAULT 0,
+    confidence      REAL DEFAULT 0,
+    reasoning       TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'identified',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pi_gaps_project ON pi_feature_gaps(project_id);
+CREATE INDEX IF NOT EXISTS idx_pi_gaps_status ON pi_feature_gaps(status);
+CREATE INDEX IF NOT EXISTS idx_pi_gaps_impact ON pi_feature_gaps(impact_score DESC);
+
+-- Product Intelligence: Feature proposals
+CREATE TABLE IF NOT EXISTS pi_feature_proposals (
+    id                      TEXT PRIMARY KEY,
+    project_id              TEXT NOT NULL REFERENCES pi_projects(id) ON DELETE CASCADE,
+    gap_id                  TEXT REFERENCES pi_feature_gaps(id),
+    feature_name            TEXT NOT NULL,
+    title                   TEXT NOT NULL,
+    description             TEXT NOT NULL,
+    rationale               TEXT NOT NULL,
+    impact_score            INTEGER NOT NULL DEFAULT 5,
+    complexity_score        INTEGER NOT NULL DEFAULT 5,
+    strategic_fit           REAL DEFAULT 0.5,
+    confidence              REAL DEFAULT 0,
+    evidence_json           TEXT NOT NULL DEFAULT '{}',
+    implementation_hints_json TEXT NOT NULL DEFAULT '[]',
+    status                  TEXT NOT NULL DEFAULT 'proposed',
+    workflow_id             TEXT,
+    created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pi_proposals_project ON pi_feature_proposals(project_id);
+CREATE INDEX IF NOT EXISTS idx_pi_proposals_status ON pi_feature_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_pi_proposals_gap ON pi_feature_proposals(gap_id);
+CREATE INDEX IF NOT EXISTS idx_pi_proposals_workflow ON pi_feature_proposals(workflow_id);
 `

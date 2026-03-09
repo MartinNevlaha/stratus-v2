@@ -95,7 +95,7 @@ func (d *DB) SaveAgentCandidate(c *AgentCandidate) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := d.sql.Exec(`
-		INSERT INTO openclaw_agent_candidates 
+		INSERT INTO insight_agent_candidates 
 		(id, agent_name, base_agent, specialization, reason, confidence, prompt_diff_json,
 		 status, evidence_json, opportunity_type, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -122,7 +122,7 @@ func (d *DB) GetAgentCandidateByID(id string) (*AgentCandidate, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, agent_name, base_agent, specialization, reason, confidence, prompt_diff_json,
 		       status, evidence_json, opportunity_type, created_at, updated_at
-		FROM openclaw_agent_candidates
+		FROM insight_agent_candidates
 		WHERE id = ?
 	`, id)
 
@@ -133,7 +133,7 @@ func (d *DB) GetAgentCandidateByName(agentName string) (*AgentCandidate, error) 
 	row := d.sql.QueryRow(`
 		SELECT id, agent_name, base_agent, specialization, reason, confidence, prompt_diff_json,
 		       status, evidence_json, opportunity_type, created_at, updated_at
-		FROM openclaw_agent_candidates
+		FROM insight_agent_candidates
 		WHERE agent_name = ?
 	`, agentName)
 
@@ -147,7 +147,7 @@ func (d *DB) ListAgentCandidates(status string, limit int) ([]AgentCandidate, er
 
 	query := `SELECT id, agent_name, base_agent, specialization, reason, confidence, prompt_diff_json,
 	          status, evidence_json, opportunity_type, created_at, updated_at
-	          FROM openclaw_agent_candidates`
+	          FROM insight_agent_candidates`
 	args := []any{}
 
 	if status != "" {
@@ -170,7 +170,7 @@ func (d *DB) ListAgentCandidates(status string, limit int) ([]AgentCandidate, er
 func (d *DB) UpdateAgentCandidateStatus(id, status string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := d.sql.Exec(`
-		UPDATE openclaw_agent_candidates
+		UPDATE insight_agent_candidates
 		SET status = ?, updated_at = ?
 		WHERE id = ?
 	`, status, now, id)
@@ -178,7 +178,7 @@ func (d *DB) UpdateAgentCandidateStatus(id, status string) error {
 }
 
 func (d *DB) DeleteAgentCandidate(id string) error {
-	_, err := d.sql.Exec("DELETE FROM openclaw_agent_candidates WHERE id = ?", id)
+	_, err := d.sql.Exec("DELETE FROM insight_agent_candidates WHERE id = ?", id)
 	return err
 }
 
@@ -214,7 +214,7 @@ func (d *DB) SaveAgentExperiment(e *AgentExperiment) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_agent_experiments 
+		INSERT INTO insight_agent_experiments 
 		(id, candidate_id, candidate_agent, baseline_agent, traffic_percent, status, sample_size,
 		 runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, winner, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -243,7 +243,7 @@ func (d *DB) GetAgentExperimentByID(id string) (*AgentExperiment, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, candidate_id, candidate_agent, baseline_agent, traffic_percent, status, sample_size,
 		       runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, winner, created_at, updated_at
-		FROM openclaw_agent_experiments
+		FROM insight_agent_experiments
 		WHERE id = ?
 	`, id)
 
@@ -254,7 +254,7 @@ func (d *DB) GetAgentExperimentByCandidateID(candidateID string) (*AgentExperime
 	row := d.sql.QueryRow(`
 		SELECT id, candidate_id, candidate_agent, baseline_agent, traffic_percent, status, sample_size,
 		       runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, winner, created_at, updated_at
-		FROM openclaw_agent_experiments
+		FROM insight_agent_experiments
 		WHERE candidate_id = ?
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -267,7 +267,7 @@ func (d *DB) ListRunningAgentExperiments() ([]AgentExperiment, error) {
 	rows, err := d.sql.Query(`
 		SELECT id, candidate_id, candidate_agent, baseline_agent, traffic_percent, status, sample_size,
 		       runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, winner, created_at, updated_at
-		FROM openclaw_agent_experiments
+		FROM insight_agent_experiments
 		WHERE status = 'running'
 		ORDER BY started_at DESC
 	`)
@@ -286,7 +286,7 @@ func (d *DB) ListAgentExperiments(status string, limit int) ([]AgentExperiment, 
 
 	query := `SELECT id, candidate_id, candidate_agent, baseline_agent, traffic_percent, status, sample_size,
 	          runs_candidate, runs_baseline, bandit_state_json, started_at, completed_at, winner, created_at, updated_at
-	          FROM openclaw_agent_experiments`
+	          FROM insight_agent_experiments`
 	args := []any{}
 
 	if status != "" {
@@ -314,7 +314,7 @@ func (d *DB) UpdateAgentExperimentBandit(id string, bandit AgentBanditState, run
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		UPDATE openclaw_agent_experiments
+		UPDATE insight_agent_experiments
 		SET bandit_state_json = ?, runs_candidate = ?, runs_baseline = ?, updated_at = ?
 		WHERE id = ?
 	`, string(banditBytes), runsCandidate, runsBaseline, now, id)
@@ -338,7 +338,7 @@ func (d *DB) UpdateAgentExperimentStatus(id, status, winner string) error {
 	}
 
 	_, err := d.sql.Exec(`
-		UPDATE openclaw_agent_experiments
+		UPDATE insight_agent_experiments
 		SET status = ?, completed_at = ?, winner = ?, updated_at = ?
 		WHERE id = ?
 	`, status, completedAt, winnerVal, now, id)
@@ -361,7 +361,7 @@ func (d *DB) SaveAgentExperimentResult(r *AgentExperimentResult) error {
 	}
 
 	result, err := d.sql.Exec(`
-		INSERT INTO openclaw_agent_experiment_results 
+		INSERT INTO insight_agent_experiment_results 
 		(experiment_id, workflow_id, task_type, used_candidate, success, cycle_time_ms, review_passed, rework_count, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
@@ -382,7 +382,7 @@ func (d *DB) SaveAgentExperimentResult(r *AgentExperimentResult) error {
 func (d *DB) GetAgentExperimentResults(experimentID string) ([]AgentExperimentResult, error) {
 	rows, err := d.sql.Query(`
 		SELECT id, experiment_id, workflow_id, task_type, used_candidate, success, cycle_time_ms, review_passed, rework_count, created_at
-		FROM openclaw_agent_experiment_results
+		FROM insight_agent_experiment_results
 		WHERE experiment_id = ?
 		ORDER BY created_at DESC
 	`, experimentID)
@@ -397,7 +397,7 @@ func (d *DB) GetAgentExperimentResults(experimentID string) ([]AgentExperimentRe
 func (d *DB) GetAgentExperimentMetrics(experimentID string) (candidate, baseline AgentEvaluationMetrics, err error) {
 	rows, err := d.sql.Query(`
 		SELECT used_candidate, success, cycle_time_ms, review_passed, rework_count
-		FROM openclaw_agent_experiment_results
+		FROM insight_agent_experiment_results
 		WHERE experiment_id = ?
 	`, experimentID)
 	if err != nil {
@@ -466,7 +466,7 @@ func (d *DB) GetAgentExperimentMetrics(experimentID string) (candidate, baseline
 }
 
 func (d *DB) DeleteAgentExperiment(id string) error {
-	_, err := d.sql.Exec("DELETE FROM openclaw_agent_experiments WHERE id = ?", id)
+	_, err := d.sql.Exec("DELETE FROM insight_agent_experiments WHERE id = ?", id)
 	return err
 }
 
@@ -485,16 +485,12 @@ func scanAgentCandidate(row *sql.Row) (*AgentCandidate, error) {
 		return nil, fmt.Errorf("scan agent candidate: %w", err)
 	}
 
-	if promptDiffJSON != "" {
-		if err := json.Unmarshal([]byte(promptDiffJSON), &c.PromptDiff); err != nil {
-			return nil, fmt.Errorf("unmarshal prompt_diff: %w", err)
-		}
+	if err := unmarshalJSONField("prompt_diff", promptDiffJSON, &c.PromptDiff); err != nil {
+		return nil, err
 	}
 
-	if evidenceJSON != "" {
-		if err := json.Unmarshal([]byte(evidenceJSON), &c.Evidence); err != nil {
-			return nil, fmt.Errorf("unmarshal evidence: %w", err)
-		}
+	if err := unmarshalJSONField("evidence", evidenceJSON, &c.Evidence); err != nil {
+		return nil, err
 	}
 
 	return &c, nil
@@ -514,16 +510,12 @@ func scanAgentCandidates(rows *sql.Rows) ([]AgentCandidate, error) {
 			return nil, fmt.Errorf("scan agent candidate row: %w", err)
 		}
 
-		if promptDiffJSON != "" {
-			if err := json.Unmarshal([]byte(promptDiffJSON), &c.PromptDiff); err != nil {
-				return nil, fmt.Errorf("unmarshal prompt_diff: %w", err)
-			}
+		if err := unmarshalJSONField("prompt_diff", promptDiffJSON, &c.PromptDiff); err != nil {
+			return nil, err
 		}
 
-		if evidenceJSON != "" {
-			if err := json.Unmarshal([]byte(evidenceJSON), &c.Evidence); err != nil {
-				return nil, fmt.Errorf("unmarshal evidence: %w", err)
-			}
+		if err := unmarshalJSONField("evidence", evidenceJSON, &c.Evidence); err != nil {
+			return nil, err
 		}
 
 		candidates = append(candidates, c)
@@ -539,13 +531,14 @@ func scanAgentCandidates(rows *sql.Rows) ([]AgentCandidate, error) {
 func scanAgentExperiment(row *sql.Row) (*AgentExperiment, error) {
 	var e AgentExperiment
 	var banditJSON string
+	var startedAt string
 	var completedAt sql.NullString
 	var winner sql.NullString
 
 	err := row.Scan(
 		&e.ID, &e.CandidateID, &e.CandidateAgent, &e.BaselineAgent, &e.TrafficPercent, &e.Status,
 		&e.SampleSize, &e.RunsCandidate, &e.RunsBaseline, &banditJSON,
-		&e.StartedAt, &completedAt, &winner, &e.CreatedAt, &e.UpdatedAt,
+		&startedAt, &completedAt, &winner, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -560,12 +553,17 @@ func scanAgentExperiment(row *sql.Row) (*AgentExperiment, error) {
 		}
 	}
 
-	if completedAt.Valid {
-		t, err := time.Parse(time.RFC3339Nano, completedAt.String)
-		if err == nil {
-			e.CompletedAt = &t
-		}
+	parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+	if err != nil {
+		return nil, err
 	}
+	e.StartedAt = parsedStartedAt
+
+	parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
+	if err != nil {
+		return nil, err
+	}
+	e.CompletedAt = parsedCompletedAt
 
 	if winner.Valid {
 		e.Winner = winner.String
@@ -579,13 +577,14 @@ func scanAgentExperiments(rows *sql.Rows) ([]AgentExperiment, error) {
 	for rows.Next() {
 		var e AgentExperiment
 		var banditJSON string
+		var startedAt string
 		var completedAt sql.NullString
 		var winner sql.NullString
 
 		err := rows.Scan(
 			&e.ID, &e.CandidateID, &e.CandidateAgent, &e.BaselineAgent, &e.TrafficPercent, &e.Status,
 			&e.SampleSize, &e.RunsCandidate, &e.RunsBaseline, &banditJSON,
-			&e.StartedAt, &completedAt, &winner, &e.CreatedAt, &e.UpdatedAt,
+			&startedAt, &completedAt, &winner, &e.CreatedAt, &e.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan agent experiment row: %w", err)
@@ -597,12 +596,17 @@ func scanAgentExperiments(rows *sql.Rows) ([]AgentExperiment, error) {
 			}
 		}
 
-		if completedAt.Valid {
-			t, err := time.Parse(time.RFC3339Nano, completedAt.String)
-			if err == nil {
-				e.CompletedAt = &t
-			}
+		parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+		if err != nil {
+			return nil, err
 		}
+		e.StartedAt = parsedStartedAt
+
+		parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
+		if err != nil {
+			return nil, err
+		}
+		e.CompletedAt = parsedCompletedAt
 
 		if winner.Valid {
 			e.Winner = winner.String

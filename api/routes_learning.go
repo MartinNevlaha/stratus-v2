@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/openclaw/events"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
 )
 
 func (s *Server) handleListCandidates(w http.ResponseWriter, r *http.Request) {

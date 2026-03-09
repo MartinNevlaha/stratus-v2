@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/workflow_synthesis"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
 )
 
 type SynthesisRouter struct {

@@ -15,15 +15,23 @@ type SyncState struct {
 	SkippedFiles  []string          `json:"skipped_files,omitempty"`
 }
 
-type OpenClawConfig struct {
-	Enabled       bool    `json:"enabled"`
-	Interval      int     `json:"interval"`
-	MaxProposals  int     `json:"max_proposals"`
-	MinConfidence float64 `json:"min_confidence"`
-	LLMProvider   string  `json:"llm_provider"`
-	LLMModel      string  `json:"llm_model"`
-	LLMAPIKey     string  `json:"llm_api_key"`
-	LLMTimeout    int     `json:"llm_timeout"`
+type LLMConfig struct {
+	Provider    string  `json:"provider"`
+	Model       string  `json:"model"`
+	APIKey      string  `json:"-"`
+	BaseURL     string  `json:"base_url,omitempty"`
+	Timeout     int     `json:"timeout,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	MaxRetries  int     `json:"max_retries,omitempty"`
+}
+
+type InsightConfig struct {
+	Enabled       bool      `json:"enabled"`
+	Interval      int       `json:"interval"`
+	MaxProposals  int       `json:"max_proposals"`
+	MinConfidence float64   `json:"min_confidence"`
+	LLM           LLMConfig `json:"llm"`
 }
 
 type Config struct {
@@ -34,7 +42,7 @@ type Config struct {
 	STT                      STTConfig      `json:"stt"`
 	SyncState                *SyncState     `json:"sync_state,omitempty"`
 	MetricsBroadcastInterval int            `json:"metrics_broadcast_interval"`
-	OpenClaw                 OpenClawConfig `json:"openclaw"`
+	Insight                 InsightConfig `json:"insight"`
 }
 
 type VexorConfig struct {
@@ -65,13 +73,18 @@ func Default() Config {
 			Model:    "Systran/faster-whisper-small",
 		},
 		MetricsBroadcastInterval: 30,
-		OpenClaw: OpenClawConfig{
+		Insight: InsightConfig{
 			Enabled:       true,
 			Interval:      1,
 			MaxProposals:  5,
 			MinConfidence: 0.7,
-			LLMProvider:   "claude",
-			LLMModel:      "claude-3-5-sonnet-20241022",
+			LLM: LLMConfig{
+				Provider:    "zai",
+				Model:       "glm-5",
+				Timeout:     120,
+				MaxTokens:   16384,
+				Temperature: 0.7,
+			},
 		},
 	}
 }

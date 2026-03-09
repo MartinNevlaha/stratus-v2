@@ -180,25 +180,25 @@ export const getProjectMetrics = (project?: string, days = 30) =>
     days: String(days)
   })
 
-// OpenClaw
-export const getOpenClawStatus = () =>
-  get<{ enabled: boolean; state: any; metrics: any; recent_patterns: any[]; recent_analyses: any[] }>('/openclaw/status')
+// Insight
+export const getInsightStatus = () =>
+  get<{ enabled: boolean; state: any; metrics: any; recent_patterns: any[]; recent_analyses: any[] }>('/insight/status')
 
-export const triggerOpenClawAnalysis = () =>
-  post<{ status: string; message: string }>('/openclaw/trigger', {})
+export const triggerInsightAnalysis = () =>
+  post<{ status: string; message: string }>('/insight/trigger', {})
 
-export const getOpenClawPatterns = (type?: string, minConfidence?: number, limit?: number) => {
+export const getInsightPatterns = (type?: string, minConfidence?: number, limit?: number) => {
   const params: Record<string, string> = {}
   if (type) params.type = type
   if (minConfidence) params.min_confidence = String(minConfidence)
   if (limit) params.limit = String(limit)
-  return get<{ patterns: any[]; count: number }>('/openclaw/patterns', params)
+  return get<{ patterns: any[]; count: number }>('/insight/patterns', params)
 }
 
-export const getOpenClawAnalyses = (type?: string, limit?: number) => {
+export const getInsightAnalyses = (type?: string, limit?: number) => {
   const params: Record<string, string> = {}
   if (type) params.type = type
   if (limit) params.limit = String(limit)
-  return get<{ analyses: any[]; count: number }>('/openclaw/analyses', params)
+  return get<{ analyses: any[]; count: number }>('/insight/analyses', params)
 }
 

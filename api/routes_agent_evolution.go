@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/agent_evolution"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 )
 
 func (s *Server) handleGetAgentEvolutionSummary(w http.ResponseWriter, r *http.Request) {
@@ -159,6 +159,10 @@ func (s *Server) handleStartAgentExperiment(w http.ResponseWriter, r *http.Reque
 	experiment, err := s.agentEvolutionEngine.StartExperiment(r.Context(), id)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if experiment == nil {
+		jsonErr(w, http.StatusNotFound, "candidate not found")
 		return
 	}
 

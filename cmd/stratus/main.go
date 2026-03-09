@@ -23,9 +23,10 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/hooks"
-	"github.com/MartinNevlaha/stratus-v2/internal/openclaw/agent_evolution"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/mcp"
-	"github.com/MartinNevlaha/stratus-v2/openclaw"
+	"github.com/MartinNevlaha/stratus-v2/insight"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
@@ -122,6 +123,11 @@ func cmdServe() {
 	}()
 
 	coord := orchestration.NewCoordinator(database)
+	var eventBus events.EventBus
+	if cfg.Insight.Enabled {
+		eventBus = events.NewInMemoryBus(1000)
+		coord.SetEventBus(eventBus)
+	}
 	vexorClient := vexor.New(cfg.Vexor.BinaryPath, cfg.Vexor.Model, cfg.Vexor.TimeoutSec)
 	hub := api.NewHub()
 	termMgr := terminal.NewManager()
@@ -140,15 +146,18 @@ func cmdServe() {
 	}
 	swarmStore := swarm.NewStore(database, cfg.ProjectRoot)
 
-	// Initialize OpenClaw engine
-	var openclawEngine *openclaw.Engine
-	var openclawCancel context.CancelFunc
-	if cfg.OpenClaw.Enabled {
-		openclawEngine = openclaw.NewEngine(database, cfg.OpenClaw)
+	// Initialize Insight engine
+	var insightEngine *insight.Engine
+	var insightCancel context.CancelFunc
+	if cfg.Insight.Enabled {
+		insightEngine = insight.NewEngine(database, cfg.Insight)
+		if eventBus != nil {
+			insightEngine.SetEventBus(eventBus)
+		}
 		ctx, cancel := context.WithCancel(context.Background())
-		openclawCancel = cancel
-		if err := openclawEngine.Start(ctx); err != nil {
-			log.Printf("warning: failed to start OpenClaw engine: %v", err)
+		insightCancel = cancel
+		if err := insightEngine.Start(ctx); err != nil {
+			log.Printf("warning: failed to start Insight engine: %v", err)
 		}
 	}
 
@@ -158,7 +167,13 @@ func cmdServe() {
 	opencodeAgentsDir := filepath.Join(cfg.ProjectRoot, ".opencode", "agents")
 	agentEvolutionEngine := agent_evolution.NewEngine(database, agent_evolution.DefaultConfig(), claudeAgentsDir, opencodeAgentsDir, logger)
 
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, openclawEngine, agentEvolutionEngine)
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, insightEngine, agentEvolutionEngine)
+	if eventBus != nil {
+		srv.SetEventBus(eventBus)
+	}
+	if insightEngine != nil {
+		srv.SetProductIntelligenceEngine(insightEngine.ProductIntelligence())
+	}
 
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)
@@ -169,11 +184,14 @@ func cmdServe() {
 	go func() {
 		<-sigCh
 		log.Println("stratus shutting down…")
-		if openclawEngine != nil {
-			openclawEngine.Stop()
+		if insightEngine != nil {
+			insightEngine.Stop()
 		}
-		if openclawCancel != nil {
-			openclawCancel()
+		if insightCancel != nil {
+			insightCancel()
+		}
+		if eventBus != nil {
+			eventBus.Close()
 		}
 		if sttOwned {
 			sttStop()

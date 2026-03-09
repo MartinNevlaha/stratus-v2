@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,7 +89,7 @@ func (d *DB) SaveTrajectory(t *Trajectory) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_trajectories 
+		INSERT INTO insight_trajectories 
 		(id, workflow_id, task_type, repo_type, workflow_type, steps_json, step_count,
 		 final_result, cycle_time_minutes, started_at, completed_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -116,7 +115,7 @@ func (d *DB) GetTrajectoryByID(id string) (*Trajectory, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, workflow_id, task_type, repo_type, workflow_type, steps_json, step_count,
 		       final_result, cycle_time_minutes, started_at, completed_at, created_at
-		FROM openclaw_trajectories
+		FROM insight_trajectories
 		WHERE id = ?
 	`, id)
 
@@ -127,7 +126,7 @@ func (d *DB) GetTrajectoryByWorkflowID(workflowID string) (*Trajectory, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, workflow_id, task_type, repo_type, workflow_type, steps_json, step_count,
 		       final_result, cycle_time_minutes, started_at, completed_at, created_at
-		FROM openclaw_trajectories
+		FROM insight_trajectories
 		WHERE workflow_id = ?
 	`, workflowID)
 
@@ -137,7 +136,7 @@ func (d *DB) GetTrajectoryByWorkflowID(workflowID string) (*Trajectory, error) {
 func (d *DB) ListTrajectories(filters TrajectoryFilters) ([]Trajectory, error) {
 	query := `SELECT id, workflow_id, task_type, repo_type, workflow_type, steps_json, step_count,
 	          final_result, cycle_time_minutes, started_at, completed_at, created_at
-	          FROM openclaw_trajectories WHERE 1=1`
+	          FROM insight_trajectories WHERE 1=1`
 	args := []any{}
 
 	if filters.TaskType != "" {
@@ -183,7 +182,7 @@ func (d *DB) GetTrajectoriesInTimeRange(start, end time.Time, limit int) ([]Traj
 	rows, err := d.sql.Query(`
 		SELECT id, workflow_id, task_type, repo_type, workflow_type, steps_json, step_count,
 		       final_result, cycle_time_minutes, started_at, completed_at, created_at
-		FROM openclaw_trajectories
+		FROM insight_trajectories
 		WHERE started_at >= ? AND started_at <= ?
 		ORDER BY started_at DESC
 		LIMIT ?
@@ -197,7 +196,7 @@ func (d *DB) GetTrajectoriesInTimeRange(start, end time.Time, limit int) ([]Traj
 }
 
 func (d *DB) DeleteTrajectory(id string) error {
-	_, err := d.sql.Exec("DELETE FROM openclaw_trajectories WHERE id = ?", id)
+	_, err := d.sql.Exec("DELETE FROM insight_trajectories WHERE id = ?", id)
 	return err
 }
 
@@ -224,7 +223,7 @@ func (d *DB) SaveTrajectoryPattern(p *TrajectoryPattern) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = d.sql.Exec(`
-		INSERT INTO openclaw_trajectory_patterns 
+		INSERT INTO insight_trajectory_patterns 
 		(id, problem_type, repo_type, optimal_agent_sequence_json, success_rate,
 		 occurrence_count, avg_cycle_time_minutes, example_trajectory_ids_json,
 		 confidence, created_at, updated_at)
@@ -251,7 +250,7 @@ func (d *DB) GetTrajectoryPatternByID(id string) (*TrajectoryPattern, error) {
 		SELECT id, problem_type, repo_type, optimal_agent_sequence_json, success_rate,
 		       occurrence_count, avg_cycle_time_minutes, example_trajectory_ids_json,
 		       confidence, created_at, updated_at
-		FROM openclaw_trajectory_patterns
+		FROM insight_trajectory_patterns
 		WHERE id = ?
 	`, id)
 
@@ -262,7 +261,7 @@ func (d *DB) GetTrajectoryPatternsByProblemType(problemType, repoType string) ([
 	query := `SELECT id, problem_type, repo_type, optimal_agent_sequence_json, success_rate,
 	          occurrence_count, avg_cycle_time_minutes, example_trajectory_ids_json,
 	          confidence, created_at, updated_at
-	          FROM openclaw_trajectory_patterns WHERE problem_type = ?`
+	          FROM insight_trajectory_patterns WHERE problem_type = ?`
 	args := []any{problemType}
 
 	if repoType != "" {
@@ -290,7 +289,7 @@ func (d *DB) ListTrajectoryPatterns(limit int) ([]TrajectoryPattern, error) {
 		SELECT id, problem_type, repo_type, optimal_agent_sequence_json, success_rate,
 		       occurrence_count, avg_cycle_time_minutes, example_trajectory_ids_json,
 		       confidence, created_at, updated_at
-		FROM openclaw_trajectory_patterns
+		FROM insight_trajectory_patterns
 		ORDER BY confidence DESC, success_rate DESC
 		LIMIT ?
 	`, limit)
@@ -303,14 +302,14 @@ func (d *DB) ListTrajectoryPatterns(limit int) ([]TrajectoryPattern, error) {
 }
 
 func (d *DB) DeleteTrajectoryPattern(id string) error {
-	_, err := d.sql.Exec("DELETE FROM openclaw_trajectory_patterns WHERE id = ?", id)
+	_, err := d.sql.Exec("DELETE FROM insight_trajectory_patterns WHERE id = ?", id)
 	return err
 }
 
 func (d *DB) CountTrajectoriesByResult(taskType string) (success, failure int, err error) {
 	rows, err := d.sql.Query(`
 		SELECT final_result, COUNT(*) 
-		FROM openclaw_trajectories 
+		FROM insight_trajectories 
 		WHERE task_type = ?
 		GROUP BY final_result
 	`, taskType)
@@ -389,12 +388,13 @@ func (d *DB) GetAgentSequenceStats(taskType string) ([]AgentSequenceStats, error
 func scanTrajectory(row *sql.Row) (*Trajectory, error) {
 	var t Trajectory
 	var stepsJSON string
+	var startedAt string
 	var completedAt sql.NullString
 
 	err := row.Scan(
 		&t.ID, &t.WorkflowID, &t.TaskType, &t.RepoType, &t.WorkflowType,
 		&stepsJSON, &t.StepCount, &t.FinalResult, &t.CycleTimeMin,
-		&t.StartedAt, &completedAt, &t.CreatedAt,
+		&startedAt, &completedAt, &t.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -403,20 +403,21 @@ func scanTrajectory(row *sql.Row) (*Trajectory, error) {
 		return nil, fmt.Errorf("scan trajectory: %w", err)
 	}
 
-	if stepsJSON != "" {
-		if err := json.Unmarshal([]byte(stepsJSON), &t.Steps); err != nil {
-			return nil, fmt.Errorf("unmarshal steps: %w", err)
-		}
+	if err := unmarshalJSONField("steps", stepsJSON, &t.Steps); err != nil {
+		return nil, err
 	}
 
-	if completedAt.Valid {
-		pt, err := time.Parse(time.RFC3339Nano, completedAt.String)
-		if err == nil {
-			t.CompletedAt = &pt
-		} else {
-			slog.Debug("failed to parse completed_at timestamp", "value", completedAt.String, "error", err)
-		}
+	parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+	if err != nil {
+		return nil, err
 	}
+	t.StartedAt = parsedStartedAt
+
+	parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
+	if err != nil {
+		return nil, err
+	}
+	t.CompletedAt = parsedCompletedAt
 
 	return &t, nil
 }
@@ -426,31 +427,33 @@ func scanTrajectories(rows *sql.Rows) ([]Trajectory, error) {
 	for rows.Next() {
 		var t Trajectory
 		var stepsJSON string
+		var startedAt string
 		var completedAt sql.NullString
 
 		err := rows.Scan(
 			&t.ID, &t.WorkflowID, &t.TaskType, &t.RepoType, &t.WorkflowType,
 			&stepsJSON, &t.StepCount, &t.FinalResult, &t.CycleTimeMin,
-			&t.StartedAt, &completedAt, &t.CreatedAt,
+			&startedAt, &completedAt, &t.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan trajectory row: %w", err)
 		}
 
-		if stepsJSON != "" {
-			if err := json.Unmarshal([]byte(stepsJSON), &t.Steps); err != nil {
-				return nil, fmt.Errorf("unmarshal steps: %w", err)
-			}
+		if err := unmarshalJSONField("steps", stepsJSON, &t.Steps); err != nil {
+			return nil, err
 		}
 
-		if completedAt.Valid {
-			pt, err := time.Parse(time.RFC3339Nano, completedAt.String)
-			if err == nil {
-				t.CompletedAt = &pt
-			} else {
-				slog.Debug("failed to parse completed_at timestamp", "value", completedAt.String, "error", err)
-			}
+		parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+		if err != nil {
+			return nil, err
 		}
+		t.StartedAt = parsedStartedAt
+
+		parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
+		if err != nil {
+			return nil, err
+		}
+		t.CompletedAt = parsedCompletedAt
 
 		trajectories = append(trajectories, t)
 	}

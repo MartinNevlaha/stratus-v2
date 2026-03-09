@@ -1,4 +1,4 @@
-# Research: OpenClaw Bot Integration
+# Research: Insight Bot Integration
 
 **Status:** Research Proposal  
 **Priority:** High  
@@ -9,13 +9,13 @@
 
 ## Executive Summary
 
-Integrate an autonomous AI agent (OpenClaw) that continuously analyzes the codebase, workflow patterns, and team performance to propose improvements, identify anti-patterns, and generate new governance rules automatically.
+Integrate an autonomous AI agent (Insight) that continuously analyzes the codebase, workflow patterns, and team performance to propose improvements, identify anti-patterns, and generate new governance rules automatically.
 
 ---
 
-## What is OpenClaw?
+## What is Insight?
 
-OpenClaw is an **autonomous AI agent** that operates as a "team coach" for Stratus:
+Insight is an **autonomous AI agent** that operates as a "team coach" for Stratus:
 
 - **Monitors** workflows, agent performance, code quality
 - **Analyzes** patterns, trends, anomalies
@@ -329,7 +329,7 @@ learning:
 │                            │                               │
 │                            ▼                               │
 │                   ┌─────────────────┐                      │
-│                   │  OpenClaw Core  │                      │
+│                   │  Insight Core  │                      │
 │                   │                 │                      │
 │                   │  ┌───────────┐  │                      │
 │                   │  │ Scheduler │  │  ◀── Runs hourly     │
@@ -357,8 +357,8 @@ learning:
 ### Database Schema
 
 ```sql
--- OpenClaw memory and state
-CREATE TABLE openclaw_state (
+-- Insight memory and state
+CREATE TABLE insight_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     last_analysis TIMESTAMP,
     patterns_detected JSON,
@@ -369,7 +369,7 @@ CREATE TABLE openclaw_state (
 );
 
 -- Pattern library
-CREATE TABLE openclaw_patterns (
+CREATE TABLE insight_patterns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pattern_type TEXT,  -- workflow, code, quality, team
     pattern_name TEXT,
@@ -382,7 +382,7 @@ CREATE TABLE openclaw_patterns (
 );
 
 -- Learning feedback
-CREATE TABLE openclaw_feedback (
+CREATE TABLE insight_feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     proposal_id TEXT,
     feedback_type TEXT,  -- accepted, rejected, modified
@@ -393,7 +393,7 @@ CREATE TABLE openclaw_feedback (
 );
 
 -- Analysis history
-CREATE TABLE openclaw_analyses (
+CREATE TABLE insight_analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     analysis_type TEXT,
     scope TEXT,  -- workflow_id, agent_id, project-wide
@@ -405,20 +405,20 @@ CREATE TABLE openclaw_analyses (
 
 ---
 
-## OpenClaw Agent Definition
+## Insight Agent Definition
 
 ### Agent Card
 
 ```yaml
-# .claude/agents/openclaw.md
+# .claude/agents/insight.md
 ---
-name: openclaw
+name: insight
 description: "Autonomous AI coach that analyzes patterns and proposes improvements"
 mode: background
 schedule: "0 * * * *"  # Hourly
 ---
 
-You are OpenClaw, an autonomous AI coach for the development team.
+You are Insight, an autonomous AI coach for the development team.
 
 ## Your Mission
 
@@ -463,7 +463,7 @@ curl -sS -X POST $BASE/api/learning/proposals \
     "proposed_content": "...",
     "proposed_path": ".claude/rules/db-migrations.md",
     "confidence": 0.85,
-    "source": "openclaw"
+    "source": "insight"
   }'
 ```
 
@@ -526,23 +526,23 @@ After each proposal:
 ### API Endpoints
 
 ```go
-// routes_openclaw.go
-func (s *Server) handleOpenClawStatus(w http.ResponseWriter, r *http.Request)
-func (s *Server) handleOpenClawTrigger(w http.ResponseWriter, r *http.Request)
-func (s *Server) handleOpenClawPatterns(w http.ResponseWriter, r *http.Request)
-func (s *Server) handleOpenClawFeedback(w http.ResponseWriter, r *http.Request)
+// routes_insight.go
+func (s *Server) handleInsightStatus(w http.ResponseWriter, r *http.Request)
+func (s *Server) handleInsightTrigger(w http.ResponseWriter, r *http.Request)
+func (s *Server) handleInsightPatterns(w http.ResponseWriter, r *http.Request)
+func (s *Server) handleInsightFeedback(w http.ResponseWriter, r *http.Request)
 ```
 
 ### Background Scheduler
 
 ```go
-// scheduler/openclaw.go
-func StartOpenClawScheduler(server *Server) {
+// scheduler/insight.go
+func StartInsightScheduler(server *Server) {
     ticker := time.NewTicker(1 * time.Hour)
     go func() {
         for range ticker.C {
-            if err := server.RunOpenClawAnalysis(); err != nil {
-                log.Printf("OpenClaw analysis failed: %v", err)
+            if err := server.RunInsightAnalysis(); err != nil {
+                log.Printf("Insight analysis failed: %v", err)
             }
         }
     }()
@@ -553,22 +553,22 @@ func StartOpenClawScheduler(server *Server) {
 
 ```json
 {
-  "openclaw_request_analysis": {
-    "description": "Request immediate analysis from OpenClaw",
+  "insight_request_analysis": {
+    "description": "Request immediate analysis from Insight",
     "parameters": {
       "scope": "string",  // workflows, code, team, all
       "focus": "string"   // specific area to analyze
     }
   },
-  "openclaw_get_patterns": {
-    "description": "Get detected patterns by OpenClaw",
+  "insight_get_patterns": {
+    "description": "Get detected patterns by Insight",
     "parameters": {
       "pattern_type": "string",
       "min_confidence": "number"
     }
   },
-  "openclaw_give_feedback": {
-    "description": "Provide feedback on OpenClaw proposal",
+  "insight_give_feedback": {
+    "description": "Provide feedback on Insight proposal",
     "parameters": {
       "proposal_id": "string",
       "accepted": "boolean",
@@ -584,7 +584,7 @@ func StartOpenClawScheduler(server *Server) {
 
 ### 1. Workflow Optimization
 ```
-OpenClaw detects:
+Insight detects:
   "Plan phase takes 2x longer for UI features"
   
 Proposes:
@@ -596,7 +596,7 @@ Outcome:
 
 ### 2. Code Quality
 ```
-OpenClaw detects:
+Insight detects:
   "Functions > 50 lines have 3x higher bug rate"
   
 Proposes:
@@ -608,7 +608,7 @@ Outcome:
 
 ### 3. Team Performance
 ```
-OpenClaw detects:
+Insight detects:
   "Backend Engineer consistently faster on API tasks"
   
 Proposes:
@@ -620,7 +620,7 @@ Outcome:
 
 ### 4. Architecture Drift
 ```
-OpenClaw detects:
+Insight detects:
   "Codebase has 3 different logging libraries"
   
 Proposes:
@@ -635,7 +635,7 @@ Outcome:
 ## Implementation Plan
 
 ### Phase 1: Foundation (Week 1-2)
-- [ ] OpenClaw agent definition
+- [ ] Insight agent definition
 - [ ] Scheduler infrastructure
 - [ ] Basic pattern detection
 - [ ] Proposal creation integration
@@ -675,7 +675,7 @@ Outcome:
 |------|-----------|
 | Too many proposals | Daily limit + confidence threshold |
 | Low-quality suggestions | Learning from feedback + LLM tuning |
-| Team ignores OpenClaw | Slack integration + gamification |
+| Team ignores Insight | Slack integration + gamification |
 | Performance impact | Async processing + caching |
 
 ---
@@ -686,4 +686,4 @@ Outcome:
 2. **Industry Benchmarks**: Compare against external data
 3. **Predictive Analytics**: Forecast issues before they occur
 4. **Custom Training**: Fine-tune on team's specific patterns
-5. **Interactive Coaching**: Chat with OpenClaw for advice
+5. **Interactive Coaching**: Chat with Insight for advice
