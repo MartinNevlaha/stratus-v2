@@ -164,6 +164,24 @@ func chunkMarkdown(content string) []markdownChunk {
 	return chunks
 }
 
+func preprocessFTS5Query(query string) string {
+	replacer := strings.NewReplacer(
+		"-", " ",
+		"*", " ",
+		"^", " ",
+		"(", " ",
+		")", " ",
+	)
+	query = replacer.Replace(query)
+
+	terms := strings.Fields(query)
+	if len(terms) <= 1 {
+		return query
+	}
+
+	return strings.Join(terms, " OR ")
+}
+
 // SearchDocs searches governance docs using FTS5.
 func (d *DB) SearchDocs(query, docType, project string, limit int) ([]Doc, error) {
 	if limit <= 0 {
@@ -174,17 +192,19 @@ func (d *DB) SearchDocs(query, docType, project string, limit int) ([]Doc, error
 	var err error
 
 	if query != "" {
+		processedQuery := preprocessFTS5Query(query)
+
 		rows, err = d.sql.Query(`
 			SELECT d.id, d.file_path, d.chunk_index, d.title, d.content, d.doc_type, d.file_hash, d.project, d.indexed_at,
-			       (-rank) AS score
+			       bm25(docs_fts, 10.0, 1.0, 0.5) as score
 			FROM docs_fts f
 			JOIN docs d ON d.id = f.rowid
 			WHERE docs_fts MATCH ?
 			  AND (? = '' OR d.doc_type = ?)
 			  AND (? = '' OR d.project = ?)
-			ORDER BY rank
+			ORDER BY bm25(docs_fts, 10.0, 1.0, 0.5)
 			LIMIT ?`,
-			query,
+			processedQuery,
 			docType, docType,
 			project, project,
 			limit,

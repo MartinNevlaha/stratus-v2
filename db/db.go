@@ -51,7 +51,7 @@ func (d *DB) migrate() error {
 	// "duplicate column" errors from ALTER TABLE.
 	for _, stmt := range migrations {
 		if _, err := d.sql.Exec(stmt); err != nil {
-			if !isDuplicateColumn(err) {
+			if !isMigrationError(err) {
 				return fmt.Errorf("migration: %w", err)
 			}
 		}
@@ -149,11 +149,23 @@ CREATE TABLE IF NOT EXISTS openclaw_analyses (
 )`,
 	`CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_type ON openclaw_analyses(analysis_type)`,
 	`CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_created ON openclaw_analyses(created_at DESC)`,
+	`
+-- Rebuild FTS5 index with trigram tokenizer
+DROP TABLE IF EXISTS docs_fts;
+CREATE VIRTUAL TABLE docs_fts USING fts5(
+    title, content, doc_type,
+    content='docs', content_rowid='id',
+    tokenize='trigram'
+);
+INSERT INTO docs_fts(rowid, title, content, doc_type)
+SELECT id, title, content, doc_type FROM docs;
+`,
 }
 
-func isDuplicateColumn(err error) bool {
-	// modernc.org/sqlite returns "duplicate column name: <col>" for ALTER TABLE ADD COLUMN
-	// when the column already exists.
+func isMigrationError(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
+	return strings.Contains(msg, "duplicate column") ||
+		strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "docs_fts")
 }

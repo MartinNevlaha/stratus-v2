@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS docs (
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
     title, content, doc_type,
     content='docs', content_rowid='id',
-    tokenize='porter unicode61'
+    tokenize='trigram'
 );
 
 CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
