@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { Line, Bar, Doughnut, Pie } from 'svelte-chartjs'
+  import Chart from '$lib/Chart.svelte'
   import { appState } from '$lib/store'
   import { 
     getMetricsSummary, 
@@ -314,7 +314,8 @@
       <div class="chart-container full-width">
         <h3>Workflow Performance Trend</h3>
         {#if workflowTrendData}
-          <Line 
+          <Chart 
+            type="line"
             data={workflowTrendData}
             options={{
               responsive: true,
@@ -346,7 +347,8 @@
       <div class="chart-container">
         <h3>Agent Performance</h3>
         {#if agentPerformanceData}
-          <Bar 
+          <Chart 
+            type="bar"
             data={agentPerformanceData}
             options={{
               responsive: true,
@@ -378,7 +380,8 @@
       <div class="chart-container">
         <h3>Phase Distribution</h3>
         {#if phaseDistributionData}
-          <Doughnut 
+          <Chart 
+            type="doughnut"
             data={phaseDistributionData}
             options={{
               responsive: true,
@@ -401,7 +404,8 @@
       <div class="chart-container full-width">
         <h3>Task Completion by Domain</h3>
         {#if taskCompletionData}
-          <Bar 
+          <Chart 
+            type="bar"
             data={taskCompletionData}
             options={{
               responsive: true,
