@@ -25,6 +25,7 @@ Check for `.mcp.json`:
 
 Check `.claude/settings.json` for hooks:
 - Is `stratus hook phase_guard` registered under `PreToolUse`?
+- Is `stratus hook workflow_existence_guard` registered under `PreToolUse`?
 - Is `stratus hook delegation_guard` registered under `PreToolUse`?
 
 ---

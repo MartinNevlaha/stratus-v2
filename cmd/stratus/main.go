@@ -31,7 +31,7 @@ import (
 const (
 	sttContainerName = "stratus-stt"
 	sttImage         = "ghcr.io/speaches-ai/speaches:latest-cpu"
-	sttDefaultModel  = "Systran/faster-whisper-small"
+	sttDefaultModel  = "Systran/faster-whisper-large-v3"
 	sttHost          = "http://localhost:8011"
 )
 
@@ -288,12 +288,13 @@ func cmdHook() {
 	}
 	hookName := os.Args[2]
 	handlers := map[string]hooks.Handler{
-		"phase_guard":       hooks.PhaseGuard,
-		"delegation_guard":  hooks.DelegationGuard,
-		"workflow_enforcer": hooks.WorkflowEnforcer,
-		"watcher":           hooks.Watcher,
-		"teammate_idle":     hooks.TeammateIdle,
-		"task_completed":    hooks.TaskCompleted,
+		"phase_guard":              hooks.PhaseGuard,
+		"workflow_existence_guard": hooks.WorkflowExistenceGuard,
+		"delegation_guard":         hooks.DelegationGuard,
+		"workflow_enforcer":        hooks.WorkflowEnforcer,
+		"watcher":                  hooks.Watcher,
+		"teammate_idle":            hooks.TeammateIdle,
+		"task_completed":           hooks.TaskCompleted,
 	}
 	hooks.Run(hookName, handlers)
 }
@@ -336,7 +337,8 @@ func cmdInit() {
     "timeout_sec": 15
   },
   "stt": {
-    "endpoint": "http://localhost:8011"
+    "endpoint": "http://localhost:8011",
+    "model": "Systran/faster-whisper-large-v3"
   }
 }
 `
@@ -531,9 +533,10 @@ Prompts written to .opencode/prompts/:
   error-handling        — consistent error patterns`
 
 	const ccHooks = `Hooks registered in .claude/settings.json:
-  PreToolUse  phase_guard       — blocks write tools during review/verify
-  PreToolUse  delegation_guard  — requires active workflow for delivery agents
-  PostToolUse watcher           — queues modified files for vexor reindexing
+  PreToolUse  phase_guard              — blocks write tools during review/verify
+  PreToolUse  workflow_existence_guard — requires session-scoped active workflow for Task delegation
+  PreToolUse  delegation_guard         — applies delivery-agent delegation policy
+  PostToolUse watcher                  — queues modified files for vexor reindexing
 
 Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar`
 
@@ -1071,6 +1074,7 @@ func writeHooks(projectRoot string) error {
 			event: "PreToolUse",
 			hooks: []hookDef{
 				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
+				{"Task", "stratus hook workflow_existence_guard"},
 				{"Task", "stratus hook delegation_guard"},
 			},
 		},

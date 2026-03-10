@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const noActiveWorkflowReason = "No active workflow registered. Run POST /api/workflows first."
+
 // PhaseGuard blocks disallowed tools during certain workflow phases.
 func PhaseGuard(event HookEvent) Decision {
 	if event.ToolName == "" {
@@ -38,6 +40,22 @@ func PhaseGuard(event HookEvent) Decision {
 	return Decision{Continue: true}
 }
 
+// WorkflowExistenceGuard blocks Task delegation when the current session has no active workflow.
+func WorkflowExistenceGuard(event HookEvent) Decision {
+	if event.ToolName != "Task" {
+		return Decision{Continue: true}
+	}
+
+	if fetchWorkflowForSession(event.SessionID) == nil {
+		return Decision{
+			Continue: false,
+			Reason:   noActiveWorkflowReason,
+		}
+	}
+
+	return Decision{Continue: true}
+}
+
 // DelegationGuard prevents spawning write-capable Task agents without an active workflow.
 func DelegationGuard(event HookEvent) Decision {
 	if event.ToolName != "Task" {
@@ -49,11 +67,11 @@ func DelegationGuard(event HookEvent) Decision {
 		return Decision{Continue: true} // system or read-only agent, always OK
 	}
 
-	state := fetchActiveWorkflow(event.SessionID)
+	state := fetchWorkflowForSession(event.SessionID)
 	if state == nil {
 		return Decision{
 			Continue: false,
-			Reason:   "Cannot spawn delivery agent without an active workflow. Start a /spec or /bug workflow first.",
+			Reason:   noActiveWorkflowReason,
 		}
 	}
 
@@ -87,6 +105,33 @@ func isDeliveryAgent() bool {
 	return isDeliverySubagent(agentID)
 }
 
+type dashboardState struct {
+	Workflows []map[string]any `json:"workflows"`
+}
+
+// fetchWorkflowForSession returns the active workflow for the exact Claude session.
+func fetchWorkflowForSession(sessionID string) map[string]any {
+	if sessionID == "" {
+		return nil
+	}
+
+	state := fetchDashboardState()
+	if state == nil {
+		return nil
+	}
+
+	for _, wf := range state.Workflows {
+		if wf == nil {
+			continue
+		}
+		wfSession, _ := wf["session_id"].(string)
+		if wfSession == sessionID {
+			return wf
+		}
+	}
+	return nil
+}
+
 // fetchActiveWorkflow queries the local Stratus API for the active workflow state.
 //
 // Matching priority:
@@ -94,20 +139,10 @@ func isDeliveryAgent() bool {
 //  2. Workflow with no session_id set — created before session tracking / CLAUDE_SESSION_ID
 //     was not available in the Bash environment; treated as a wildcard
 //  3. First active workflow           — last-resort fallback for resumed sessions whose
-//     session_id changed; DelegationGuard only needs to know *if* a workflow exists
+//     session_id changed; PhaseGuard uses this to keep phase checks best-effort
 func fetchActiveWorkflow(sessionID string) map[string]any {
-	port := getPort()
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://localhost:" + port + "/api/dashboard/state")
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	var state struct {
-		Workflows []map[string]any `json:"workflows"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+	state := fetchDashboardState()
+	if state == nil {
 		return nil
 	}
 
@@ -137,6 +172,22 @@ func fetchActiveWorkflow(sessionID string) map[string]any {
 		return untracked
 	}
 	return first
+}
+
+func fetchDashboardState() *dashboardState {
+	port := getPort()
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://localhost:" + port + "/api/dashboard/state")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var state dashboardState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		return nil
+	}
+	return &state
 }
 
 func getPort() string {

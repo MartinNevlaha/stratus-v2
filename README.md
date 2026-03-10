@@ -56,7 +56,7 @@ Out of the box, Claude Code and OpenCode have no memory across sessions, no stru
 - **Bug workflow**: `analyze → fix → review → complete` (review loops back to fix)
 - **E2E workflow**: `setup → plan → generate → heal → complete` (heal loops back to generate)
 - **Task tracking** — per-workflow task list with progress visible in dashboard
-- **Guard hooks** — `phase_guard` blocks invalid transitions, `delegation_guard` enforces agent rules
+- **Guard hooks** — `phase_guard` blocks invalid transitions, `workflow_existence_guard` requires a registered workflow before delegation, `delegation_guard` enforces agent rules
 
 ### Multi-Agent Swarm
 
@@ -181,7 +181,8 @@ Real-time metrics visualization for workflow performance:
 | Hook | Behaviour |
 |------|-----------|
 | `phase_guard` | Blocks invalid workflow phase transitions before they reach the DB |
-| `delegation_guard` | Enforces which agents can be delegated to in each phase |
+| `workflow_existence_guard` | Blocks Task delegation when the current session has no active workflow |
+| `delegation_guard` | Applies delivery-agent delegation policy for the active session workflow |
 | `workflow_enforcer` | Ensures agent follows active workflow phase |
 | `watcher` | Re-indexes governance docs on every file write |
 
@@ -427,7 +428,7 @@ WS     /api/terminal/ws        PTY terminal I/O
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "Systran/faster-whisper-small"
+    "model": "Systran/faster-whisper-large-v3"
   }
 }
 ```
@@ -455,13 +456,13 @@ The fastest way to give instructions to an AI agent is to just say them out loud
 3. Click again — audio is transcribed and injected at the terminal cursor
 4. Press Enter
 
-The container (`stratus-stt`) starts with `stratus serve` and stops when you exit. First launch pulls the model (~244 MB); subsequent starts are instant.
+The container (`stratus-stt`) starts with `stratus serve` and stops when you exit. First launch pulls the model (~3 GB with the default `large-v3`); subsequent starts are instant.
 
 | Model | Size | Speed | Use case |
 |-------|------|-------|----------|
-| `Systran/faster-whisper-small` | ~244 MB | ~1s | Default — fast iteration, quick prompts |
+| `Systran/faster-whisper-small` | ~244 MB | ~1s | Fast iteration, quick prompts |
 | `Systran/faster-whisper-medium` | ~769 MB | ~2s | Longer dictation, technical terms |
-| `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Maximum accuracy, heavy accents |
+| `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Default — maximum accuracy, heavy accents |
 
 Set `stt.model` in `.stratus.json` to switch models. **Docker is only required for STT** — all other Stratus features work without it.
 
@@ -477,7 +478,7 @@ orchestration/      Pure phase state machine (spec + bug + e2e workflows)
 swarm/              Swarm engine: worktree manager, dispatch, signal bus, store
 api/                HTTP server, all REST routes, WebSocket hub, SPA handler
 mcp/                MCP stdio server (JSON-RPC, 15 tools) — thin HTTP proxy
-hooks/              Hook handlers: phase_guard, delegation_guard, workflow_enforcer
+hooks/              Hook handlers: phase_guard, workflow_existence_guard, delegation_guard, workflow_enforcer
 terminal/           PTY session management + WebSocket I/O (creack/pty + xterm.js)
 vexor/              CLI wrapper for Vexor code embedding
 frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
