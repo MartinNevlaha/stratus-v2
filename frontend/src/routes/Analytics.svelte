@@ -6,10 +6,9 @@
     getMetricsSummary, 
     getDailyMetrics,
     getAgentMetrics,
-    exportMetricsCSV,
-    triggerAggregation
+    exportMetricsCSV
   } from '$lib/api'
-  import type { MetricsSummary, DailyMetric, AgentMetric, Anomaly } from '$lib/types'
+  import type { MetricsSummary, DailyMetric, AgentMetric } from '$lib/types'
   
   let loading = $state(true)
   let error = $state<string | null>(null)
@@ -18,41 +17,55 @@
   let dailyMetrics = $state<DailyMetric[]>([])
   let agentMetrics = $state<AgentMetric[]>([])
   
+  let lastUpdateCounter = 0
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingRequest = false
+  let metricsLiveTimeout: ReturnType<typeof setTimeout> | null = null
+  let isLive = $state(false)
+  
   // Chart data
   let workflowTrendData = $state<any>(null)
   let agentPerformanceData = $state<any>(null)
   let phaseDistributionData = $state<any>(null)
   let taskCompletionData = $state<any>(null)
   
-  onMount(async () => {
-    await loadMetrics()
-  })
-  
-  // Watch for real-time updates
-  $effect(() => {
-    if (appState.analyticsUpdateCounter > 0) {
-      loadMetrics()
+  onMount(() => {
+    loadMetrics()
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      if (metricsLiveTimeout) clearTimeout(metricsLiveTimeout)
     }
   })
   
-  // Watch for live metrics updates
+  function setLive() {
+    isLive = true
+    if (metricsLiveTimeout) clearTimeout(metricsLiveTimeout)
+    metricsLiveTimeout = setTimeout(() => {
+      isLive = false
+    }, 30000)
+  }
+  
+  // Watch for real-time updates with debounce
   $effect(() => {
-    if (appState.liveMetrics && appState.metricsLive) {
-      const liveData = appState.liveMetrics
-      summary = liveData.summary
-      dailyMetrics = liveData.daily.reverse()
-      agentMetrics = liveData.agents
-      generateChartData()
+    const counter = appState.analyticsUpdateCounter
+    if (counter > lastUpdateCounter) {
+      lastUpdateCounter = counter
+      setLive()
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        loadMetrics(true)
+      }, 2000)
     }
   })
   
-  async function loadMetrics() {
-    loading = true
+  async function loadMetrics(background = false) {
+    if (pendingRequest) return
+    pendingRequest = true
+    if (!background) loading = true
     error = null
     try {
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
       
-      // Load real data from backend
       const [summaryData, dailyData, agentData] = await Promise.all([
         getMetricsSummary(days),
         getDailyMetrics(days),
@@ -60,16 +73,18 @@
       ])
       
       summary = summaryData.summary
-      dailyMetrics = dailyData.metrics.reverse() // Reverse to show oldest to newest
+      dailyMetrics = dailyData.metrics
       agentMetrics = agentData.agents
       
-      // Generate charts from real data
       generateChartData()
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to load metrics'
-      console.error('Failed to load metrics:', e)
+      if (!background) {
+        error = e instanceof Error ? e.message : 'Failed to load metrics'
+        console.error('Failed to load metrics:', e)
+      }
     } finally {
       loading = false
+      pendingRequest = false
     }
   }
   
@@ -83,8 +98,9 @@
   }
   
   function generateChartData() {
-    // Workflow Performance Trend (Line Chart) - from real dailyMetrics
-    const labels = dailyMetrics.map(m => {
+    const sortedMetrics = [...dailyMetrics].reverse()
+    
+    const labels = sortedMetrics.map(m => {
       const date = new Date(m.date)
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     })
@@ -93,7 +109,7 @@
       labels,
       datasets: [{
         label: 'Completed Workflows',
-        data: dailyMetrics.map(m => m.completed_workflows),
+        data: sortedMetrics.map(m => m.completed_workflows),
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
         tension: 0.4,
@@ -101,24 +117,20 @@
       }]
     }
     
-    // Agent Performance (Bar Chart) - from real agentMetrics
     if (agentMetrics.length > 0) {
+      const colors = [
+        '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+        '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'
+      ]
       agentPerformanceData = {
         labels: agentMetrics.map(a => a.agent_id),
         datasets: [{
           label: 'Tasks Completed',
           data: agentMetrics.map(a => a.tasks_completed),
-          backgroundColor: [
-            '#3b82f6',
-            '#10b981',
-            '#f59e0b',
-            '#ef4444',
-            '#8b5cf6'
-          ]
+          backgroundColor: colors.slice(0, agentMetrics.length)
         }]
       }
     } else {
-      // Show placeholder if no agent data
       agentPerformanceData = {
         labels: ['No Data'],
         datasets: [{
@@ -129,32 +141,68 @@
       }
     }
     
-    // Phase Distribution (Doughnut Chart) - placeholder (need phase metrics from backend)
-    phaseDistributionData = {
-      labels: ['Plan', 'Implement', 'Verify', 'Learn'],
-      datasets: [{
-        data: [20, 45, 25, 10],
-        backgroundColor: [
-          '#3b82f6',
-          '#10b981',
-          '#f59e0b',
-          '#ef4444'
-        ]
-      }]
+    const successBuckets = { high: 0, medium: 0, low: 0, failed: 0 }
+    let hasData = false
+    dailyMetrics.forEach(m => {
+      if (m.total_tasks === 0) return
+      hasData = true
+      const rate = m.success_rate
+      if (rate >= 0.8) successBuckets.high++
+      else if (rate >= 0.5) successBuckets.medium++
+      else if (rate > 0) successBuckets.low++
+      else successBuckets.failed++
+    })
+    
+    if (!hasData) {
+      phaseDistributionData = {
+        labels: ['No Data'],
+        datasets: [{
+          data: [1],
+          backgroundColor: ['#30363d']
+        }]
+      }
+    } else {
+      phaseDistributionData = {
+        labels: ['High (≥80%)', 'Medium (50-80%)', 'Low (<50%)', 'Failed (0%)'],
+        datasets: [{
+          data: [
+            successBuckets.high,
+            successBuckets.medium,
+            successBuckets.low,
+            successBuckets.failed
+          ],
+          backgroundColor: ['#3fb950', '#f59e0b', '#f85149', '#6e7681']
+        }]
+      }
     }
     
-    // Task Completion by Domain (Stacked Bar) - placeholder
+    const successByDomain: Record<string, { success: number; failed: number }> = {}
+    agentMetrics.forEach(a => {
+      const parts = a.agent_id.split('-')
+      const domain = parts.length > 1 ? parts[0] : 'default'
+      if (!successByDomain[domain]) successByDomain[domain] = { success: 0, failed: 0 }
+      const completed = a.tasks_completed
+      const failed = Math.round(completed * (1 - a.success_rate))
+      successByDomain[domain].success += completed - failed
+      successByDomain[domain].failed += failed
+    })
+    
+    const domains = Object.keys(successByDomain).sort((a, b) => {
+      const aTotal = successByDomain[a].success + successByDomain[a].failed
+      const bTotal = successByDomain[b].success + successByDomain[b].failed
+      return bTotal - aTotal
+    }).slice(0, 5)
     taskCompletionData = {
-      labels: ['Backend', 'Frontend', 'Database', 'Tests', 'Infra'],
+      labels: domains.length > 0 ? domains : ['No Data'],
       datasets: [
         {
           label: 'Successful',
-          data: [42, 35, 10, 28, 15],
+          data: domains.length > 0 ? domains.map(d => successByDomain[d].success) : [0],
           backgroundColor: '#10b981'
         },
         {
           label: 'Failed',
-          data: [3, 2, 2, 4, 1],
+          data: domains.length > 0 ? domains.map(d => successByDomain[d].failed) : [0],
           backgroundColor: '#ef4444'
         }
       ]
@@ -162,7 +210,7 @@
   }
   
   function formatDuration(ms: number): string {
-    if (!ms) return '0s'
+    if (!Number.isFinite(ms) || ms <= 0) return '0s'
     const seconds = Math.floor(ms / 1000)
     const minutes = Math.floor(seconds / 60)
     const hours = Math.floor(minutes / 60)
@@ -175,6 +223,7 @@
   }
   
   function formatPercent(value: number): string {
+    if (!Number.isFinite(value)) return '0.0%'
     return `${(value * 100).toFixed(1)}%`
   }
   
@@ -195,7 +244,7 @@
       <h1>Analytics Dashboard</h1>
       <p class="subtitle">
         Real-time insights into workflow performance
-        {#if appState.metricsLive}
+        {#if isLive}
           <span class="live-indicator" title="Receiving live updates">
             <span class="live-dot"></span>
             LIVE
@@ -208,19 +257,19 @@
       <div class="time-range">
         <button 
           class:active={timeRange === '7d'}
-          onclick={() => { timeRange = '7d'; loadMetrics() }}
+          onclick={() => { if (timeRange !== '7d') { timeRange = '7d'; loadMetrics() } }}
         >
           7 Days
         </button>
         <button 
           class:active={timeRange === '30d'}
-          onclick={() => { timeRange = '30d'; loadMetrics() }}
+          onclick={() => { if (timeRange !== '30d') { timeRange = '30d'; loadMetrics() } }}
         >
           30 Days
         </button>
         <button 
           class:active={timeRange === '90d'}
-          onclick={() => { timeRange = '90d'; loadMetrics() }}
+          onclick={() => { if (timeRange !== '90d') { timeRange = '90d'; loadMetrics() } }}
         >
           90 Days
         </button>
@@ -228,7 +277,7 @@
       
       <button 
         class="refresh-btn"
-        onclick={loadMetrics}
+        onclick={() => loadMetrics()}
         disabled={loading}
       >
         {loading ? 'Loading...' : '↻ Refresh'}
@@ -376,9 +425,9 @@
         {/if}
       </div>
       
-      <!-- Phase Distribution -->
+      <!-- Success Rate Distribution -->
       <div class="chart-container">
-        <h3>Phase Distribution</h3>
+        <h3>Success Rate Distribution</h3>
         {#if phaseDistributionData}
           <Chart 
             type="doughnut"
@@ -456,7 +505,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each dailyMetrics.slice().reverse() as day}
+              {#each [...dailyMetrics].reverse() as day}
                 <tr>
                   <td>{formatDate(day.date)}</td>
                   <td>{day.total_workflows}</td>
