@@ -22,9 +22,17 @@ async function get<T>(path: string, params?: Record<string, string>): Promise<T>
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
   }
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
-  return res.json()
+  
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000)
+  
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+    return res.json()
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {

@@ -47,7 +47,9 @@
   })
   
   $effect(() => {
-    if (mounted) updateChart()
+    if (mounted && data) {
+      updateChart()
+    }
   })
 </script>
 

@@ -59,30 +59,35 @@
   })
   
   async function loadMetrics(background = false) {
-    if (pendingRequest) return
+    if (pendingRequest) {
+      console.log('[Analytics] Request already pending, skipping')
+      return
+    }
     pendingRequest = true
     if (!background) loading = true
     error = null
+    console.log('[Analytics] Loading metrics, background:', background)
     try {
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
       
+      console.log('[Analytics] Fetching metrics for', days, 'days')
       const [summaryData, dailyData, agentData] = await Promise.all([
         getMetricsSummary(days),
         getDailyMetrics(days),
         getAgentMetrics(days)
       ])
       
+      console.log('[Analytics] Got data:', { summaryData, dailyData, agentData })
       summary = summaryData.summary
       dailyMetrics = dailyData.metrics
       agentMetrics = agentData.agents
       
       generateChartData()
     } catch (e) {
-      if (!background) {
-        error = e instanceof Error ? e.message : 'Failed to load metrics'
-        console.error('Failed to load metrics:', e)
-      }
+      console.error('[Analytics] Error loading metrics:', e)
+      error = e instanceof Error ? e.message : 'Failed to load metrics'
     } finally {
+      console.log('[Analytics] Request complete')
       loading = false
       pendingRequest = false
     }
