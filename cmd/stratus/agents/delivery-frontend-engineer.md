@@ -2,6 +2,7 @@
 name: delivery-frontend-engineer
 description: "Frontend delivery agent for UI components, pages, and client-side logic."
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
 ---
 
 # Frontend Engineer

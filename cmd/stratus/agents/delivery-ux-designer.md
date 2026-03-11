@@ -2,6 +2,7 @@
 name: delivery-ux-designer
 description: "UX design delivery agent that produces design specifications, component hierarchies, and design tokens. Does not write source code."
 tools: Read, Grep, Glob, Edit, Write
+model: sonnet
 ---
 
 # UX Designer

@@ -2,6 +2,7 @@
 name: delivery-mobile-engineer
 description: "Mobile delivery agent for React Native / Expo cross-platform development (iOS + Android)."
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
 ---
 
 # Mobile Engineer

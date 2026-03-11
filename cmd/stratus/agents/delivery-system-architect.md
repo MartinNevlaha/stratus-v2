@@ -2,6 +2,7 @@
 name: delivery-system-architect
 description: "System architecture delivery agent for technical design documents, API contracts, and data models. Read-only — produces specs, never writes source code."
 tools: Read, Grep, Glob, Bash
+model: opus
 ---
 
 # System Architect

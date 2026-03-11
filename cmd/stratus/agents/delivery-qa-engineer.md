@@ -2,6 +2,7 @@
 name: delivery-qa-engineer
 description: "QA delivery agent for writing tests, analyzing coverage, and running validation commands. Does not write production code."
 tools: Read, Grep, Glob, Write, Bash
+model: sonnet
 ---
 
 # QA Engineer

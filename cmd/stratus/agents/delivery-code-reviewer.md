@@ -2,6 +2,7 @@
 name: delivery-code-reviewer
 description: "Code review delivery agent for quality, correctness, security, and governance checks. Read-only — reviews and reports, never modifies code."
 tools: Read, Grep, Glob
+model: opus
 ---
 
 # Code Reviewer

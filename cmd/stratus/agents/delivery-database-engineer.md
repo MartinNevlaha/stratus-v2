@@ -2,6 +2,7 @@
 name: delivery-database-engineer
 description: "Database delivery agent for schema design, migrations, queries, and data model changes."
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
 ---
 
 # Database Engineer

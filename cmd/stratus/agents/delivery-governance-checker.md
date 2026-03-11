@@ -2,6 +2,7 @@
 name: delivery-governance-checker
 description: "Governance review delivery agent that checks plans, designs, and implementations against project rules and ADRs. Read-only — reports findings, never modifies files."
 tools: Read, Grep, Glob
+model: opus
 ---
 
 # Governance Checker

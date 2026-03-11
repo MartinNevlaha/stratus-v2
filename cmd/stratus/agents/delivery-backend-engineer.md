@@ -2,6 +2,7 @@
 name: delivery-backend-engineer
 description: "Backend delivery agent for API endpoints, handlers, services, and business logic. Use for server-side implementation tasks."
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
 ---
 
 # Backend Engineer

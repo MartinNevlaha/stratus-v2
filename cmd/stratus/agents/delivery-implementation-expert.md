@@ -2,6 +2,7 @@
 name: delivery-implementation-expert
 description: "General-purpose delivery agent for implementation tasks that don't fit a more specialized agent."
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
 ---
 
 # Implementation Expert

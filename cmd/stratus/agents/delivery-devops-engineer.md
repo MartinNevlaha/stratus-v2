@@ -2,6 +2,7 @@
 name: delivery-devops-engineer
 description: "DevOps delivery agent for CI/CD pipelines, Docker, infrastructure-as-code, and deployment configuration."
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
 ---
 
 # DevOps Engineer
