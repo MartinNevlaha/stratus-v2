@@ -166,7 +166,6 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			if id, ok := args["workflow_id"].(string); ok && id != "" {
 				return client.get(fmt.Sprintf("/api/workflows/%s/dispatch", id), nil)
 			}
-			// Return active workflow dispatch info (first active workflow)
 			dash, err := client.get("/api/dashboard/state", nil)
 			if err != nil {
 				return nil, err
@@ -181,6 +180,79 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 				}
 			}
 			return map[string]any{"workflows": []any{}, "message": "no active workflows"}, nil
+		},
+	})
+
+	// --- Workflow management tools ---
+
+	s.Register(Tool{
+		Name:        "register_workflow",
+		Description: "Register a new workflow. REQUIRED before any Task delegation to delivery agents. Use this to start a spec, bug, or e2e workflow.",
+		InputSchema: obj(
+			req("id", "string", "Unique workflow ID (use format: <type>-<slug>, e.g. 'bug-fix-login', 'spec-user-auth')"),
+			req("type", "string", "Workflow type: 'spec' | 'bug' | 'e2e'"),
+			req("title", "string", "Human-readable title for the workflow"),
+			opt("session_id", "string", "Claude session ID (use ${CLAUDE_SESSION_ID} for automatic tracking)"),
+			opt("complexity", "string", "For spec workflows: 'simple' | 'complex'"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			return client.post("/api/workflows", args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "transition_phase",
+		Description: "Transition a workflow to the next phase. Validates against state machine rules before allowing transition.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID to transition"),
+			req("phase", "string", "Target phase (e.g. 'implement', 'verify', 'review', 'complete')"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			return client.put(fmt.Sprintf("/api/workflows/%s/phase", id), args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "delegate_agent",
+		Description: "Record an agent delegation for the current workflow phase. Call this after delegating work via Task tool to track which agents worked on which phases.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+			req("agent_id", "string", "Agent being delegated (e.g. 'delivery-backend-engineer', 'delivery-code-reviewer')"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			return client.post(fmt.Sprintf("/api/workflows/%s/delegate", id), args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "get_workflow",
+		Description: "Get current workflow state including phase, tasks, and delegation history.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			return client.get(fmt.Sprintf("/api/workflows/%s", id), nil)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "list_workflows",
+		Description: "List all active workflows.",
+		InputSchema: obj(),
+		Handler: func(args map[string]any) (any, error) {
+			return client.get("/api/dashboard/state", nil)
 		},
 	})
 

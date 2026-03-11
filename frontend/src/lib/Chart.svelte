@@ -16,20 +16,24 @@
   let chart: Chart | null = null
   let mounted = false
   
+  function deepClone(obj: any): any {
+    return JSON.parse(JSON.stringify(obj))
+  }
+  
   function createChart() {
     if (chart) {
       chart.destroy()
       chart = null
     }
     if (canvas && data) {
-      chart = new Chart(canvas, { type, data, options })
+      chart = new Chart(canvas, { type, data: deepClone(data), options: deepClone(options) })
     }
   }
   
   function updateChart() {
     if (chart && data) {
-      chart.data = data
-      chart.options = options
+      chart.data = deepClone(data)
+      chart.options = deepClone(options)
       chart.update()
     } else if (mounted && canvas && data) {
       createChart()

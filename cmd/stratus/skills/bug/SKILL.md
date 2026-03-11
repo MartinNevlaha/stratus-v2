@@ -8,40 +8,39 @@ disable-model-invocation: true
 
 You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized agents via the Task tool. You do NOT write production code directly.
 
-## API Base
+## Prerequisites
 
-```bash
-BASE=http://127.0.0.1:41777
-```
+Stratus server must be running: `stratus serve`
 
 ---
 
 ## Phase 1: Analyze
 
-Start the bug workflow:
+### 1a. Register Workflow
 
-```bash
-SLUG=$(echo "$ARGUMENTS" | tr '[:upper:] ' '[:lower:]-' | sed 's/[^a-z0-9-]//g' | cut -c1-50)
-curl -sS -X POST $BASE/api/workflows \
-  -H 'Content-Type: application/json' \
-  -d "{\"id\": \"bug-$SLUG\", \"type\": \"bug\", \"title\": \"$ARGUMENTS\", \"session_id\": \"${CLAUDE_SESSION_ID}\"}"
+First, register the workflow using `mcp__stratus__register_workflow`:
+
+```
+id: "bug-<slug>"           # slug from $ARGUMENTS: lowercase, hyphenated, max 50 chars
+type: "bug"
+title: "<bug description>"
+session_id: "${CLAUDE_SESSION_ID}"
 ```
 
-### 1a. Explore & Diagnose
+### 1b. Explore & Diagnose
 
 - Explore the codebase: Read error messages, stack traces, logs.
 - Delegate to `delivery-debugger` (Task tool) for root cause analysis.
-- Record delegation:
+- Record delegation using `mcp__stratus__delegate_agent`:
 
-```bash
-curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-debugger"}'
+```
+workflow_id: "bug-<slug>"
+agent_id: "delivery-debugger"
 ```
 
 The debugger will return a structured diagnosis with symptom, root cause, classification, evidence, and recommended fix.
 
-### 1b. Assess Severity — Intelligent Decision
+### 1c. Assess Severity — Intelligent Decision
 
 Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
 
@@ -62,7 +61,7 @@ Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
 - Risk of regressions in other areas
 - Unclear fix approach or multiple options
 
-### 1c. Plan (if COMPLEX)
+### 1d. Plan (if COMPLEX)
 
 If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "plan"`):
 
@@ -78,36 +77,20 @@ The Plan agent will return:
 - Test coverage requirements
 - Risk mitigation strategies
 
-**Governance check (if COMPLEX) — delegate to `delivery-governance-checker` (Task tool):**
-
-Ask the agent to review the fix plan against project governance:
-- Does the proposed fix violate any architectural constraints?
-- Are there security or data handling requirements to consider?
-- Will this fix require updates to ADRs or documentation?
-
-```bash
-curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-governance-checker"}'
-```
-
-If checker returns `[must_update]` findings → incorporate into the plan before user approval.
-
 Present the plan to the user via AskUserQuestion. **Wait for explicit approval.**
 
-### 1d. User Approval & Transition
+### 1e. User Approval & Transition
 
 **Present diagnosis to user via AskUserQuestion.**
 
 - If TRIVIAL: Get approval to proceed directly to fix
 - If COMPLEX: Get approval for the plan
 
-On approval, transition to fix:
+On approval, transition to fix using `mcp__stratus__transition_phase`:
 
-```bash
-curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "fix"}'
+```
+workflow_id: "bug-<slug>"
+phase: "fix"
 ```
 
 ---
@@ -128,32 +111,37 @@ Route to the appropriate delivery agent:
 
 Delegate via Task tool with diagnosis context, then record and transition:
 
-```bash
-curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "<agent-name>"}'
-
-curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "review"}'
-```
+1. `mcp__stratus__delegate_agent`: `workflow_id: "bug-<slug>"`, `agent_id: "<agent-name>"`
+2. `mcp__stratus__transition_phase`: `workflow_id: "bug-<slug>"`, `phase: "review"`
 
 ---
 
 ## Phase 3: Review
 
 - Delegate to `delivery-code-reviewer` (Task tool) — verify fix quality and no regressions.
-- Record delegation.
+- Record delegation with `mcp__stratus__delegate_agent`.
 - If reviewer finds issues → fix loop: transition back to fix, re-fix, re-review (max 5 loops).
-- On pass, complete:
+- On pass, complete using `mcp__stratus__transition_phase`:
 
-```bash
-curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "complete"}'
+```
+workflow_id: "bug-<slug>"
+phase: "complete"
 ```
 
-- Summarize what was fixed. Save a memory event with key findings.
+- Summarize what was fixed. Save a memory event with key findings using `mcp__stratus__save_memory`.
+
+---
+
+## MCP Tools Reference
+
+| Tool | Purpose |
+|------|---------|
+| `mcp__stratus__register_workflow` | Create new workflow (REQUIRED first) |
+| `mcp__stratus__transition_phase` | Move to next phase |
+| `mcp__stratus__delegate_agent` | Record agent delegation |
+| `mcp__stratus__get_workflow` | Check current workflow state |
+| `mcp__stratus__list_workflows` | See all active workflows |
+| `mcp__stratus__save_memory` | Save findings for future reference |
 
 ---
 
@@ -163,4 +151,4 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
 - Delegate ALL implementation work to delivery agents via Task.
 - **ALWAYS get explicit user approval before Phase 2 (Fix).**
 - Max 5 fix loops — escalate to user if still broken after 5 attempts.
-- Check current state: `curl -sS $BASE/api/workflows/bug-<slug>`
+- Check current state: `mcp__stratus__get_workflow` with `workflow_id: "bug-<slug>"`

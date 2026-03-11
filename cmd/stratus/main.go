@@ -292,6 +292,7 @@ func cmdHook() {
 		"workflow_existence_guard": hooks.WorkflowExistenceGuard,
 		"delegation_guard":         hooks.DelegationGuard,
 		"workflow_enforcer":        hooks.WorkflowEnforcer,
+		"bash_write_guard":         hooks.BashWriteGuard,
 		"watcher":                  hooks.Watcher,
 		"teammate_idle":            hooks.TeammateIdle,
 		"task_completed":           hooks.TaskCompleted,
@@ -535,7 +536,8 @@ Prompts written to .opencode/prompts/:
 	const ccHooks = `Hooks registered in .claude/settings.json:
   PreToolUse  phase_guard              — blocks write tools during review/verify
   PreToolUse  workflow_existence_guard — requires session-scoped active workflow for Task delegation
-  PreToolUse  delegation_guard         — applies delivery-agent delegation policy
+  PreToolUse  delegation_guard         — applies delivery-agent delegation policy and phase-agent matching
+  PreToolUse  bash_write_guard         — blocks file-modifying bash commands for delivery agents without workflow
   PostToolUse watcher                  — queues modified files for vexor reindexing
 
 Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar`
@@ -1076,6 +1078,7 @@ func writeHooks(projectRoot string) error {
 				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
 				{"Task", "stratus hook workflow_existence_guard"},
 				{"Task", "stratus hook delegation_guard"},
+				{"Bash", "stratus hook bash_write_guard"},
 			},
 		},
 		{

@@ -8,107 +8,78 @@ disable-model-invocation: true
 
 You are the **coordinator** for a spec-driven development workflow. You orchestrate work by delegating to specialized agents via the Task tool. You do NOT write production code directly.
 
-## API Base
+## Prerequisites
 
-All calls use the stratus server (default port 41777).
-
-```bash
-BASE=http://127.0.0.1:41777
-```
+Stratus server must be running: `stratus serve`
 
 ---
 
 ## Phase 1: Plan
 
-Start the workflow and explore the codebase:
+### 1a. Register Workflow
 
-```bash
-curl -sS -X POST $BASE/api/workflows \
-  -H 'Content-Type: application/json' \
-  -d "{\"id\": \"<kebab-slug>\", \"type\": \"spec\", \"complexity\": \"simple\", \"title\": \"<title from \$ARGUMENTS>\", \"session_id\": \"${CLAUDE_SESSION_ID}\"}"
+First, register the workflow using `mcp__stratus__register_workflow`:
+
+```
+id: "<kebab-slug>"          # lowercase, hyphenated, max 50 chars
+type: "spec"
+title: "<title from $ARGUMENTS>"
+session_id: "${CLAUDE_SESSION_ID}"
+complexity: "simple" | "complex"   # complex for multi-service, auth, database, cross-cutting
 ```
 
-- Use `complexity: "complex"` for multi-service, auth, database, or cross-cutting concerns; `"simple"` for everything else.
+### 1b. Codebase Exploration
 
-**Codebase exploration — use the built-in Explore agent:**
-
-Delegate to the `Explore` agent via Agent tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+Delegate to the `Explore` agent via Task tool (`subagent_type: "explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
 - Identify existing conventions, utilities, and abstractions that should be reused
 - Map dependencies and integration points that the implementation will touch
 
 Do NOT write code during exploration.
 
-**Governance check — delegate to `delivery-governance-checker` (Task tool):**
+### 1c. Governance Check
 
-Ask the agent to review the requirement from `$ARGUMENTS` against project governance rules and ADRs:
+Delegate to `delivery-strategic-architect` or `delivery-system-architect` (Task tool) to review the requirement against project governance:
 - Does this requirement conflict with any accepted ADRs?
-- Are there mandatory practices that must be followed for this type of feature?
+- Are there mandatory practices that must be followed?
 - Are there architectural constraints to consider?
 
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-governance-checker"}'
+Record delegation with `mcp__stratus__delegate_agent`:
+
+```
+workflow_id: "<slug>"
+agent_id: "delivery-strategic-architect"
 ```
 
-If checker returns `[must_update]` findings → share findings with user and adjust requirements before proceeding.
+If findings require updates → share with user and adjust requirements before proceeding.
 
-**Task planning — use the built-in Plan subagent:**
+### 1d. Task Planning
 
-Delegate to the `Plan` subagent via Agent tool (`subagent_type: "Plan"`). Pass full context:
+Delegate to the `Plan` subagent via Task tool (`subagent_type: "plan"`). Pass full context:
 - The requirement from `$ARGUMENTS`
 - Key files, directories, and patterns discovered by the Explore agent
-- Relevant architecture, patterns, and constraints found in the codebase
-- Any governance findings from the checker
+- Relevant architecture, patterns, and constraints
+- Any governance findings
 
-The Plan agent will return a step-by-step implementation plan with individual tasks and critical files.
+The Plan agent will return a step-by-step implementation plan.
 
 Use the Plan output to:
 1. Write the plan to `docs/plans/<slug>.md`
-2. Push plan content to the dashboard:
+2. Extract the ordered task list
 
-```bash
-curl -sS -X PUT $BASE/api/workflows/<slug>/plan \
-  -H 'Content-Type: application/json' \
-  -d "{\"content\": $(cat docs/plans/<slug>.md | jq -Rs .)}"
+Present the plan and task list to the user for approval via AskUserQuestion.
+On approval, transition to implement using `mcp__stratus__transition_phase`:
+
 ```
-
-3. Extract the ordered task list
-
-- Set tasks once finalized:
-
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"tasks": ["Task title 1", "Task title 2", ...]}'
-```
-
-- Present the plan and task list to the user for approval via AskUserQuestion.
-- On approval, register each task in the statusline via TaskCreate (subject = task title).
-- Transition to implement:
-
-```bash
-curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "implement"}'
+workflow_id: "<slug>"
+phase: "implement"
 ```
 
 ---
 
 ## Phase 2: Implement
 
-For each task (0-indexed):
-
-```bash
-# Mark task started (server-side)
-curl -sS -X POST $BASE/api/workflows/<slug>/tasks/<index>/start
-
-# Mark task active in statusline
-TaskUpdate(taskId=..., status="in_progress")
-```
-
-Route to the appropriate delivery agent based on task type:
+Route tasks to appropriate delivery agents:
 
 | Task Type | Agent |
 |-----------|-------|
@@ -117,32 +88,19 @@ Route to the appropriate delivery agent based on task type:
 | UI/UX design, design system | `delivery-ux-designer` |
 | Migrations, schema | `delivery-database-engineer` |
 | Infra, CI/CD | `delivery-devops-engineer` |
-| Mobile, React Native, iOS/Android | `delivery-mobile-engineer` |
-| Architecture, system design, ADRs | `delivery-system-architect` |
-| Tests | `delivery-qa-engineer` |
+| Mobile, React Native | `delivery-mobile-engineer` |
 | General/unclear | `delivery-implementation-expert` |
 
-Delegate via Task tool, then on completion:
+For each task:
+1. Delegate via Task tool
+2. Record with `mcp__stratus__delegate_agent`
+3. Mark complete in workflow
 
-```bash
-# Record delegation
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "<agent-name>"}'
+After all tasks, transition to verify using `mcp__stratus__transition_phase`:
 
-# Complete task (server-side)
-curl -sS -X POST $BASE/api/workflows/<slug>/tasks/<index>/complete
-
-# Complete in statusline
-TaskUpdate(taskId=..., status="completed")
 ```
-
-After all tasks, transition to verify:
-
-```bash
-curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "verify"}'
+workflow_id: "<slug>"
+phase: "verify"
 ```
 
 ---
@@ -150,52 +108,56 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 ## Phase 3: Verify
 
 - Delegate to `delivery-code-reviewer` (Task tool) for spec compliance, code quality, and test adequacy.
-- Record delegation:
+- Record delegation with `mcp__stratus__delegate_agent`:
 
-```bash
-curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id": "delivery-code-reviewer"}'
+```
+workflow_id: "<slug>"
+agent_id: "delivery-code-reviewer"
 ```
 
 - If reviewer returns `[must_fix]` issues → fix loop: transition back to implement, fix, re-verify.
-- On pass, transition to learn:
+- On pass, transition to learn using `mcp__stratus__transition_phase`:
 
-```bash
-curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "learn"}'
+```
+workflow_id: "<slug>"
+phase: "learn"
 ```
 
 ---
 
 ## Phase 4: Learn
 
-**Step 1 — Save memory events:** `save_memory(text="...", type="decision|discovery|bugfix", tags=[...], importance=0.8)`
+**Step 1 — Save memory events:** Use `mcp__stratus__save_memory`:
 
-**Step 2 — Create learning candidates + proposals** for each significant pattern:
-
-```bash
-CANDIDATE_ID=$(curl -sS -X POST $BASE/api/learning/candidates \
-  -H 'Content-Type: application/json' \
-  -d '{"detection_type": "pattern|decision|anti_pattern", "description": "...", "confidence": 0.85, "files": ["..."], "count": 1}' | jq -r '.id')
-
-curl -sS -X POST $BASE/api/learning/proposals \
-  -H 'Content-Type: application/json' \
-  -d '{"candidate_id": "'$CANDIDATE_ID'", "type": "rule|adr|template|skill", "title": "...", "description": "...", "proposed_content": "...", "proposed_path": ".claude/rules/<name>.md", "confidence": 0.85, "session_id": "<workflow-slug>"}'
+```
+text: "<key finding>"
+type: "decision" | "discovery" | "feature"
+tags: ["<relevant-tags>"]
+importance: 0.8
 ```
 
-User reviews proposals in the Learning tab.
+**Step 2 — Write governance artifacts** (only clear, unambiguous decisions): rules to `.claude/rules/`, ADRs to `docs/decisions/`.
 
-**Step 3 — Write governance artifacts** (only clear, unambiguous decisions): rules to `.claude/rules/`, ADRs to `docs/decisions/`, architecture to `docs/architecture/`. If files written: `curl -sS -X POST $BASE/api/retrieve/index`
+**Step 3 — Complete workflow** using `mcp__stratus__transition_phase`:
 
-**Step 4 — Complete workflow**:
-
-```bash
-curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "complete"}'
 ```
+workflow_id: "<slug>"
+phase: "complete"
+```
+
+---
+
+## MCP Tools Reference
+
+| Tool | Purpose |
+|------|---------|
+| `mcp__stratus__register_workflow` | Create new workflow (REQUIRED first) |
+| `mcp__stratus__transition_phase` | Move to next phase |
+| `mcp__stratus__delegate_agent` | Record agent delegation |
+| `mcp__stratus__get_workflow` | Check current workflow state |
+| `mcp__stratus__list_workflows` | See all active workflows |
+| `mcp__stratus__save_memory` | Save findings for future reference |
+| `mcp__stratus__retrieve` | Search code and governance docs |
 
 ---
 
@@ -204,4 +166,4 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 - **NEVER** use Write, Edit, or NotebookEdit on production source files directly.
 - Delegate ALL implementation work to delivery agents via Task.
 - Doc/config files (`*.md`, `*.json`, `*.yaml`) are exceptions — you may edit them.
-- Check current state at any time: `curl -sS $BASE/api/workflows/<slug>`
+- Check current state: `mcp__stratus__get_workflow` with `workflow_id: "<slug>"`
