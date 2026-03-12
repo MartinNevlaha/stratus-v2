@@ -474,7 +474,11 @@ func obj(fields ...map[string]any) map[string]any {
 	required := []string{}
 	for _, f := range fields {
 		name := f["name"].(string)
-		properties[name] = map[string]any{"type": f["type"], "description": f["description"]}
+		prop := map[string]any{"type": f["type"], "description": f["description"]}
+		if f["type"] == "array" {
+			prop["items"] = map[string]any{"type": "string"}
+		}
+		properties[name] = prop
 		if r, ok := f["required"].(bool); ok && r {
 			required = append(required, name)
 		}
