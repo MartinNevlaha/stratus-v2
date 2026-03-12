@@ -14,11 +14,19 @@ Stratus server must be running: `stratus serve`
 
 ---
 
+## MANDATORY EXECUTION PROTOCOL
+
+You MUST follow the phases in strict order. Each phase has mandatory MCP tool calls that MUST be executed. Do NOT skip any step. Do NOT proceed to the next phase without completing all mandatory calls in the current phase.
+
+---
+
 ## Phase 1: Setup
 
-### 1a. Register Workflow
+### STEP 1 — MANDATORY: Register Workflow
 
-First, register the workflow using `mcp__stratus__register_workflow`:
+**This is the FIRST thing you MUST do. Do NOT delegate to any agent, do NOT read any files, do NOT do anything else until this is complete.**
+
+Call `mcp__stratus__register_workflow` with:
 
 ```
 id: "<kebab-slug>"          # lowercase, hyphenated, max 50 chars
@@ -27,7 +35,9 @@ title: "E2E: <title from $ARGUMENTS>"
 session_id: "${CLAUDE_SESSION_ID}"
 ```
 
-### 1b. Environment Checks
+**DO NOT PROCEED until `mcp__stratus__register_workflow` succeeds and returns a workflow ID.**
+
+### STEP 2 — Environment Checks
 
 Perform ALL of the following:
 
@@ -51,26 +61,22 @@ Perform ALL of the following:
    npx playwright install chromium
    ```
 
-### 1c. Transition to Plan
+### STEP 3 — MANDATORY: Transition to Plan
 
-Use `mcp__stratus__transition_phase`:
+**After environment setup is complete, you MUST call `mcp__stratus__transition_phase` BEFORE delegating any planning agent. DO NOT skip this step.**
 
 ```
 workflow_id: "<slug>"
 phase: "plan"
 ```
 
+**DO NOT PROCEED to Phase 2 until this transition succeeds.**
+
 ---
 
 ## Phase 2: Plan
 
-Delegate test planning to the appropriate agent.
-
-### 2a. Set Task
-
-Set the planning task (use Bash for task API calls if no MCP tool available).
-
-### 2b. Delegate to Planner
+### STEP 4 — Delegate to Planner
 
 Delegate to `delivery-strategic-architect` or `delivery-qa-engineer` (Task tool) with:
 - The user's test scope from `$ARGUMENTS`
@@ -78,77 +84,72 @@ Delegate to `delivery-strategic-architect` or `delivery-qa-engineer` (Task tool)
 - The base URL from `.env.playwright.example` or `playwright.config.ts`
 - Any relevant PRD or requirements docs mentioned by the user
 
-Record delegation with `mcp__stratus__delegate_agent`:
+**MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
 
 ```
 workflow_id: "<slug>"
 agent_id: "delivery-qa-engineer"
 ```
 
-### 2c. Transition to Generate
+### STEP 5 — MANDATORY: Transition to Generate
 
-After planner finishes, transition using `mcp__stratus__transition_phase`:
+**After planner finishes, you MUST call `mcp__stratus__transition_phase` BEFORE delegating any test generation agent. DO NOT skip this step.**
 
 ```
 workflow_id: "<slug>"
 phase: "generate"
 ```
 
+**DO NOT PROCEED to Phase 3 until this transition succeeds.**
+
 ---
 
 ## Phase 3: Generate
 
-Generate test files from the plans.
-
-### 3a. Read Spec Files
+### STEP 6 — Generate Test Files
 
 Read all spec files from `specs/` and create tasks for each test scenario.
 
-### 3b. For Each Scenario
-
+For each scenario:
 1. Delegate to `delivery-qa-engineer` or `delivery-frontend-engineer` (Task tool) with the test plan
-2. Record with `mcp__stratus__delegate_agent`
+2. **MANDATORY:** Record with `mcp__stratus__delegate_agent`
 3. Mark task complete
 
-### 3c. Transition to Heal
+### STEP 7 — MANDATORY: Transition to Heal
 
-After all tests generated, transition using `mcp__stratus__transition_phase`:
+**After all tests are generated, you MUST call `mcp__stratus__transition_phase` BEFORE delegating any healing agent. DO NOT skip this step.**
 
 ```
 workflow_id: "<slug>"
 phase: "heal"
 ```
 
+**DO NOT PROCEED to Phase 4 until this transition succeeds.**
+
 ---
 
 ## Phase 4: Heal
 
-Run all tests and fix failures.
-
-### 4a. Set Task
-
-Set healing task.
-
-### 4b. Delegate to Debugger
+### STEP 8 — Delegate to Debugger
 
 Delegate to `delivery-debugger` or `delivery-qa-engineer` (Task tool):
 - Tell it to run all tests and fix any failures
 - It will diagnose and fix issues
 
-Record delegation with `mcp__stratus__delegate_agent`:
+**MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
 
 ```
 workflow_id: "<slug>"
 agent_id: "delivery-debugger"
 ```
 
-### 4c. Evaluate Results
+### STEP 9 — Evaluate Results
 
-- If all tests pass → transition to complete
-- If healer reports tests need regeneration → transition back to generate
+- If all tests pass → **MANDATORY:** transition to complete
+- If healer reports tests need regeneration → **MANDATORY:** transition back to generate, then re-generate
 - Maximum 3 heal→generate loops before completing with partial results
 
-Use `mcp__stratus__transition_phase`:
+**MANDATORY: Transition to Complete** using `mcp__stratus__transition_phase`:
 
 ```
 workflow_id: "<slug>"
@@ -159,14 +160,7 @@ phase: "complete"
 
 ## Phase 5: Complete
 
-Transition to complete using `mcp__stratus__transition_phase`:
-
-```
-workflow_id: "<slug>"
-phase: "complete"
-```
-
-Summarize results using `mcp__stratus__save_memory` for key findings.
+**MANDATORY:** Summarize results using `mcp__stratus__save_memory` for key findings.
 
 ---
 
@@ -174,9 +168,9 @@ Summarize results using `mcp__stratus__save_memory` for key findings.
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__stratus__register_workflow` | Create new workflow (REQUIRED first) |
-| `mcp__stratus__transition_phase` | Move to next phase |
-| `mcp__stratus__delegate_agent` | Record agent delegation |
+| `mcp__stratus__register_workflow` | Create new workflow (REQUIRED FIRST — call before anything else) |
+| `mcp__stratus__transition_phase` | Move to next phase (REQUIRED at each phase boundary) |
+| `mcp__stratus__delegate_agent` | Record agent delegation (REQUIRED for every delivery agent) |
 | `mcp__stratus__get_workflow` | Check current workflow state |
 | `mcp__stratus__save_memory` | Save findings for future reference |
 
@@ -185,6 +179,9 @@ Summarize results using `mcp__stratus__save_memory` for key findings.
 ## Rules
 
 - **NEVER** write test code directly — delegate ALL test writing to agents.
+- **ALWAYS** call `mcp__stratus__register_workflow` as the very first action.
+- **ALWAYS** call `mcp__stratus__transition_phase` before starting each new phase.
+- **ALWAYS** call `mcp__stratus__delegate_agent` for every delivery agent delegation.
 - Always get user confirmation of the seed test before proceeding to plan.
 - Check current state: `mcp__stratus__get_workflow` with `workflow_id: "<slug>"`
 - Maximum 3 heal→generate loops to prevent infinite cycling.

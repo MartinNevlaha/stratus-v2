@@ -14,11 +14,19 @@ Stratus server must be running: `stratus serve`
 
 ---
 
+## MANDATORY EXECUTION PROTOCOL
+
+You MUST follow the phases in strict order. Each phase has mandatory MCP tool calls that MUST be executed. Do NOT skip any step. Do NOT proceed to the next phase without completing all mandatory calls in the current phase.
+
+---
+
 ## Phase 1: Analyze
 
-### 1a. Register Workflow
+### STEP 1 — MANDATORY: Register Workflow
 
-First, register the workflow using `mcp__stratus__register_workflow`:
+**This is the FIRST thing you MUST do. Do NOT delegate to any agent, do NOT read any files, do NOT do anything else until this is complete.**
+
+Call `mcp__stratus__register_workflow` with:
 
 ```
 id: "bug-<slug>"           # slug from $ARGUMENTS: lowercase, hyphenated, max 50 chars
@@ -27,11 +35,13 @@ title: "<bug description>"
 session_id: "${CLAUDE_SESSION_ID}"
 ```
 
-### 1b. Explore & Diagnose
+**DO NOT PROCEED until `mcp__stratus__register_workflow` succeeds and returns a workflow ID.**
+
+### STEP 2 — Explore & Diagnose
 
 - Explore the codebase: Read error messages, stack traces, logs.
 - Delegate to `delivery-debugger` (Task tool) for root cause analysis.
-- Record delegation using `mcp__stratus__delegate_agent`:
+- **MANDATORY:** Record delegation using `mcp__stratus__delegate_agent`:
 
 ```
 workflow_id: "bug-<slug>"
@@ -40,7 +50,7 @@ agent_id: "delivery-debugger"
 
 The debugger will return a structured diagnosis with symptom, root cause, classification, evidence, and recommended fix.
 
-### 1c. Assess Severity — Intelligent Decision
+### STEP 3 — Assess Severity — Intelligent Decision
 
 Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
 
@@ -61,7 +71,7 @@ Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
 - Risk of regressions in other areas
 - Unclear fix approach or multiple options
 
-### 1d. Plan (if COMPLEX)
+### STEP 4 — Plan (if COMPLEX)
 
 If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "plan"`):
 
@@ -79,19 +89,23 @@ The Plan agent will return:
 
 Present the plan to the user via AskUserQuestion. **Wait for explicit approval.**
 
-### 1e. User Approval & Transition
+### STEP 5 — User Approval
 
 **Present diagnosis to user via AskUserQuestion.**
 
 - If TRIVIAL: Get approval to proceed directly to fix
 - If COMPLEX: Get approval for the plan
 
-On approval, transition to fix using `mcp__stratus__transition_phase`:
+### STEP 6 — MANDATORY: Transition to Fix
+
+**After user approval, you MUST call `mcp__stratus__transition_phase` BEFORE delegating any fix work. DO NOT delegate to any engineer until this transition is complete.**
 
 ```
 workflow_id: "bug-<slug>"
 phase: "fix"
 ```
+
+**DO NOT PROCEED to Phase 2 until this transition succeeds.**
 
 ---
 
@@ -109,26 +123,47 @@ Route to the appropriate delivery agent:
 | Mobile, React Native | `delivery-mobile-engineer` |
 | General | `delivery-implementation-expert` |
 
-Delegate via Task tool with diagnosis context, then record and transition:
+1. Delegate via Task tool with diagnosis context
+2. **MANDATORY:** Record with `mcp__stratus__delegate_agent`: `workflow_id: "bug-<slug>"`, `agent_id: "<agent-name>"`
 
-1. `mcp__stratus__delegate_agent`: `workflow_id: "bug-<slug>"`, `agent_id: "<agent-name>"`
-2. `mcp__stratus__transition_phase`: `workflow_id: "bug-<slug>"`, `phase: "review"`
+### MANDATORY: Transition to Review
+
+**After the fix is complete, you MUST call `mcp__stratus__transition_phase` BEFORE delegating to the code reviewer. DO NOT skip this step.**
+
+```
+workflow_id: "bug-<slug>"
+phase: "review"
+```
+
+**DO NOT PROCEED to Phase 3 until this transition succeeds.**
 
 ---
 
 ## Phase 3: Review
 
 - Delegate to `delivery-code-reviewer` (Task tool) — verify fix quality and no regressions.
-- Record delegation with `mcp__stratus__delegate_agent`.
-- If reviewer finds issues → fix loop: transition back to fix, re-fix, re-review (max 5 loops).
-- On pass, complete using `mcp__stratus__transition_phase`:
+- **MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
+
+```
+workflow_id: "bug-<slug>"
+agent_id: "delivery-code-reviewer"
+```
+
+If reviewer finds issues:
+1. **MANDATORY:** Transition back to fix: `mcp__stratus__transition_phase` → `phase: "fix"`
+2. Re-fix and re-delegate to engineer
+3. **MANDATORY:** Transition back to review: `mcp__stratus__transition_phase` → `phase: "review"`
+4. Re-delegate to code reviewer
+(max 5 loops)
+
+On PASS, **MANDATORY:** complete using `mcp__stratus__transition_phase`:
 
 ```
 workflow_id: "bug-<slug>"
 phase: "complete"
 ```
 
-- Summarize what was fixed. Save a memory event with key findings using `mcp__stratus__save_memory`.
+Summarize what was fixed. **MANDATORY:** Save a memory event with key findings using `mcp__stratus__save_memory`.
 
 ---
 
@@ -136,9 +171,9 @@ phase: "complete"
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__stratus__register_workflow` | Create new workflow (REQUIRED first) |
-| `mcp__stratus__transition_phase` | Move to next phase |
-| `mcp__stratus__delegate_agent` | Record agent delegation |
+| `mcp__stratus__register_workflow` | Create new workflow (REQUIRED FIRST — call before anything else) |
+| `mcp__stratus__transition_phase` | Move to next phase (REQUIRED at each phase boundary) |
+| `mcp__stratus__delegate_agent` | Record agent delegation (REQUIRED for every delivery agent) |
 | `mcp__stratus__get_workflow` | Check current workflow state |
 | `mcp__stratus__list_workflows` | See all active workflows |
 | `mcp__stratus__save_memory` | Save findings for future reference |
@@ -149,6 +184,18 @@ phase: "complete"
 
 - **NEVER** use Write, Edit, or NotebookEdit on production source files directly.
 - Delegate ALL implementation work to delivery agents via Task.
+- **ALWAYS** call `mcp__stratus__register_workflow` as the very first action.
+- **ALWAYS** call `mcp__stratus__transition_phase` before starting each new phase.
+- **ALWAYS** call `mcp__stratus__delegate_agent` for every delivery agent delegation.
 - **ALWAYS get explicit user approval before Phase 2 (Fix).**
 - Max 5 fix loops — escalate to user if still broken after 5 attempts.
 - Check current state: `mcp__stratus__get_workflow` with `workflow_id: "bug-<slug>"`
+
+## Workflow API Error Handling
+
+If any workflow MCP tool call returns an error, you MUST resolve it before continuing. **NEVER rationalize away an API error as "a limitation" or "not important" and proceed anyway.**
+
+- Error says "tasks not defined" → create the task list and set it, then retry
+- Any other error → read the message, fix the prerequisite, retry
+
+**Proceeding after a failed transition is FORBIDDEN regardless of the reason.**
