@@ -135,11 +135,11 @@ func validateSpecPhaseReadiness(state *WorkflowState, to Phase) []string {
 		if to == PhaseImplement {
 			if len(state.Tasks) == 0 {
 				warnings = append(warnings,
-					"transitioning to implement with no tasks defined")
+					"tasks not defined — use /api/workflows/<id>/tasks to set tasks before implementing")
 			}
 			if state.PlanContent == "" {
 				warnings = append(warnings,
-					"transitioning to implement without plan content")
+					"plan not defined — write plan to docs/plans/<slug>.md and set via /api/workflows/<id>/plan")
 			}
 		}
 
@@ -296,6 +296,15 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	warnings := validatePhaseReadiness(state, to)
 	for _, w := range warnings {
 		log.Printf("warning: workflow %s phase transition: %s", id, w)
+	}
+	// Block transition if validation fails for critical requirements
+	if len(warnings) > 0 {
+		switch state.Type {
+		case WorkflowSpec:
+			if state.Phase == PhasePlan && to == PhaseImplement {
+				return nil, fmt.Errorf("cannot transition to implement: %s", strings.Join(warnings, "; "))
+			}
+		}
 	}
 
 	fromPhase := state.Phase

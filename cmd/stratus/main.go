@@ -301,7 +301,7 @@ func cmdHook() {
 }
 
 func parseInitFlags() (force bool, target string) {
-	target = "claude-code"
+	target = "both"
 	for i := 2; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--force":
@@ -525,8 +525,11 @@ Prompts written to .opencode/prompts/:
   playwright-test-healer.md`
 
 	const ocPlugin = `Plugin written to .opencode/plugin/stratus.ts:
-  phase_guard — blocks write tools during verify/review phases
-  watcher     — queues modified files for vexor reindexing`
+  phase_guard              — blocks write tools during verify/review phases
+  workflow_existence_guard — requires active workflow for Task delegation
+  delegation_guard         — enforces phase-agent matching for delivery agents
+  bash_write_guard         — blocks bash write commands for delivery agents without workflow
+  watcher                  — queues modified files for vexor reindexing`
 
 	const rules = `Rules written to .claude/rules/:
   review-verdict-format — structured PASS/FAIL verdicts
@@ -1028,6 +1031,12 @@ func writeOpenCodeConfig(projectRoot string) error {
 		}
 	}
 	existing["agent"] = agentSection
+
+	// Register plugin if not present
+	pluginSection, _ := existing["plugin"].([]any)
+	if len(pluginSection) == 0 {
+		existing["plugin"] = []any{".opencode/plugin/stratus.ts"}
+	}
 
 	// Remove stale "plugins" key from older Stratus versions — OpenCode
 	// auto-discovers local plugins from .opencode/plugins/.

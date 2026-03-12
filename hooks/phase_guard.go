@@ -25,9 +25,9 @@ var phaseAgentAllowlist = map[string]map[string][]string{
 	},
 	"spec": {
 		"plan":       {"delivery-strategic-architect", "delivery-system-architect", "plan", "explore"},
-		"discovery":  {"delivery-debugger", "explore"},
+		"discovery":  {"delivery-debugger", "delivery-strategic-architect", "explore"},
 		"design":     {"delivery-strategic-architect", "delivery-system-architect", "delivery-ux-designer"},
-		"governance": {"delivery-code-reviewer"},
+		"governance": {"delivery-code-reviewer", "delivery-governance-checker"},
 		"accept":     {},
 		"implement": {
 			"delivery-backend-engineer", "delivery-frontend-engineer", "delivery-database-engineer",
