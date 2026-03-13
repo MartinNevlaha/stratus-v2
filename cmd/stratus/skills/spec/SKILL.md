@@ -101,10 +101,22 @@ Route tasks to appropriate delivery agents:
 | Mobile, React Native | `delivery-mobile-engineer` |
 | General/unclear | `delivery-implementation-expert` |
 
-For each task:
-1. Delegate via Task tool
-2. **MANDATORY:** Record with `mcp__stratus__delegate_agent`
-3. Mark complete in workflow
+For each task (by index, starting at 0):
+1. **MANDATORY:** Mark as started with `mcp__stratus__start_task`:
+
+```
+workflow_id: "<slug>"
+task_index: 0  # zero-based index
+```
+
+2. Delegate via Task tool
+3. **MANDATORY:** Record with `mcp__stratus__delegate_agent`
+4. **MANDATORY:** Mark complete with `mcp__stratus__complete_task`:
+
+```
+workflow_id: "<slug>"
+task_index: 0
+```
 
 ### MANDATORY: Transition to Verify
 
@@ -174,6 +186,8 @@ phase: "complete"
 | `mcp__stratus__register_workflow` | Create new workflow (REQUIRED FIRST — call before anything else) |
 | `mcp__stratus__transition_phase` | Move to next phase (REQUIRED at each phase boundary) |
 | `mcp__stratus__delegate_agent` | Record agent delegation (REQUIRED for every delivery agent) |
+| `mcp__stratus__start_task` | Mark task as in_progress (REQUIRED before delegating each task) |
+| `mcp__stratus__complete_task` | Mark task as done (REQUIRED after each task completes) |
 | `mcp__stratus__get_workflow` | Check current workflow state |
 | `mcp__stratus__list_workflows` | See all active workflows |
 | `mcp__stratus__save_memory` | Save findings for future reference |
@@ -188,6 +202,8 @@ phase: "complete"
 - Doc/config files (`*.md`, `*.json`, `*.yaml`) are exceptions — you may edit them.
 - **ALWAYS** call `mcp__stratus__register_workflow` as the very first action.
 - **ALWAYS** call `mcp__stratus__transition_phase` before starting each new phase.
+- **ALWAYS** call `mcp__stratus__start_task` before delegating each task.
+- **ALWAYS** call `mcp__stratus__complete_task` after each task completes successfully.
 - **ALWAYS** call `mcp__stratus__delegate_agent` for every delivery agent delegation.
 - Check current state: `mcp__stratus__get_workflow` with `workflow_id: "<slug>"`
 

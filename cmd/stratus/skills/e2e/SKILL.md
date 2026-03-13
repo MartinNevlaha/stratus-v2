@@ -111,9 +111,21 @@ phase: "generate"
 Read all spec files from `specs/` and create tasks for each test scenario.
 
 For each scenario:
-1. Delegate to `delivery-qa-engineer` or `delivery-frontend-engineer` (Task tool) with the test plan
-2. **MANDATORY:** Record with `mcp__stratus__delegate_agent`
-3. Mark task complete
+1. **MANDATORY:** Mark as started with `mcp__stratus__start_task`:
+
+```
+workflow_id: "<slug>"
+task_index: 0  # zero-based index
+```
+
+2. Delegate to `delivery-qa-engineer` or `delivery-frontend-engineer` (Task tool) with the test plan
+3. **MANDATORY:** Record with `mcp__stratus__delegate_agent`
+4. **MANDATORY:** Mark complete with `mcp__stratus__complete_task`:
+
+```
+workflow_id: "<slug>"
+task_index: 0
+```
 
 ### STEP 7 — MANDATORY: Transition to Heal
 
@@ -171,6 +183,8 @@ phase: "complete"
 | `mcp__stratus__register_workflow` | Create new workflow (REQUIRED FIRST — call before anything else) |
 | `mcp__stratus__transition_phase` | Move to next phase (REQUIRED at each phase boundary) |
 | `mcp__stratus__delegate_agent` | Record agent delegation (REQUIRED for every delivery agent) |
+| `mcp__stratus__start_task` | Mark task as in_progress (REQUIRED before delegating each task) |
+| `mcp__stratus__complete_task` | Mark task as done (REQUIRED after each task completes) |
 | `mcp__stratus__get_workflow` | Check current workflow state |
 | `mcp__stratus__save_memory` | Save findings for future reference |
 
@@ -181,6 +195,8 @@ phase: "complete"
 - **NEVER** write test code directly — delegate ALL test writing to agents.
 - **ALWAYS** call `mcp__stratus__register_workflow` as the very first action.
 - **ALWAYS** call `mcp__stratus__transition_phase` before starting each new phase.
+- **ALWAYS** call `mcp__stratus__start_task` before delegating each task.
+- **ALWAYS** call `mcp__stratus__complete_task` after each task completes successfully.
 - **ALWAYS** call `mcp__stratus__delegate_agent` for every delivery agent delegation.
 - Always get user confirmation of the seed test before proceeding to plan.
 - Check current state: `mcp__stratus__get_workflow` with `workflow_id: "<slug>"`

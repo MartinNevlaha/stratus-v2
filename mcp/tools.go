@@ -255,6 +255,46 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 	})
 
 	s.Register(Tool{
+		Name:        "start_task",
+		Description: "Mark a workflow task as in_progress. Call this before delegating a task to an agent.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+			req("task_index", "integer", "Zero-based task index"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			index := intArg(args, "task_index", -1)
+			if index < 0 {
+				return nil, fmt.Errorf("task_index is required")
+			}
+			return client.post(fmt.Sprintf("/api/workflows/%s/tasks/%d/start", id, index), nil)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "complete_task",
+		Description: "Mark a workflow task as done. Call this after an agent successfully completes a task.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+			req("task_index", "integer", "Zero-based task index"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			index := intArg(args, "task_index", -1)
+			if index < 0 {
+				return nil, fmt.Errorf("task_index is required")
+			}
+			return client.post(fmt.Sprintf("/api/workflows/%s/tasks/%d/complete", id, index), nil)
+		},
+	})
+
+	s.Register(Tool{
 		Name:        "get_workflow",
 		Description: "Get current workflow state including phase, tasks, and delegation history.",
 		InputSchema: obj(
