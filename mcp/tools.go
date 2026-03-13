@@ -215,8 +215,14 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			if id == "" {
 				return nil, fmt.Errorf("workflow_id is required")
 			}
+			phase, _ := args["phase"].(string)
+			if phase == "" {
+				return nil, fmt.Errorf("phase is required")
+			}
 
-			if tasks := convertTasksArg(args["tasks"]); len(tasks) > 0 {
+			if tasks, err := convertTasksArg(args["tasks"]); err != nil {
+				return nil, fmt.Errorf("invalid tasks: %w", err)
+			} else if len(tasks) > 0 {
 				if _, err := client.post(fmt.Sprintf("/api/workflows/%s/tasks", id), map[string]any{"tasks": tasks}); err != nil {
 					return nil, fmt.Errorf("failed to set tasks: %w", err)
 				}
@@ -228,7 +234,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 				}
 			}
 
-			return client.put(fmt.Sprintf("/api/workflows/%s/phase", id), map[string]any{"phase": args["phase"]})
+			return client.put(fmt.Sprintf("/api/workflows/%s/phase", id), map[string]any{"phase": phase})
 		},
 	})
 
@@ -553,24 +559,27 @@ func convertMemoryArgs(args map[string]any) map[string]any {
 	return result
 }
 
-func convertTasksArg(v any) []string {
+func convertTasksArg(v any) ([]string, error) {
 	if v == nil {
-		return nil
+		return nil, nil
 	}
 	if arr, ok := v.([]any); ok {
 		result := make([]string, 0, len(arr))
-		for _, item := range arr {
+		for i, item := range arr {
 			if s, ok := item.(string); ok {
 				result = append(result, s)
+			} else {
+				return nil, fmt.Errorf("task at index %d is not a string (got %T)", i, item)
 			}
 		}
-		return result
+		return result, nil
 	}
 	if s, ok := v.(string); ok && s != "" {
 		var arr []string
-		if json.Unmarshal([]byte(s), &arr) == nil {
-			return arr
+		if err := json.Unmarshal([]byte(s), &arr); err != nil {
+			return nil, fmt.Errorf("invalid JSON array: %w", err)
 		}
+		return arr, nil
 	}
-	return nil
+	return nil, nil
 }
