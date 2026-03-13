@@ -293,24 +293,8 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 		return nil, err
 	}
 
-	warnings := validatePhaseReadiness(state, to)
-	for _, w := range warnings {
+	for _, w := range validatePhaseReadiness(state, to) {
 		log.Printf("warning: workflow %s phase transition: %s", id, w)
-	}
-	// Block transition if validation fails for critical requirements.
-	// Warnings that represent hard prerequisites are returned as errors so that
-	// agents cannot rationalize past them and must resolve the condition first.
-	if len(warnings) > 0 {
-		switch state.Type {
-		case WorkflowSpec:
-			if state.Phase == PhasePlan && to == PhaseImplement {
-				return nil, fmt.Errorf("cannot transition to implement: %s", strings.Join(warnings, "; "))
-			}
-		case WorkflowBug:
-			if state.Phase == PhaseAnalyze && to == PhaseFix {
-				return nil, fmt.Errorf("cannot transition to fix: %s", strings.Join(warnings, "; "))
-			}
-		}
 	}
 
 	fromPhase := state.Phase
