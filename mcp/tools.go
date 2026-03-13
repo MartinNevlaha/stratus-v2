@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"strconv"
 )
 
 // RegisterTools registers Stratus MCP tools on the server.
@@ -120,7 +121,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			opt("project", "string", "Project name"),
 		),
 		Handler: func(args map[string]any) (any, error) {
-			return client.post("/api/events", args)
+			return client.post("/api/events", convertMemoryArgs(args))
 		},
 	})
 
@@ -510,4 +511,29 @@ func intArg(args map[string]any, key string, def int) int {
 		return n
 	}
 	return def
+}
+
+func convertMemoryArgs(args map[string]any) map[string]any {
+	result := make(map[string]any)
+	for k, v := range args {
+		switch k {
+		case "importance":
+			if s, ok := v.(string); ok {
+				if f, err := strconv.ParseFloat(s, 64); err == nil {
+					result[k] = f
+					continue
+				}
+			}
+		case "tags":
+			if s, ok := v.(string); ok {
+				var arr []string
+				if json.Unmarshal([]byte(s), &arr) == nil {
+					result[k] = arr
+					continue
+				}
+			}
+		}
+		result[k] = v
+	}
+	return result
 }
