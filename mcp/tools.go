@@ -203,17 +203,32 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "transition_phase",
-		Description: "Transition a workflow to the next phase. Validates against state machine rules before allowing transition.",
+		Description: "Transition a workflow to the next phase. Optionally set tasks and plan before transitioning. Validates against state machine rules.",
 		InputSchema: obj(
 			req("workflow_id", "string", "Workflow ID to transition"),
 			req("phase", "string", "Target phase (e.g. 'implement', 'verify', 'review', 'complete')"),
+			opt("tasks", "array", "Task titles to set before transitioning (for plan→implement)"),
+			opt("plan_content", "string", "Full markdown plan content to set before transitioning"),
 		),
 		Handler: func(args map[string]any) (any, error) {
 			id, _ := args["workflow_id"].(string)
 			if id == "" {
 				return nil, fmt.Errorf("workflow_id is required")
 			}
-			return client.put(fmt.Sprintf("/api/workflows/%s/phase", id), args)
+
+			if tasks := convertTasksArg(args["tasks"]); len(tasks) > 0 {
+				if _, err := client.post(fmt.Sprintf("/api/workflows/%s/tasks", id), map[string]any{"tasks": tasks}); err != nil {
+					return nil, fmt.Errorf("failed to set tasks: %w", err)
+				}
+			}
+
+			if plan, _ := args["plan_content"].(string); plan != "" {
+				if _, err := client.put(fmt.Sprintf("/api/workflows/%s/plan", id), map[string]any{"content": plan}); err != nil {
+					return nil, fmt.Errorf("failed to set plan: %w", err)
+				}
+			}
+
+			return client.put(fmt.Sprintf("/api/workflows/%s/phase", id), map[string]any{"phase": args["phase"]})
 		},
 	})
 
@@ -536,4 +551,26 @@ func convertMemoryArgs(args map[string]any) map[string]any {
 		result[k] = v
 	}
 	return result
+}
+
+func convertTasksArg(v any) []string {
+	if v == nil {
+		return nil
+	}
+	if arr, ok := v.([]any); ok {
+		result := make([]string, 0, len(arr))
+		for _, item := range arr {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	if s, ok := v.(string); ok && s != "" {
+		var arr []string
+		if json.Unmarshal([]byte(s), &arr) == nil {
+			return arr
+		}
+	}
+	return nil
 }
