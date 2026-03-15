@@ -53,7 +53,7 @@ For each user-added skill (anything beyond the 3 expected):
 ### Step 2.5: Custom Skills Discovery
 
 **Stratus-owned skills** (baseline — these are installed by `stratus init`):
-`spec`, `spec-complex`, `bug`, `learn`, `sync-stratus`, `vexor-cli`, `governance-db`, `run-tests`, `code-review`, `find-bugs`, `security-review`, `create-architecture`, `explain-architecture`, `frontend-design`, `react-native-best-practices`
+`spec`, `spec-complex`, `bug`, `learn`, `sync-stratus`, `vexor-cli`, `governance-db`, `run-tests`, `code-review`, `find-bugs`, `security-review`, `create-architecture`, `explain-architecture`, `frontend-design`, `react-native-best-practices`, `system-reminder`
 
 For each skill in `.claude/skills/` that is NOT in the above list:
 1. Read its `SKILL.md` — record `name`, `description`, `context` field

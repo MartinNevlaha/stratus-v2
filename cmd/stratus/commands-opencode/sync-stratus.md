@@ -33,6 +33,11 @@ Detect:
 - **Missing coordinator skill**
 - **Skill with incorrect context** — coordinator skills must NOT have `context: fork`
 
+Baseline Stratus-owned skills include:
+- `spec`, `spec-complex`, `bug`, `learn`, `sync-stratus`, `resume`, `swarm`
+- `vexor-cli`, `governance-db`, `run-tests`, `code-review`, `find-bugs`, `security-review`
+- `create-architecture`, `explain-architecture`, `frontend-design`, `react-native-best-practices`, `system-reminder`, `e2e`
+
 For each user-added skill (not in the baseline list):
 - Read its `SKILL.md` — record `name`, `description`, `context`
 - Check if any agent in `.opencode/agents/` references it

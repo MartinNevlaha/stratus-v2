@@ -2,33 +2,33 @@
   import { onMount } from 'svelte'
   import Chart from '$lib/Chart.svelte'
   import { appState } from '$lib/store'
-  import { 
-    getMetricsSummary, 
+  import {
+    getMetricsSummary,
     getDailyMetrics,
     getAgentMetrics,
     exportMetricsCSV
   } from '$lib/api'
   import type { MetricsSummary, DailyMetric, AgentMetric } from '$lib/types'
-  
+
   let loading = $state(true)
   let error = $state<string | null>(null)
   let timeRange = $state<'7d' | '30d' | '90d'>('7d')
   let summary = $state<MetricsSummary | null>(null)
   let dailyMetrics = $state<DailyMetric[]>([])
   let agentMetrics = $state<AgentMetric[]>([])
-  
+
   let lastUpdateCounter = 0
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let pendingRequest = false
   let metricsLiveTimeout: ReturnType<typeof setTimeout> | null = null
   let isLive = $state(false)
-  
+
   // Chart data
   let workflowTrendData = $state<any>(null)
   let agentPerformanceData = $state<any>(null)
   let phaseDistributionData = $state<any>(null)
   let taskCompletionData = $state<any>(null)
-  
+
   onMount(() => {
     loadMetrics()
     return () => {
@@ -36,7 +36,7 @@
       if (metricsLiveTimeout) clearTimeout(metricsLiveTimeout)
     }
   })
-  
+
   function setLive() {
     isLive = true
     if (metricsLiveTimeout) clearTimeout(metricsLiveTimeout)
@@ -44,20 +44,33 @@
       isLive = false
     }, 30000)
   }
-  
-  // Watch for real-time updates with debounce
+
+  function applyLiveMetrics() {
+    if (appState.liveMetrics && appState.liveMetrics.summary) {
+      summary = appState.liveMetrics.summary
+      dailyMetrics = appState.liveMetrics.daily
+      agentMetrics = appState.liveMetrics.agents
+      generateChartData()
+      setLive()
+    }
+  }
+
   $effect(() => {
     const counter = appState.analyticsUpdateCounter
     if (counter > lastUpdateCounter) {
       lastUpdateCounter = counter
       setLive()
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        loadMetrics(true)
-      }, 2000)
+      if (appState.liveMetrics) {
+        applyLiveMetrics()
+      } else {
+        if (debounceTimer) clearTimeout(debounceTimer)
+        debounceTimer = setTimeout(() => {
+          loadMetrics(true)
+        }, 2000)
+      }
     }
   })
-  
+
   async function loadMetrics(background = false) {
     if (pendingRequest) {
       console.log('[Analytics] Request already pending, skipping')
@@ -69,19 +82,19 @@
     console.log('[Analytics] Loading metrics, background:', background)
     try {
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
-      
+
       console.log('[Analytics] Fetching metrics for', days, 'days')
       const [summaryData, dailyData, agentData] = await Promise.all([
         getMetricsSummary(days),
         getDailyMetrics(days),
         getAgentMetrics(days)
       ])
-      
+
       console.log('[Analytics] Got data:', { summaryData, dailyData, agentData })
       summary = summaryData.summary
       dailyMetrics = dailyData.metrics
       agentMetrics = agentData.agents
-      
+
       generateChartData()
     } catch (e) {
       console.error('[Analytics] Error loading metrics:', e)
@@ -368,9 +381,10 @@
       <div class="chart-container full-width">
         <h3>Workflow Performance Trend</h3>
         {#if workflowTrendData}
-          <Chart 
+          <Chart
             type="line"
             data={workflowTrendData}
+            height="300px"
             options={{
               responsive: true,
               maintainAspectRatio: false,
@@ -396,14 +410,15 @@
           />
         {/if}
       </div>
-      
+
       <!-- Agent Performance -->
       <div class="chart-container">
         <h3>Agent Performance</h3>
         {#if agentPerformanceData}
-          <Chart 
+          <Chart
             type="bar"
             data={agentPerformanceData}
+            height="300px"
             options={{
               responsive: true,
               maintainAspectRatio: false,
@@ -429,14 +444,15 @@
           />
         {/if}
       </div>
-      
+
       <!-- Success Rate Distribution -->
       <div class="chart-container">
         <h3>Success Rate Distribution</h3>
         {#if phaseDistributionData}
-          <Chart 
+          <Chart
             type="doughnut"
             data={phaseDistributionData}
+            height="300px"
             options={{
               responsive: true,
               maintainAspectRatio: false,
@@ -453,14 +469,15 @@
           />
         {/if}
       </div>
-      
+
       <!-- Task Completion by Domain -->
       <div class="chart-container full-width">
         <h3>Task Completion by Domain</h3>
         {#if taskCompletionData}
-          <Chart 
+          <Chart
             type="bar"
             data={taskCompletionData}
+            height="300px"
             options={{
               responsive: true,
               maintainAspectRatio: false,
@@ -742,24 +759,29 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 20px;
   }
-  
+
   .chart-container {
     background: #161b22;
     border: 1px solid #30363d;
     border-radius: 8px;
     padding: 20px;
-    min-height: 300px;
+    height: 380px;
   }
-  
+
   .chart-container.full-width {
     grid-column: 1 / -1;
   }
-  
+
   .chart-container h3 {
-    margin: 0 0 16px 0;
+    margin: 0 0 12px 0;
     font-size: 16px;
     font-weight: 600;
     color: #c9d1d9;
+  }
+
+  :global(.chart-wrapper) {
+    width: 100%;
+    height: 100%;
   }
   
   @media (max-width: 768px) {
@@ -921,7 +943,7 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-  
+
   .live-dot {
     width: 8px;
     height: 8px;
@@ -929,10 +951,23 @@
     border-radius: 50%;
     animation: pulse 2s ease-in-out infinite;
   }
-  
+
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
+  }
+
+  :global(.chart-wrapper) {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    min-height: 0;
+  }
+
+  :global(.chart-wrapper canvas) {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
   
   .anomaly-banner {

@@ -42,8 +42,10 @@ func (m *MetricsCollector) RecordTaskComplete(workflowID string, taskIndex int, 
 		value = 0.0
 	}
 	err := m.db.RecordMetric(workflowID, "agent", "task_completed", value, map[string]any{
-		"task_index": taskIndex,
-		"agent_id":   agentID,
+		"task_index":  taskIndex,
+		"agent_id":    agentID,
+		"duration_ms": duration.Milliseconds(),
+		"success":     success,
 	})
 	if err != nil {
 		log.Printf("warning: failed to record task completion metric: %v", err)

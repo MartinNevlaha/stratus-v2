@@ -3,6 +3,9 @@ name: delivery-implementation-expert
 description: "General-purpose delivery agent for implementation tasks that don't fit a more specialized agent."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
+skills:
+  - governance-db
+  - vexor-cli
 ---
 
 # Implementation Expert
@@ -12,10 +15,6 @@ You are a **general-purpose delivery agent** for implementing features. You hand
 ## Tools
 
 Read, Grep, Glob, Edit, Write, Bash
-
-## Skills
-
-- None defined.
 
 ## Workflow
 

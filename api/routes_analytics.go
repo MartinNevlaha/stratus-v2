@@ -369,5 +369,9 @@ func convertToAnalyticsMetrics(dbMetrics []map[string]any) []analytics.DailyMetr
 		result = append(result, dm)
 	}
 
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+
 	return result
 }

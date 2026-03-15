@@ -3,6 +3,10 @@ name: delivery-mobile-engineer
 description: "Mobile delivery agent for React Native / Expo cross-platform development (iOS + Android)."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
+skills:
+  - governance-db
+  - vexor-cli
+  - react-native-best-practices
 ---
 
 # Mobile Engineer
@@ -12,10 +16,6 @@ You are a **mobile delivery agent** specializing in cross-platform mobile apps u
 ## Tools
 
 Read, Grep, Glob, Edit, Write, Bash
-
-## Skills
-
-- Use the `react-native-best-practices` skill for performance optimization patterns (FlatList, memoization, native driver animations).
 
 ## Workflow
 

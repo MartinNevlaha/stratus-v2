@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"encoding/json"
+	"time"
 )
 
 type DailyMetrics struct {
@@ -101,6 +102,20 @@ func (d *DB) GetMetricsSummary(days int) (map[string]any, error) {
 		return nil, err
 	}
 
+	todayMetrics, err := d.GetTodayMetrics()
+	if err != nil {
+		return nil, err
+	}
+
+	totalWorkflows += todayMetrics["total_workflows"].(int)
+	completedWorkflows += todayMetrics["completed_workflows"].(int)
+	totalTasks += todayMetrics["total_tasks"].(int)
+	completedTasks += todayMetrics["completed_tasks"].(int)
+
+	if totalTasks > 0 {
+		avgDuration = (float64(avgDuration)*float64(totalTasks-todayMetrics["total_tasks"].(int)) + float64(todayMetrics["avg_workflow_duration_ms"].(int))*float64(todayMetrics["total_tasks"].(int))) / float64(totalTasks)
+	}
+
 	var successRate float64
 	if totalTasks > 0 {
 		successRate = float64(completedTasks) / float64(totalTasks)
@@ -118,7 +133,7 @@ func (d *DB) GetMetricsSummary(days int) (map[string]any, error) {
 
 func (d *DB) GetRecentDailyMetrics(limit int) ([]map[string]any, error) {
 	rows, err := d.sql.Query(`
-		SELECT metric_date, total_workflows, completed_workflows, 
+		SELECT metric_date, total_workflows, completed_workflows,
 		       avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate
 		FROM daily_metrics
 		ORDER BY metric_date DESC
@@ -149,6 +164,23 @@ func (d *DB) GetRecentDailyMetrics(limit int) ([]map[string]any, error) {
 		})
 	}
 
+	todayMetrics, err := d.GetTodayMetrics()
+	if err == nil {
+		foundToday := false
+		for _, result := range results {
+			if result["date"].(string) == todayMetrics["date"].(string) {
+				foundToday = true
+				break
+			}
+		}
+		if !foundToday {
+			results = append([]map[string]any{todayMetrics}, results...)
+			if len(results) > limit {
+				results = results[:limit]
+			}
+		}
+	}
+
 	return results, nil
 }
 
@@ -157,7 +189,7 @@ func (d *DB) GetAgentMetrics(days int) ([]map[string]any, error) {
 		SELECT 
 			metadata->>'$.agent_id' as agent_id,
 			COUNT(*) as tasks_completed,
-			AVG(metric_value) as avg_task_duration_ms,
+			AVG(CAST(metadata->>'$.duration_ms' AS REAL)) as avg_task_duration_ms,
 			SUM(CASE WHEN metric_value = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as success_rate,
 			MAX(recorded_at) as last_active
 		FROM workflow_metrics
@@ -199,4 +231,65 @@ func (d *DB) GetAgentMetrics(days int) ([]map[string]any, error) {
 	}
 
 	return results, nil
+}
+
+func (d *DB) GetTodayMetrics() (map[string]any, error) {
+	today := time.Now().Format("2006-01-02")
+
+	var totalWorkflows int
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM workflows WHERE DATE(created_at) = ?`, today).Scan(&totalWorkflows)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	var completedWorkflows int
+	err = d.sql.QueryRow(`SELECT COUNT(*) FROM workflows WHERE DATE(updated_at) = ? AND phase = 'complete'`, today).Scan(&completedWorkflows)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	var avgDuration float64
+	err = d.sql.QueryRow(`
+		SELECT COALESCE(AVG(metric_value), 0)
+		FROM workflow_metrics
+		WHERE metric_name = 'phase_duration' AND DATE(recorded_at) = ?
+	`, today).Scan(&avgDuration)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	var totalTasks int
+	err = d.sql.QueryRow(`
+		SELECT COUNT(*)
+		FROM workflow_metrics
+		WHERE metric_name = 'task_completed' AND DATE(recorded_at) = ?
+	`, today).Scan(&totalTasks)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	var completedTasks int
+	err = d.sql.QueryRow(`
+		SELECT COALESCE(SUM(metric_value), 0)
+		FROM workflow_metrics
+		WHERE metric_name = 'task_completed' AND DATE(recorded_at) = ?
+	`, today).Scan(&completedTasks)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	var successRate float64
+	if totalTasks > 0 {
+		successRate = float64(completedTasks) / float64(totalTasks)
+	}
+
+	return map[string]any{
+		"date":                     today,
+		"total_workflows":          totalWorkflows,
+		"completed_workflows":      completedWorkflows,
+		"avg_workflow_duration_ms": int(avgDuration),
+		"total_tasks":              totalTasks,
+		"completed_tasks":          completedTasks,
+		"success_rate":             successRate,
+	}, nil
 }

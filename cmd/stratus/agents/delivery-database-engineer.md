@@ -3,6 +3,9 @@ name: delivery-database-engineer
 description: "Database delivery agent for schema design, migrations, queries, and data model changes."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
+skills:
+  - governance-db
+  - vexor-cli
 ---
 
 # Database Engineer
@@ -12,10 +15,6 @@ You are a **database delivery agent** specializing in schema design, migrations,
 ## Tools
 
 Read, Grep, Glob, Edit, Write, Bash
-
-## Skills
-
-- Use the `governance-db` skill to retrieve database design standards, naming conventions, and architectural constraints before schema changes.
 
 ## Workflow
 

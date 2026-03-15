@@ -472,6 +472,7 @@ func printInitSummary(target string) {
   /security-review             — security audit (OWASP, secrets, injection)
   /frontend-design             — distinctive UI design guidance
   /react-native-best-practices — React Native / Expo performance patterns
+  /system-reminder             — read-only reminder for planning and review agents
   /e2e                         — Playwright E2E testing (setup→plan→generate→heal)`
 
 	const ccAgents = `Agents written to .claude/agents/:

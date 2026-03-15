@@ -3,6 +3,10 @@ name: delivery-frontend-engineer
 description: "Frontend delivery agent for UI components, pages, and client-side logic."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
+skills:
+  - governance-db
+  - vexor-cli
+  - frontend-design
 ---
 
 # Frontend Engineer
@@ -12,10 +16,6 @@ You are a **frontend delivery agent** specializing in UI components, pages, and 
 ## Tools
 
 Read, Grep, Glob, Edit, Write, Bash
-
-## Skills
-
-- None defined.
 
 ## Workflow
 

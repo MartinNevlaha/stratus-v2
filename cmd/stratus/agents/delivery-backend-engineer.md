@@ -3,6 +3,10 @@ name: delivery-backend-engineer
 description: "Backend delivery agent for API endpoints, handlers, services, and business logic. Use for server-side implementation tasks."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
+skills:
+  - governance-db
+  - vexor-cli
+  - prompt-writing
 ---
 
 # Backend Engineer
@@ -12,10 +16,6 @@ You are a **backend delivery agent** specializing in API endpoints, business log
 ## Tools
 
 Read, Grep, Glob, Edit, Write, Bash
-
-## Skills
-
-- Use the `governance-db` skill to retrieve API design standards and architectural constraints before implementation.
 
 ## Workflow
 
