@@ -35,7 +35,7 @@ curl -sS -X POST $BASE/api/workflows \
 
 ### 1a. Explore — built-in Explore agent
 
-**Delegate to the built-in `Explore` agent** (Task tool, `subagent_type: "explore"`) with thoroughness `"very thorough"`:
+**Delegate to the built-in `Explore` agent** (Task tool, `subagent_type: "Explore"`) with thoroughness `"very thorough"`:
 
 Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
@@ -79,7 +79,7 @@ Skip this step for backend-only, infra, or database-focused work.
 
 ### 1d. Plan — built-in Plan agent
 
-**Delegate to the built-in `Plan` agent** (Task tool, `subagent_type: "plan"`):
+**Delegate to the built-in `Plan` agent** (Task tool, `subagent_type: "Plan"`):
 
 Pass full context:
 - The requirement from `$ARGUMENTS`

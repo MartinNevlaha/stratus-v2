@@ -128,7 +128,7 @@ func TestDelegationGuardPhaseAgentMatching(t *testing.T) {
 		{
 			name:        "non-delivery agent always allowed",
 			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "plan"},
-			subagent:    "explore",
+			subagent:    "Explore",
 			shouldAllow: true,
 		},
 		{

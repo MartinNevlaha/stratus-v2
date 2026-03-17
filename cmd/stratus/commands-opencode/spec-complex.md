@@ -100,7 +100,7 @@ Transition to plan:
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
   -H 'Content-Type: application/json' \
-  -d '{"phase": "plan"}'
+  -d '{"phase": "Plan"}'
 ```
 
 ---

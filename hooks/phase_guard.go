@@ -15,7 +15,7 @@ const noActiveWorkflowReason = "No active workflow registered. Use mcp__stratus_
 // phaseAgentAllowlist defines which delivery agents are allowed in each phase per workflow type.
 var phaseAgentAllowlist = map[string]map[string][]string{
 	"bug": {
-		"analyze": {"delivery-debugger", "delivery-strategic-architect", "delivery-system-architect", "plan", "explore"},
+		"analyze": {"delivery-debugger", "delivery-strategic-architect", "delivery-system-architect", "Plan", "Explore"},
 		"fix": {
 			"delivery-backend-engineer", "delivery-frontend-engineer", "delivery-database-engineer",
 			"delivery-devops-engineer", "delivery-mobile-engineer", "delivery-implementation-expert",
@@ -24,8 +24,8 @@ var phaseAgentAllowlist = map[string]map[string][]string{
 		"review": {"delivery-code-reviewer"},
 	},
 	"spec": {
-		"plan":       {"delivery-strategic-architect", "delivery-system-architect", "plan", "explore"},
-		"discovery":  {"delivery-debugger", "delivery-strategic-architect", "explore"},
+		"plan":       {"delivery-strategic-architect", "delivery-system-architect", "Plan", "Explore"},
+		"discovery":  {"delivery-debugger", "delivery-strategic-architect", "Explore"},
 		"design":     {"delivery-strategic-architect", "delivery-system-architect", "delivery-ux-designer"},
 		"governance": {"delivery-code-reviewer", "delivery-governance-checker"},
 		"accept":     {},
@@ -40,7 +40,7 @@ var phaseAgentAllowlist = map[string]map[string][]string{
 	},
 	"e2e": {
 		"setup":    {"delivery-qa-engineer"},
-		"plan":     {"delivery-strategic-architect", "plan"},
+		"plan":     {"delivery-strategic-architect", "Plan"},
 		"generate": {"delivery-qa-engineer", "delivery-frontend-engineer"},
 		"heal":     {"delivery-debugger", "delivery-qa-engineer"},
 		"complete": {},

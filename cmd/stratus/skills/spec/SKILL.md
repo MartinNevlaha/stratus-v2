@@ -40,7 +40,7 @@ complexity: "simple" | "complex"   # complex for multi-service, auth, database, 
 
 ### STEP 2 — Codebase Exploration
 
-Delegate to the `Explore` agent via Task tool (`subagent_type: "explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+Delegate to the `Explore` agent via Task tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
 - Identify existing conventions, utilities, and abstractions that should be reused
 - Map dependencies and integration points that the implementation will touch
@@ -62,7 +62,7 @@ If findings require updates → share with user and adjust requirements before p
 
 ### STEP 4 — Task Planning
 
-Delegate to the `Plan` subagent via Task tool (`subagent_type: "plan"`). Pass full context:
+Delegate to the `Plan` subagent via Task tool (`subagent_type: "Plan"`). Pass full context:
 - The requirement from `$ARGUMENTS`
 - Key files, directories, and patterns discovered by the Explore agent
 - Relevant architecture, patterns, and constraints
@@ -168,7 +168,37 @@ tags: ["<relevant-tags>"]
 importance: 0.8
 ```
 
-**Step 2 — Write governance artifacts** (only clear, unambiguous decisions): rules to `.claude/rules/`, ADRs to `docs/decisions/`.
+**Step 2 — MANDATORY: Create learning candidates + proposals** for each significant pattern, rule, or decision:
+
+Use Bash with curl to the local API (`http://localhost:41777`):
+
+```bash
+# 2a. Save candidate
+CANDIDATE_ID=$(curl -sS -X POST http://localhost:41777/api/learning/candidates \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "detection_type": "pattern|decision|anti_pattern",
+    "description": "Short description of what was found",
+    "confidence": 0.85,
+    "files": ["path/to/relevant/file.ts"],
+    "count": 1
+  }' | jq -r '.id')
+
+# 2b. Generate proposal from candidate
+curl -sS -X POST http://localhost:41777/api/learning/proposals \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "candidate_id": "'$CANDIDATE_ID'",
+    "type": "rule|adr|template|skill",
+    "title": "Short proposal title",
+    "description": "Why this matters",
+    "proposed_content": "Full content of the rule/ADR/template",
+    "proposed_path": ".claude/rules/<name>.md",
+    "confidence": 0.85
+  }'
+```
+
+Create a proposal for every insight worth preserving. The user will review proposals in the Learning tab. **Do not write governance files directly** — proposals are the gate.
 
 **Step 3 — MANDATORY: Complete workflow** using `mcp__stratus__transition_phase`:
 

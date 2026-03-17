@@ -63,7 +63,7 @@ phase: "discovery"
 
 ### STEP 3 — Codebase Exploration
 
-Delegate to the `Explore` agent via Task tool (`subagent_type: "explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+Delegate to the `Explore` agent via Task tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
 - Identify existing conventions, utilities, and abstractions that should be reused
 - Map dependencies and integration points that the implementation will touch
@@ -143,7 +143,7 @@ If checker returns `[must_update]` findings → address them in the design doc b
 
 ```
 workflow_id: "<slug>"
-phase: "plan"
+phase: "Plan"
 ```
 
 **DO NOT PROCEED to Phase 4 until this transition succeeds.**
@@ -152,7 +152,7 @@ phase: "plan"
 
 ## Phase 4: Plan
 
-Delegate to the `Plan` subagent via Task tool (`subagent_type: "plan"`). Pass full context:
+Delegate to the `Plan` subagent via Task tool (`subagent_type: "Plan"`). Pass full context:
 - The design document from `docs/plans/<slug>-design.md`
 - The original requirement from `$ARGUMENTS`
 - Key files and architecture constraints surfaced during discovery and design phases
@@ -262,7 +262,37 @@ tags: ["<relevant-tags>"]
 importance: 0.8
 ```
 
-**Step 2 — Write governance artifacts** (rules to `.claude/rules/`, ADRs to `docs/decisions/`). Only write for insights worth preserving long-term.
+**Step 2 — MANDATORY: Create learning candidates + proposals** for each significant pattern, rule, or decision:
+
+Use Bash with curl to the local API (`http://localhost:41777`):
+
+```bash
+# 2a. Save candidate
+CANDIDATE_ID=$(curl -sS -X POST http://localhost:41777/api/learning/candidates \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "detection_type": "pattern|decision|anti_pattern",
+    "description": "Short description of what was found",
+    "confidence": 0.85,
+    "files": ["path/to/relevant/file.ts"],
+    "count": 1
+  }' | jq -r '.id')
+
+# 2b. Generate proposal from candidate
+curl -sS -X POST http://localhost:41777/api/learning/proposals \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "candidate_id": "'$CANDIDATE_ID'",
+    "type": "rule|adr|template|skill",
+    "title": "Short proposal title",
+    "description": "Why this matters",
+    "proposed_content": "Full content of the rule/ADR/template",
+    "proposed_path": ".claude/rules/<name>.md",
+    "confidence": 0.85
+  }'
+```
+
+Create a proposal for every insight worth preserving. The user will review proposals in the Learning tab. **Do not write governance files directly** — proposals are the gate.
 
 **Step 3 — MANDATORY: Complete workflow** using `mcp__stratus__transition_phase`:
 

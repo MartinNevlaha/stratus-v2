@@ -73,7 +73,7 @@ Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
 
 ### STEP 4 — Plan (if COMPLEX)
 
-If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "plan"`):
+If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "Plan"`):
 
 Pass full context:
 - The bug description from `$ARGUMENTS`
