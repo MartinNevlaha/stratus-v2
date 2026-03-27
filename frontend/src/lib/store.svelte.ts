@@ -1,4 +1,4 @@
-import type { DashboardState, VersionInfo, LiveMetricsUpdate, MetricsAnomalyAlert, MetricsAlert, Anomaly } from './types'
+import type { DashboardState, VersionInfo } from './types'
 import { getDashboardState, getVersion, triggerUpdate } from './api'
 import { wsClient } from './ws'
 
@@ -11,22 +11,12 @@ interface AppState {
   updateInProgress: boolean
   updateLog: string[]
   updateError: string | null
-  // Swarm real-time state
   swarmUpdateCounter: number
   lastHeartbeats: Record<string, number>
-  // Analytics real-time updates
-  analyticsUpdateCounter: number
-  lastMetricsUpdate: number
-  // Real-time metrics
-  liveMetrics: LiveMetricsUpdate | null
-  metricsLive: boolean
-  activeAnomalies: Anomaly[]
-  lastMetricsAlert: MetricsAlert | null
 }
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
 
-// Svelte 5 reactive state — must live in .svelte.ts to use $state rune.
 export const appState: AppState = $state({
   dashboard: null,
   connected: false,
@@ -38,12 +28,6 @@ export const appState: AppState = $state({
   updateError: null,
   swarmUpdateCounter: 0,
   lastHeartbeats: {},
-  analyticsUpdateCounter: 0,
-  lastMetricsUpdate: 0,
-  liveMetrics: null,
-  metricsLive: false,
-  activeAnomalies: [],
-  lastMetricsAlert: null
 })
 
 export async function refreshDashboard() {
@@ -120,27 +104,6 @@ export function initStore() {
     if (data?.error) appState.updateLog.push(`Error: ${data.error}`)
   })
 
-  // Analytics real-time updates
-  wsClient.on('workflow_started', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
-  wsClient.on('phase_changed', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
-  wsClient.on('task_completed', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
-  wsClient.on('workflow_completed', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
   // Swarm real-time events — targeted refresh instead of full dashboard reload
   const swarmTypes = ['mission_status', 'worker_spawned', 'worker_status', 'ticket_status', 'forge_update', 'signal_sent']
   for (const type of swarmTypes) {
@@ -151,24 +114,6 @@ export function initStore() {
     const data = msg.payload as { id?: string; ts?: string } | undefined
     if (data?.id) appState.lastHeartbeats[data.id] = Date.now()
     emitSwarmUpdate()
-  })
-
-  // Real-time metrics updates
-  wsClient.on('metrics_update', (msg) => {
-    appState.liveMetrics = msg.payload as LiveMetricsUpdate
-    appState.metricsLive = true
-    appState.lastMetricsUpdate = Date.now()
-  })
-
-  wsClient.on('metrics_anomaly', (msg) => {
-    const data = msg.payload as MetricsAnomalyAlert
-    if (data.anomaly) {
-      appState.activeAnomalies.push(data.anomaly)
-    }
-  })
-
-  wsClient.on('metrics_alert', (msg) => {
-    appState.lastMetricsAlert = msg.payload as MetricsAlert
   })
 
   refreshDashboard()

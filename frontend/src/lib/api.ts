@@ -8,11 +8,13 @@ import type {
   VersionInfo, 
   SwarmMission, 
   SwarmMissionDetail,
-  MetricsSummaryResponse,
-  WorkflowMetricsResponse,
-  DailyMetricsResponse,
-  AgentMetricsResponse,
-  ProjectMetricsResponse
+  AgentsResponse,
+  AgentDetail,
+  SkillsResponse,
+  SkillDef,
+  RulesResponse,
+  RuleDef,
+  PastItemsResponse
 } from './types'
 
 const BASE = '/api'
@@ -92,6 +94,8 @@ export const triggerReIndex = () => post<{ status: string }>('/retrieve/index')
 // Workflows
 export const listWorkflows = () => get<WorkflowState[]>('/workflows')
 export const deleteWorkflow = (id: string) => del<{ deleted: boolean }>(`/workflows/${id}`)
+export const listPastItems = (limit = 20, offset = 0) =>
+  get<PastItemsResponse>('/past', { limit: String(limit), offset: String(offset) })
 
 export const startWorkflow = (id: string, type: 'spec' | 'bug', title: string, complexity = 'simple') =>
   post<WorkflowState>('/workflows', { id, type, title, complexity })
@@ -163,23 +167,32 @@ export async function uploadTerminalImage(blob: Blob, filename: string): Promise
   return res.json()
 }
 
-// Analytics
-export const getMetricsSummary = (days = 7) =>
-  get<MetricsSummaryResponse>('/metrics/summary', { days: String(days) })
+// Agents
+export const listAgents = () => get<AgentsResponse>('/agents')
+export const getAgent = (name: string) => get<AgentDetail>(`/agents/${name}`)
+export const createAgent = (data: { name: string; description: string; tools?: string[]; model?: string; skills?: string[]; body?: string }) =>
+  post<{ status: string; name: string }>('/agents', data)
+export const updateAgent = (name: string, data: { description: string; tools?: string[]; model?: string; skills?: string[]; body?: string }) =>
+  put<{ status: string; name: string }>(`/agents/${name}`, data)
+export const deleteAgent = (name: string) => del<{ status: string; name: string }>(`/agents/${name}`)
+export const assignSkills = (name: string, skills: string[]) =>
+  put<{ status: string; name: string; skills: string[] }>(`/agents/${name}/skills`, { skills })
 
-export const getWorkflowMetrics = (id: string) =>
-  get<WorkflowMetricsResponse>(`/metrics/workflows/${id}`)
+// Skills
+export const listSkills = () => get<SkillsResponse>('/skills')
+export const getSkill = (name: string) => get<SkillDef>(`/skills/${name}`)
+export const createSkill = (data: { name: string; description: string; disable_model_invocation?: boolean; argument_hint?: string; body?: string }) =>
+  post<{ status: string; name: string }>('/skills', data)
+export const updateSkill = (name: string, data: { description: string; disable_model_invocation?: boolean; argument_hint?: string; body?: string }) =>
+  put<{ status: string; name: string }>(`/skills/${name}`, data)
+export const deleteSkill = (name: string) => del<{ status: string; name: string }>(`/skills/${name}`)
 
-export const getDailyMetrics = (limit = 30) =>
-  get<DailyMetricsResponse>('/metrics/daily', { limit: String(limit) })
-
-export const getAgentMetrics = (days = 30) =>
-  get<AgentMetricsResponse>('/metrics/agents', { days: String(days) })
-
-export const triggerAggregation = () =>
-  post<{ status: string }>('/metrics/aggregate', {})
-
-export const exportMetricsCSV = (days = 30) => {
-  window.open(`${BASE}/metrics/export?days=${days}`, '_blank')
-}
+// Rules
+export const listRules = () => get<RulesResponse>('/rules')
+export const getRule = (name: string) => get<RuleDef>(`/rules/${name}`)
+export const createRule = (data: { name: string; title?: string; body?: string }) =>
+  post<{ status: string; name: string }>('/rules', data)
+export const updateRule = (name: string, data: { title?: string; body?: string }) =>
+  put<{ status: string; name: string }>(`/rules/${name}`, data)
+export const deleteRule = (name: string) => del<{ status: string; name: string }>(`/rules/${name}`)
 

@@ -159,6 +159,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/retrieve/dirty", s.handleMarkDirty)
 
 	// Orchestration
+	mux.HandleFunc("GET /api/past", s.handleListPast)
 	mux.HandleFunc("GET /api/workflows", s.handleListWorkflows)
 	mux.HandleFunc("POST /api/workflows", s.handleStartWorkflow)
 	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
@@ -179,21 +180,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/learning/proposals", s.handleListProposals)
 	mux.HandleFunc("POST /api/learning/proposals", s.handleSaveProposal)
 	mux.HandleFunc("POST /api/learning/proposals/{id}/decide", s.handleDecideProposal)
-
-	// Dashboard
-	mux.HandleFunc("GET /api/dashboard/state", s.handleDashboardState)
-
-	// Analytics & Metrics
-	mux.HandleFunc("GET /api/metrics/summary", s.handleGetMetricsSummary)
-	mux.HandleFunc("GET /api/metrics/daily", s.handleGetDailyMetrics)
-	mux.HandleFunc("GET /api/metrics/agents", s.handleGetAgentMetrics)
-	mux.HandleFunc("GET /api/metrics/workflows/{id}", s.handleGetWorkflowMetrics)
-	mux.HandleFunc("GET /api/metrics/export", s.handleExportMetrics)
-	mux.HandleFunc("POST /api/metrics/aggregate", s.handleTriggerAggregation)
-	mux.HandleFunc("GET /api/metrics/report/{type}", s.handleGetReport)
-	mux.HandleFunc("GET /api/metrics/predictions", s.handleGetPredictions)
-	mux.HandleFunc("GET /api/metrics/anomalies", s.handleGetAnomalies)
-	mux.HandleFunc("GET /api/metrics/trends", s.handleGetTrends)
 
 	// System
 	mux.HandleFunc("GET /api/system/version", s.handleVersion)
@@ -231,6 +217,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/swarm/missions/{id}/checkpoint", s.handleSaveCheckpoint)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/checkpoint/latest", s.handleGetLatestCheckpoint)
 	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
+
+	// Agents
+	mux.HandleFunc("GET /api/agents", s.handleListAgents)
+	mux.HandleFunc("GET /api/agents/{name}", s.handleGetAgent)
+	mux.HandleFunc("POST /api/agents", s.handleCreateAgent)
+	mux.HandleFunc("PUT /api/agents/{name}", s.handleUpdateAgent)
+	mux.HandleFunc("DELETE /api/agents/{name}", s.handleDeleteAgent)
+	mux.HandleFunc("PUT /api/agents/{name}/skills", s.handleAssignSkills)
+
+	// Skills
+	mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	mux.HandleFunc("GET /api/skills/{name}", s.handleGetSkill)
+	mux.HandleFunc("POST /api/skills", s.handleCreateSkill)
+	mux.HandleFunc("PUT /api/skills/{name}", s.handleUpdateSkill)
+	mux.HandleFunc("DELETE /api/skills/{name}", s.handleDeleteSkill)
+
+	// Rules
+	mux.HandleFunc("GET /api/rules", s.handleListRules)
+	mux.HandleFunc("GET /api/rules/{name}", s.handleGetRule)
+	mux.HandleFunc("POST /api/rules", s.handleCreateRule)
+	mux.HandleFunc("PUT /api/rules/{name}", s.handleUpdateRule)
+	mux.HandleFunc("DELETE /api/rules/{name}", s.handleDeleteRule)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

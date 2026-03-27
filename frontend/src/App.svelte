@@ -5,10 +5,10 @@
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'
   import Learning from './routes/Learning.svelte'
-  import Analytics from './routes/Analytics.svelte'
+  import Agents from './routes/Agents.svelte'
   import Terminal from './components/Terminal.svelte'
   
-  let activeTab = $state<'overview' | 'memory' | 'retrieval' | 'learning' | 'analytics' | 'terminal'>('overview')
+  let activeTab = $state<'overview' | 'agents' | 'memory' | 'retrieval' | 'learning' | 'terminal'>('overview')
   
   onMount(() => {
     initStore()
@@ -16,6 +16,7 @@
   
   const tabs = [
     { id: 'overview' as const, label: 'Overview' },
+    { id: 'agents' as const, label: 'Agents' },
     { id: 'analytics' as const, label: 'Analytics' },
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
@@ -128,8 +129,8 @@
 
       {#if activeTab === 'memory'}
         <Memory />
-      {:else if activeTab === 'analytics'}
-        <Analytics />
+      {:else if activeTab === 'agents'}
+        <Agents />
       {:else if activeTab === 'retrieval'}
         <Retrieval />
       {:else if activeTab === 'learning'}

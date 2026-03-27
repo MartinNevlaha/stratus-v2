@@ -43,15 +43,13 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db      *db.DB
-	metrics *MetricsCollector
+	db *db.DB
 }
 
 // NewCoordinator creates a new coordinator.
 func NewCoordinator(db *db.DB) *Coordinator {
 	return &Coordinator{
-		db:      db,
-		metrics: NewMetricsCollector(db),
+		db: db,
 	}
 }
 
@@ -76,7 +74,6 @@ func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity
 	if err := c.save(state); err != nil {
 		return nil, err
 	}
-	c.metrics.RecordWorkflowStart(id, string(wtype))
 	return state, nil
 }
 
@@ -297,21 +294,9 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 		log.Printf("warning: workflow %s phase transition: %s", id, w)
 	}
 
-	fromPhase := state.Phase
-	createdAt, _ := time.Parse(time.RFC3339Nano, state.CreatedAt)
-	updatedAt, _ := time.Parse(time.RFC3339Nano, state.UpdatedAt)
-	phaseDuration := updatedAt.Sub(createdAt)
-
 	state.Phase = to
 	if err := c.save(state); err != nil {
 		return nil, err
-	}
-
-	c.metrics.RecordPhaseTransition(id, string(fromPhase), string(to), phaseDuration)
-
-	if to == PhaseComplete {
-		totalDuration := time.Since(createdAt)
-		c.metrics.RecordWorkflowComplete(id, totalDuration, true)
 	}
 
 	return state, nil
@@ -333,7 +318,6 @@ func (c *Coordinator) RecordDelegation(id, agentID string) (*WorkflowState, erro
 	if err := c.save(state); err != nil {
 		return nil, err
 	}
-	c.metrics.RecordDelegation(id, agentID, state.Phase)
 	return state, nil
 }
 
@@ -379,7 +363,6 @@ func (c *Coordinator) CompleteTask(id string, index int) (*WorkflowState, error)
 	if err := c.save(state); err != nil {
 		return nil, err
 	}
-	c.metrics.RecordTaskComplete(id, index, "", 0, true)
 	return state, nil
 }
 
@@ -478,6 +461,48 @@ func (c *Coordinator) UpdateSessionID(id, sessionID string) (*WorkflowState, err
 // ListAll returns all workflows (including completed and aborted), newest first.
 func (c *Coordinator) ListAll() ([]*WorkflowState, error) {
 	rows, err := c.db.SQL().Query(`SELECT id, type, phase, complexity, state_json, created_at, updated_at FROM workflows ORDER BY updated_at DESC LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var states []*WorkflowState
+	for rows.Next() {
+		var id, wtype, phase, complexity, stateJSON, createdAt, updatedAt string
+		if err := rows.Scan(&id, &wtype, &phase, &complexity, &stateJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		var state WorkflowState
+		if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+			continue
+		}
+		state.ID = id
+		state.Type = WorkflowType(wtype)
+		state.Phase = Phase(phase)
+		state.Complexity = Complexity(complexity)
+		state.CreatedAt = createdAt
+		state.UpdatedAt = updatedAt
+		if state.Delegated == nil {
+			state.Delegated = map[string][]string{}
+		}
+		if state.Tasks == nil {
+			state.Tasks = []Task{}
+		}
+		states = append(states, &state)
+	}
+	return states, rows.Err()
+}
+
+// CountPastWorkflows returns the total number of completed or aborted workflows.
+func (c *Coordinator) CountPastWorkflows() (int, error) {
+	var count int
+	err := c.db.SQL().QueryRow(`SELECT COUNT(*) FROM workflows WHERE phase = 'complete' OR JSON_EXTRACT(state_json, '$.aborted') = 1`).Scan(&count)
+	return count, err
+}
+
+// ListPastWorkflows returns completed or aborted workflows with offset/limit pagination.
+func (c *Coordinator) ListPastWorkflows(offset, limit int) ([]*WorkflowState, error) {
+	rows, err := c.db.SQL().Query(`SELECT id, type, phase, complexity, state_json, created_at, updated_at FROM workflows WHERE phase = 'complete' OR JSON_EXTRACT(state_json, '$.aborted') = 1 ORDER BY updated_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
 	}

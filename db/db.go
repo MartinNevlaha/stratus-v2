@@ -65,35 +65,6 @@ var migrations = []string{
 	`ALTER TABLE missions ADD COLUMN strategy TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE missions ADD COLUMN strategy_outcome TEXT NOT NULL DEFAULT '{}'`,
 	`
-CREATE TABLE IF NOT EXISTS workflow_metrics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL,
-    metric_type TEXT NOT NULL,
-    metric_name TEXT NOT NULL,
-    metric_value REAL NOT NULL,
-    metadata TEXT,
-    recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
-)`,
-	`CREATE INDEX IF NOT EXISTS idx_metrics_type ON workflow_metrics(metric_type)`,
-	`CREATE INDEX IF NOT EXISTS idx_metrics_name ON workflow_metrics(metric_name)`,
-	`CREATE INDEX IF NOT EXISTS idx_metrics_workflow ON workflow_metrics(workflow_id)`,
-	`CREATE INDEX IF NOT EXISTS idx_metrics_recorded ON workflow_metrics(recorded_at)`,
-	`
-CREATE TABLE IF NOT EXISTS daily_metrics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    metric_date TEXT NOT NULL UNIQUE,
-    total_workflows INTEGER DEFAULT 0,
-    completed_workflows INTEGER DEFAULT 0,
-    avg_workflow_duration_ms INTEGER DEFAULT 0,
-    total_tasks INTEGER DEFAULT 0,
-    completed_tasks INTEGER DEFAULT 0,
-    success_rate REAL DEFAULT 0,
-    metrics_json TEXT,
-    computed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-)`,
-	`CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date)`,
-	`
 CREATE TABLE IF NOT EXISTS openclaw_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     last_analysis TEXT NOT NULL,

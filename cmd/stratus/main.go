@@ -137,11 +137,6 @@ func cmdServe() {
 	swarmStore := swarm.NewStore(database, cfg.ProjectRoot)
 	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore)
 
-	// Start metrics broadcaster for real-time analytics
-	metricsBroadcaster := api.NewMetricsBroadcaster(database, hub, cfg.MetricsBroadcastInterval)
-	go metricsBroadcaster.Start()
-	log.Printf("metrics broadcaster started (interval: %ds)", cfg.MetricsBroadcastInterval)
-
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)
 
@@ -151,7 +146,6 @@ func cmdServe() {
 	go func() {
 		<-sigCh
 		log.Println("stratus shutting down…")
-		metricsBroadcaster.Stop()
 		if sttOwned {
 			sttStop()
 		}

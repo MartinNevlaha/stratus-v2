@@ -171,111 +171,62 @@ export interface SwarmMissionDetail {
   forge: SwarmForgeEntry[]
 }
 
-// Analytics types
-export interface MetricsSummary {
-  total_workflows: number
-  completed_workflows: number
-  avg_workflow_duration_ms: number
-  total_tasks: number
-  completed_tasks: number
-  success_rate: number
-}
-
-export interface WorkflowMetric {
-  type: string
+// Agent & Skill types
+export interface AgentDef {
   name: string
-  value: number
-  metadata: Record<string, any>
-  recorded_at: string
-}
-
-export interface DailyMetric {
-  date: string
-  total_workflows: number
-  completed_workflows: number
-  avg_workflow_duration_ms: number
-  total_tasks: number
-  completed_tasks: number
-  success_rate: number
-}
-
-export interface AgentMetric {
-  agent_id: string
-  tasks_completed: number
-  avg_task_duration_ms: number
-  success_rate: number
-  last_active: string
-}
-
-export interface Anomaly {
-  id: string
-  type: string
-  metric_name: string
-  actual_value: number
-  expected_value: number
-  deviation: number
-  severity: string
-  detected_at: string
   description: string
+  tools: string[]
+  model?: string
+  skills: string[]
+  body: string
+  format: 'claude-code' | 'opencode'
+  file_path: string
 }
 
-export interface ProjectMetric {
-  project: string
-  total_workflows: number
-  completed_workflows: number
-  avg_duration_ms: number
-  success_rate: number
+export interface SkillDef {
+  name: string
+  description: string
+  disable_model_invocation: boolean
+  argument_hint?: string
+  body: string
+  has_resources: boolean
+  resource_dirs: string[]
+  dir_path: string
 }
 
-export interface MetricsSummaryResponse {
-  period_days: number
-  summary: MetricsSummary
+export interface AgentsResponse {
+  claude_code: AgentDef[]
+  opencode: AgentDef[]
 }
 
-export interface WorkflowMetricsResponse {
-  workflow_id: string
-  metrics: WorkflowMetric[]
+export interface AgentDetail {
+  name: string
+  claude_code?: AgentDef
+  opencode?: AgentDef
 }
 
-export interface DailyMetricsResponse {
-  metrics: DailyMetric[]
+export interface SkillsResponse {
+  skills: SkillDef[]
 }
 
-export interface AgentMetricsResponse {
-  agents: AgentMetric[]
+export interface RuleDef {
+  name: string
+  title: string
+  body: string
+  file_path: string
 }
 
-export interface ProjectMetricsResponse {
-  projects: ProjectMetric[]
+export interface RulesResponse {
+  rules: RuleDef[]
 }
 
-// Real-time metrics types
-export interface LiveMetricsUpdate {
-  summary: MetricsSummary
-  daily: DailyMetric[]
-  agents: AgentMetric[]
-  ts: number
-}
+export type PastItem =
+  | { kind: 'workflow'; data: WorkflowState }
+  | { kind: 'mission'; data: SwarmMission }
 
-export interface MetricsAnomalyAlert {
-  anomaly: {
-    id: string
-    type: string
-    metric_name: string
-    actual_value: number
-    expected_value: number
-    deviation: number
-    severity: string
-    detected_at: string
-    description: string
-  }
-  ts: number
-  alert_msg: string
-}
-
-export interface MetricsAlert {
-  message: string
-  severity: string
-  count: number
-  ts: number
+export interface PastItemsResponse {
+  items: PastItem[]
+  total: number
+  offset: number
+  limit: number
 }
