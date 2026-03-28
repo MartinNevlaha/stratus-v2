@@ -34,15 +34,32 @@ type InsightConfig struct {
 	LLM           LLMConfig `json:"llm"`
 }
 
+// GuardianConfig configures the Ambient Codebase Guardian.
+type GuardianConfig struct {
+	Enabled            bool    `json:"enabled"`
+	IntervalMinutes    int     `json:"interval_minutes"`
+	CoverageDriftPct   float64 `json:"coverage_drift_pct"`
+	StaleWorkflowHours int     `json:"stale_workflow_hours"`
+	MemoryThreshold    int     `json:"memory_threshold"`
+	TechDebtThreshold  int     `json:"tech_debt_threshold"`
+	LLMEndpoint        string  `json:"llm_endpoint"`
+	LLMAPIKey          string  `json:"llm_api_key"`
+	LLMModel           string  `json:"llm_model"`
+	LLMTemperature     float64 `json:"llm_temperature"`
+	LLMMaxTokens       int     `json:"llm_max_tokens"`
+}
+
+// Config holds the stratus configuration.
 type Config struct {
 	Port                     int            `json:"port"`
 	DataDir                  string         `json:"data_dir"`
 	ProjectRoot              string         `json:"project_root"`
 	Vexor                    VexorConfig    `json:"vexor"`
 	STT                      STTConfig      `json:"stt"`
+	Guardian                 GuardianConfig `json:"guardian"`
 	SyncState                *SyncState     `json:"sync_state,omitempty"`
 	MetricsBroadcastInterval int            `json:"metrics_broadcast_interval"`
-	Insight                 InsightConfig `json:"insight"`
+	Insight                  InsightConfig  `json:"insight"`
 }
 
 type VexorConfig struct {
@@ -71,6 +88,16 @@ func Default() Config {
 		STT: STTConfig{
 			Endpoint: "http://localhost:8011",
 			Model:    "Systran/faster-whisper-large-v3",
+		},
+		Guardian: GuardianConfig{
+			Enabled:            true,
+			IntervalMinutes:    15,
+			CoverageDriftPct:   5.0,
+			StaleWorkflowHours: 2,
+			MemoryThreshold:    5000,
+			TechDebtThreshold:  50,
+			LLMTemperature:     0.3,
+			LLMMaxTokens:       1024,
 		},
 		MetricsBroadcastInterval: 30,
 		Insight: InsightConfig{

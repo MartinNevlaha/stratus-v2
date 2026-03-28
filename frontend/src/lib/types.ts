@@ -15,6 +15,21 @@ export interface Event {
   created_ms: number
 }
 
+export interface ChangeSummary {
+  capabilities_added: string[]
+  capabilities_modified: string[]
+  capabilities_removed: string[]
+  downstream_risks: string[]
+  governance_compliance: string[]
+  test_coverage_delta: string
+  files_changed: number
+  lines_added: number
+  lines_removed: number
+  governance_docs_matched?: string[]
+  vexor_excerpts?: string[]
+  generated_at: string
+}
+
 export interface WorkflowState {
   id: string
   type: 'spec' | 'bug' | 'e2e'
@@ -29,6 +44,8 @@ export interface WorkflowState {
   session_id?: string
   plan_content?: string
   design_content?: string
+  base_commit?: string
+  change_summary?: ChangeSummary
   created_at: string
   updated_at: string
 }
@@ -164,6 +181,15 @@ export interface SwarmForgeEntry {
   created_at: string
 }
 
+export interface SwarmFileReservation {
+  id: string
+  mission_id: string
+  worker_id: string
+  patterns: string
+  reason: string
+  created_at: string
+}
+
 export interface SwarmMissionDetail {
   mission: SwarmMission
   workers: SwarmWorker[]
@@ -269,4 +295,49 @@ export interface PastItemsResponse {
   total: number
   offset: number
   limit: number
+}
+
+export interface SimilarWorkflow {
+  id: string
+  title: string
+  type: string
+  complexity: string
+  duration_min: number
+  aborted: boolean
+}
+
+export interface AnalysisResult {
+  recommended_type: string
+  recommended_complexity: string
+  recommended_strategy: string
+  risk_score: number
+  risk_level: 'low' | 'medium' | 'high'
+  risk_factors: string[]
+  estimated_duration_min: number
+  suggested_domains: string[]
+  similar_past_workflows: SimilarWorkflow[]
+}
+
+export interface GuardianAlert {
+  id: number
+  type: string
+  severity: 'info' | 'warning' | 'critical'
+  message: string
+  metadata: Record<string, unknown>
+  dismissed_at: string | null
+  created_at: string
+}
+
+export interface GuardianConfig {
+  enabled: boolean
+  interval_minutes: number
+  coverage_drift_pct: number
+  stale_workflow_hours: number
+  memory_threshold: number
+  tech_debt_threshold: number
+  llm_endpoint: string
+  llm_api_key: string
+  llm_model: string
+  llm_temperature: number
+  llm_max_tokens: number
 }

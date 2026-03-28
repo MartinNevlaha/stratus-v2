@@ -1,20 +1,25 @@
-import type { 
-  DashboardState, 
-  Event, 
-  SearchResult, 
-  WorkflowState, 
-  Candidate, 
-  Proposal, 
-  VersionInfo, 
-  SwarmMission, 
+import type {
+  DashboardState,
+  Event,
+  SearchResult,
+  WorkflowState,
+  ChangeSummary,
+  Candidate,
+  Proposal,
+  VersionInfo,
+  SwarmMission,
   SwarmMissionDetail,
+  SwarmFileReservation,
   AgentsResponse,
   AgentDetail,
   SkillsResponse,
   SkillDef,
   RulesResponse,
   RuleDef,
-  PastItemsResponse
+  PastItemsResponse,
+  AnalysisResult,
+  GuardianAlert,
+  GuardianConfig,
 } from './types'
 
 const BASE = '/api'
@@ -96,11 +101,19 @@ export const listWorkflows = () => get<WorkflowState[]>('/workflows')
 export const deleteWorkflow = (id: string) => del<{ deleted: boolean }>(`/workflows/${id}`)
 export const listPastItems = (limit = 20, offset = 0) =>
   get<PastItemsResponse>('/past', { limit: String(limit), offset: String(offset) })
+export const analyzeWorkflow = (description: string, filesHint?: string[]) =>
+  post<AnalysisResult>('/workflows/analyze', { description, files_hint: filesHint ?? [] })
 
 export const startWorkflow = (id: string, type: 'spec' | 'bug', title: string, complexity = 'simple') =>
   post<WorkflowState>('/workflows', { id, type, title, complexity })
 
 export const getWorkflow = (id: string) => get<WorkflowState>(`/workflows/${id}`)
+
+export const getWorkflowSummary = (id: string) =>
+  get<ChangeSummary | { status: string }>(`/workflows/${id}/summary`)
+
+export const updateWorkflowSummary = (id: string, summary: Partial<ChangeSummary>) =>
+  put<ChangeSummary>(`/workflows/${id}/summary`, summary)
 
 export const transitionPhase = (id: string, phase: string) =>
   put<WorkflowState>(`/workflows/${id}/phase`, { phase })
@@ -140,6 +153,7 @@ export const saveProposal = (proposal: {
 // Swarm
 export const listMissions = () => get<SwarmMission[]>('/swarm/missions')
 export const getMission = (id: string) => get<SwarmMissionDetail>(`/swarm/missions/${id}`)
+export const getMissionFiles = (id: string) => get<SwarmFileReservation[]>(`/swarm/missions/${id}/files`)
 export const deleteMission = (id: string) => del<{ deleted: boolean }>(`/swarm/missions/${id}`)
 
 // System
@@ -236,3 +250,16 @@ export const updateRule = (name: string, data: { title?: string; body?: string }
   put<{ status: string; name: string }>(`/rules/${name}`, data)
 export const deleteRule = (name: string) => del<{ status: string; name: string }>(`/rules/${name}`)
 
+// Guardian
+export const listGuardianAlerts = (type?: string) =>
+  get<GuardianAlert[]>('/guardian/alerts' + (type ? `?type=${type}` : ''))
+export const dismissGuardianAlert = (id: number) =>
+  put<{ ok: boolean }>(`/guardian/alerts/${id}/dismiss`, {})
+export const deleteGuardianAlert = (id: number) =>
+  del<{ ok: boolean }>(`/guardian/alerts/${id}`)
+export const getGuardianConfig = () => get<GuardianConfig>('/guardian/config')
+export const updateGuardianConfig = (cfg: GuardianConfig) =>
+  put<GuardianConfig>('/guardian/config', cfg)
+export const runGuardianScan = () => post<{ ok: boolean }>('/guardian/run', {})
+export const testGuardianLLM = (cfg: Partial<GuardianConfig>) =>
+  post<{ ok: boolean }>('/guardian/test-llm', cfg)

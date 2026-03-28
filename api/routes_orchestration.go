@@ -5,10 +5,220 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 )
+
+// ── Risk scoring ─────────────────────────────────────────────────────────────
+
+var riskKeywords = map[string]float64{
+	"auth": 0.15, "oauth": 0.15, "jwt": 0.15, "login": 0.10, "password": 0.15,
+	"payment": 0.20, "stripe": 0.15, "billing": 0.15,
+	"migration": 0.20, "schema": 0.15, "database": 0.10,
+	"security": 0.15, "vulnerability": 0.20, "permission": 0.10,
+	"breaking": 0.15, "remove": 0.10, "delete": 0.10, "refactor": 0.10,
+	"deploy": 0.10, "production": 0.10, "release": 0.10,
+}
+
+var domainKeywords = map[string]string{
+	"frontend": "frontend", "ui": "frontend", "component": "frontend", "css": "frontend",
+	"api": "backend", "server": "backend", "endpoint": "backend", "handler": "backend",
+	"auth": "backend", "oauth": "backend", "jwt": "backend", "login": "backend",
+	"database": "database", "db": "database", "sql": "database", "query": "database", "migration": "database",
+	"schema": "database",
+	"test": "qa", "spec": "qa", "coverage": "qa", "playwright": "qa",
+	"deploy": "devops", "docker": "devops", "ci": "devops", "kubernetes": "devops", "infra": "devops",
+	"mobile": "mobile", "ios": "mobile", "android": "mobile",
+}
+
+var bugKeywords = []string{"bug", "fix", "error", "crash", "broken", "fail", "issue", "patch", "regression"}
+
+type analyzeRequest struct {
+	Description string   `json:"description"`
+	FilesHint   []string `json:"files_hint"`
+}
+
+// AnalysisResult is the response from POST /api/workflows/analyze.
+type AnalysisResult struct {
+	RecommendedType       string                          `json:"recommended_type"`
+	RecommendedComplexity string                          `json:"recommended_complexity"`
+	RecommendedStrategy   string                          `json:"recommended_strategy"`
+	RiskScore             float64                         `json:"risk_score"`
+	RiskLevel             string                          `json:"risk_level"`
+	RiskFactors           []string                        `json:"risk_factors"`
+	EstimatedDurationMin  int                             `json:"estimated_duration_min"`
+	SuggestedDomains      []string                        `json:"suggested_domains"`
+	SimilarPastWorkflows  []orchestration.SimilarWorkflow `json:"similar_past_workflows"`
+}
+
+// normalizeWords lowercases the description and strips punctuation from each token
+// so "JWT," and "auth." match their keyword entries.
+func normalizeWords(s string) []string {
+	lower := strings.ToLower(s)
+	var words []string
+	for _, w := range strings.Fields(lower) {
+		w = strings.Trim(w, ".,;:!?()[]{}\"'`/\\")
+		if w != "" {
+			words = append(words, w)
+		}
+	}
+	return words
+}
+
+func calculateRisk(req analyzeRequest, history *orchestration.WorkflowHistorySummary) AnalysisResult {
+	desc := strings.ToLower(req.Description)
+	words := normalizeWords(req.Description)
+
+	// Deduplicated domain set
+	domainSet := map[string]struct{}{}
+	for _, w := range words {
+		if d, ok := domainKeywords[w]; ok {
+			domainSet[d] = struct{}{}
+		}
+	}
+	// Also infer domains from files_hint paths
+	for _, f := range req.FilesHint {
+		fl := strings.ToLower(f)
+		for kw, d := range domainKeywords {
+			if strings.Contains(fl, kw) {
+				domainSet[d] = struct{}{}
+			}
+		}
+	}
+	domains := make([]string, 0, len(domainSet))
+	for d := range domainSet {
+		domains = append(domains, d)
+	}
+	sort.Strings(domains)
+
+	// A) Keyword risk
+	var keywordRisk float64
+	var matchedKeywords []string
+	for _, w := range words {
+		if weight, ok := riskKeywords[w]; ok {
+			keywordRisk += weight
+			matchedKeywords = append(matchedKeywords, w)
+		}
+	}
+	if keywordRisk > 0.50 {
+		keywordRisk = 0.50
+	}
+
+	// B) Historical risk
+	historyRisk := history.AbortRate * 0.30
+
+	// C) Domain count risk
+	domainRisk := float64(len(domains)) * 0.05
+	if domainRisk > 0.20 {
+		domainRisk = 0.20
+	}
+
+	// Total risk score
+	riskScore := keywordRisk + historyRisk + domainRisk
+	if riskScore > 1.0 {
+		riskScore = 1.0
+	}
+	// Round to 2 decimal places
+	riskScore = float64(int(riskScore*100+0.5)) / 100
+
+	riskLevel := "low"
+	if riskScore >= 0.65 {
+		riskLevel = "high"
+	} else if riskScore >= 0.35 {
+		riskLevel = "medium"
+	}
+
+	// Risk factors (human-readable)
+	var factors []string
+	if len(matchedKeywords) > 0 {
+		factors = append(factors, "Contains high-risk keywords: "+strings.Join(matchedKeywords, ", "))
+	}
+	if len(domains) >= 3 {
+		factors = append(factors, "Affects "+strconv.Itoa(len(domains))+" domains: "+strings.Join(domains, ", "))
+	} else if len(domains) > 0 {
+		factors = append(factors, "Domains involved: "+strings.Join(domains, ", "))
+	}
+	if history.AbortRate > 0.10 {
+		pct := int(history.AbortRate*100 + 0.5)
+		factors = append(factors, strconv.Itoa(pct)+"% abort rate in past similar workflows")
+	}
+	if len(factors) == 0 {
+		factors = append(factors, "No significant risk factors detected")
+	}
+
+	// Recommendations
+	recType := "spec"
+	for _, kw := range bugKeywords {
+		if strings.Contains(desc, kw) {
+			recType = "bug"
+			break
+		}
+	}
+	recComplexity := "simple"
+	if riskScore >= 0.60 {
+		recComplexity = "complex"
+	}
+	recStrategy := "single"
+	if len(domains) >= 3 {
+		recStrategy = "swarm"
+	}
+
+	// Duration estimate
+	base := history.AvgDurationMin
+	if base == 0 {
+		base = 30
+	}
+	estimated := int(base*(1.0+riskScore*1.5) + 0.5)
+
+	similar := history.SimilarWorkflows
+	if similar == nil {
+		similar = []orchestration.SimilarWorkflow{}
+	}
+
+	return AnalysisResult{
+		RecommendedType:       recType,
+		RecommendedComplexity: recComplexity,
+		RecommendedStrategy:   recStrategy,
+		RiskScore:             riskScore,
+		RiskLevel:             riskLevel,
+		RiskFactors:           factors,
+		EstimatedDurationMin:  estimated,
+		SuggestedDomains:      domains,
+		SimilarPastWorkflows:  similar,
+	}
+}
+
+func (s *Server) handleAnalyzeWorkflow(w http.ResponseWriter, r *http.Request) {
+	var req analyzeRequest
+	if err := decodeBody(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Description) == "" {
+		jsonErr(w, http.StatusBadRequest, "description is required")
+		return
+	}
+
+	// Detect workflow type from description for similar-workflow lookup
+	recType := "spec"
+	desc := strings.ToLower(req.Description)
+	for _, kw := range bugKeywords {
+		if strings.Contains(desc, kw) {
+			recType = "bug"
+			break
+		}
+	}
+
+	history, err := s.coordinator.WorkflowHistory(recType)
+	if err != nil {
+		history = &orchestration.WorkflowHistorySummary{}
+	}
+
+	result := calculateRisk(req, history)
+	json200(w, result)
+}
 
 func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -44,6 +254,12 @@ func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 	if body.SessionID != "" {
 		if err2 := s.coordinator.SetSessionID(body.ID, body.SessionID); err2 == nil {
 			state.SessionID = body.SessionID
+		}
+	}
+	if commit, err2 := runGit(s.projectRoot, "rev-parse", "HEAD"); err2 == nil {
+		commit = strings.TrimSpace(commit)
+		if err2 := s.coordinator.SetBaseCommit(body.ID, commit); err2 == nil {
+			state.BaseCommit = commit
 		}
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
@@ -90,6 +306,7 @@ func (s *Server) handleTransitionPhase(w http.ResponseWriter, r *http.Request) {
 			"workflow_id": id,
 			"success":     true,
 		})
+		go s.generateChangeSummary(id, state.BaseCommit)
 	}
 	json200(w, state)
 }

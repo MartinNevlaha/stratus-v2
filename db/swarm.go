@@ -879,3 +879,36 @@ func (d *DB) UpdateMissionStrategyOutcome(id, outcome string) error {
 func now() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 }
+
+// GetRecentDailyMetrics returns aggregated daily metrics for the last n days.
+func (d *DB) GetRecentDailyMetrics(days int) ([]map[string]any, error) {
+	rows, err := d.sql.Query(`
+		SELECT metric_date, total_workflows, completed_workflows,
+		       avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate
+		FROM daily_metrics
+		ORDER BY metric_date DESC
+		LIMIT ?`, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]any
+	for rows.Next() {
+		var date string
+		var totalWF, completedWF, avgDur, totalTasks, completedTasks int
+		var successRate float64
+		if err := rows.Scan(&date, &totalWF, &completedWF, &avgDur, &totalTasks, &completedTasks, &successRate); err != nil {
+			return nil, err
+		}
+		result = append(result, map[string]any{
+			"date":                       date,
+			"total_workflows":            totalWF,
+			"completed_workflows":        completedWF,
+			"avg_workflow_duration_ms":   avgDur,
+			"total_tasks":                totalTasks,
+			"completed_tasks":            completedTasks,
+			"success_rate":               successRate,
+		})
+	}
+	return result, rows.Err()
+}

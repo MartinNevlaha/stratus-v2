@@ -428,6 +428,19 @@ func (s *Server) handleListForgeEntries(w http.ResponseWriter, r *http.Request) 
 
 // --- File Reservations ---
 
+func (s *Server) handleListMissionFiles(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	reservations, err := s.db.ListFileReservations(missionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if reservations == nil {
+		reservations = []db.FileReservation{}
+	}
+	json200(w, reservations)
+}
+
 func (s *Server) handleReserveFiles(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MissionID string   `json:"mission_id"`

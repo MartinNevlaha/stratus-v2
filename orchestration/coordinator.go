@@ -1,7 +1,6 @@
 package orchestration
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,14 +10,26 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
 )
-
-const emitEventTimeout = 5 * time.Second
 
 // ErrWorkflowNotFound is returned when a workflow ID does not exist in the database.
 var ErrWorkflowNotFound = errors.New("workflow not found")
+
+// ChangeSummary holds the structural and semantic summary of changes made during a workflow.
+type ChangeSummary struct {
+	CapabilitiesAdded    []string `json:"capabilities_added"`
+	CapabilitiesModified []string `json:"capabilities_modified"`
+	CapabilitiesRemoved  []string `json:"capabilities_removed"`
+	DownstreamRisks      []string `json:"downstream_risks"`
+	GovernanceCompliance []string `json:"governance_compliance"`
+	TestCoverageDelta    string   `json:"test_coverage_delta"`
+	FilesChanged         int      `json:"files_changed"`
+	LinesAdded           int      `json:"lines_added"`
+	LinesRemoved         int      `json:"lines_removed"`
+	GovernanceDocs       []string `json:"governance_docs_matched,omitempty"` // raw FTS matches for agent context
+	VexorExcerpts        []string `json:"vexor_excerpts,omitempty"`          // raw similarity results for agent context
+	GeneratedAt          string   `json:"generated_at"`
+}
 
 // WorkflowState is the full state of a workflow.
 type WorkflowState struct {
@@ -35,6 +46,8 @@ type WorkflowState struct {
 	SessionID     string              `json:"session_id,omitempty"` // Claude Code session that owns this workflow
 	PlanContent   string              `json:"plan_content,omitempty"`
 	DesignContent string              `json:"design_content,omitempty"`
+	BaseCommit    string              `json:"base_commit,omitempty"`    // git HEAD at workflow creation
+	ChangeSummary *ChangeSummary      `json:"change_summary,omitempty"` // populated on complete
 	CreatedAt     string              `json:"created_at"`
 	UpdatedAt     string              `json:"updated_at"`
 }
@@ -48,55 +61,17 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db              *db.DB
-	metrics         *MetricsCollector
-	eventBus        events.EventBus
-	synthesisRouter *SynthesisRouter
+	db *db.DB
 }
 
+// NewCoordinator creates a new coordinator.
 func NewCoordinator(db *db.DB) *Coordinator {
 	return &Coordinator{
 		db: db,
 	}
 }
 
-func NewCoordinatorWithEvents(db *db.DB, eventBus events.EventBus) *Coordinator {
-	return &Coordinator{
-		db:       db,
-		metrics:  NewMetricsCollector(db),
-		eventBus: eventBus,
-	}
-}
-
-func NewCoordinatorWithSynthesis(db *db.DB, eventBus events.EventBus) *Coordinator {
-	c := &Coordinator{
-		db:       db,
-		metrics:  NewMetricsCollector(db),
-		eventBus: eventBus,
-	}
-	c.initSynthesisRouter()
-	return c
-}
-
-func (c *Coordinator) initSynthesisRouter() {
-	store := workflow_synthesis.NewDBStore(c.db)
-	c.synthesisRouter = NewSynthesisRouter(store)
-}
-
-func (c *Coordinator) SetEventBus(bus events.EventBus) {
-	c.eventBus = bus
-}
-
-func (c *Coordinator) emitEvent(eventType events.EventType, source string, payload map[string]any) {
-	if c.eventBus == nil {
-		return
-	}
-	evt := events.NewEvent(eventType, source, payload)
-	ctx, cancel := context.WithTimeout(context.Background(), emitEventTimeout)
-	defer cancel()
-	c.eventBus.Publish(ctx, evt)
-}
-
+// Start creates a new workflow or returns an existing one with the same ID.
 func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity, title string) (*WorkflowState, error) {
 	existing, err := c.Get(id)
 	if err == nil {
@@ -117,12 +92,6 @@ func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity
 	if err := c.save(state); err != nil {
 		return nil, err
 	}
-	c.emitEvent(events.EventWorkflowStarted, "orchestration", map[string]any{
-		"workflow_id": id,
-		"type":        string(wtype),
-		"complexity":  string(complexity),
-		"title":       title,
-	})
 	return state, nil
 }
 
@@ -338,7 +307,6 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	if err := ValidateTransition(state.Type, state.Phase, to); err != nil {
 		return nil, err
 	}
-	from := state.Phase
 
 	for _, w := range validatePhaseReadiness(state, to) {
 		log.Printf("warning: workflow %s phase transition: %s", id, w)
@@ -347,17 +315,6 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	state.Phase = to
 	if err := c.save(state); err != nil {
 		return nil, err
-	}
-	c.emitEvent(events.EventPhaseTransition, "orchestration", map[string]any{
-		"workflow_id": id,
-		"from_phase":  string(from),
-		"to_phase":    string(to),
-	})
-	if to == PhaseComplete {
-		c.emitEvent(events.EventWorkflowCompleted, "orchestration", map[string]any{
-			"workflow_id": id,
-			"type":        string(state.Type),
-		})
 	}
 
 	return state, nil
@@ -434,14 +391,7 @@ func (c *Coordinator) Abort(id string) (*WorkflowState, error) {
 		return nil, err
 	}
 	state.Aborted = true
-	if err := c.save(state); err != nil {
-		return nil, err
-	}
-	c.emitEvent(events.EventWorkflowAborted, "orchestration", map[string]any{
-		"workflow_id": id,
-		"type":        string(state.Type),
-	})
-	return state, nil
+	return state, c.save(state)
 }
 
 // SetPlanContent stores the plan markdown content in the workflow state.
@@ -523,6 +473,75 @@ func (c *Coordinator) UpdateSessionID(id, sessionID string) (*WorkflowState, err
 		return nil, err
 	}
 	state.SessionID = sessionID
+	return state, c.save(state)
+}
+
+// SetBaseCommit records the git HEAD SHA at workflow creation time.
+func (c *Coordinator) SetBaseCommit(id, commit string) error {
+	state, err := c.Get(id)
+	if err != nil {
+		return err
+	}
+	if state.BaseCommit != "" {
+		return nil // already captured
+	}
+	state.BaseCommit = commit
+	return c.save(state)
+}
+
+// SetChangeSummary stores (or replaces) the change summary for a workflow.
+// Computed fields (FilesChanged, LinesAdded, LinesRemoved, GovernanceDocs, VexorExcerpts, GeneratedAt)
+// are preserved when the incoming summary has zero values for them.
+func (c *Coordinator) SetChangeSummary(id string, incoming *ChangeSummary) (*WorkflowState, error) {
+	state, err := c.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if state.ChangeSummary == nil {
+		state.ChangeSummary = incoming
+	} else {
+		// Merge: preserve computed fields, overwrite semantic fields from incoming
+		existing := state.ChangeSummary
+		if incoming.FilesChanged != 0 {
+			existing.FilesChanged = incoming.FilesChanged
+		}
+		if incoming.LinesAdded != 0 {
+			existing.LinesAdded = incoming.LinesAdded
+		}
+		if incoming.LinesRemoved != 0 {
+			existing.LinesRemoved = incoming.LinesRemoved
+		}
+		if len(incoming.GovernanceDocs) > 0 {
+			existing.GovernanceDocs = incoming.GovernanceDocs
+		}
+		if len(incoming.VexorExcerpts) > 0 {
+			existing.VexorExcerpts = incoming.VexorExcerpts
+		}
+		if incoming.GeneratedAt != "" {
+			existing.GeneratedAt = incoming.GeneratedAt
+		}
+		// Semantic fields: only overwrite when the incoming value is non-empty,
+		// so the async generateChangeSummary goroutine (which starts with empty slices)
+		// cannot erase data that an agent already submitted via PUT /summary.
+		if len(incoming.CapabilitiesAdded) > 0 {
+			existing.CapabilitiesAdded = incoming.CapabilitiesAdded
+		}
+		if len(incoming.CapabilitiesModified) > 0 {
+			existing.CapabilitiesModified = incoming.CapabilitiesModified
+		}
+		if len(incoming.CapabilitiesRemoved) > 0 {
+			existing.CapabilitiesRemoved = incoming.CapabilitiesRemoved
+		}
+		if len(incoming.DownstreamRisks) > 0 {
+			existing.DownstreamRisks = incoming.DownstreamRisks
+		}
+		if len(incoming.GovernanceCompliance) > 0 {
+			existing.GovernanceCompliance = incoming.GovernanceCompliance
+		}
+		if incoming.TestCoverageDelta != "" {
+			existing.TestCoverageDelta = incoming.TestCoverageDelta
+		}
+	}
 	return state, c.save(state)
 }
 
@@ -616,6 +635,86 @@ func (c *Coordinator) Delete(id string) error {
 	return nil
 }
 
+// WorkflowHistorySummary holds aggregated historical data used for risk scoring.
+type WorkflowHistorySummary struct {
+	TotalCompleted   int
+	AbortedCount     int
+	AbortRate        float64
+	AvgDurationMin   float64
+	SimilarWorkflows []SimilarWorkflow
+}
+
+// SimilarWorkflow is a past workflow used as a reference in risk analysis.
+type SimilarWorkflow struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Type        string `json:"type"`
+	Complexity  string `json:"complexity"`
+	DurationMin int    `json:"duration_min"`
+	Aborted     bool   `json:"aborted"`
+}
+
+// WorkflowHistory returns aggregate stats and similar past workflows for risk scoring.
+// wtype filters similar workflows by type; pass empty string to skip similarity lookup.
+func (c *Coordinator) WorkflowHistory(wtype string) (*WorkflowHistorySummary, error) {
+	var summary WorkflowHistorySummary
+
+	// Aggregate stats filtered by type (or all types if wtype is empty).
+	// COALESCE on SUM prevents NULL scan errors when the table is empty.
+	row := c.db.SQL().QueryRow(`
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN JSON_EXTRACT(state_json, '$.aborted') = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(CAST((julianday(updated_at) - julianday(created_at)) * 1440 AS INTEGER)), 0)
+		FROM workflows
+		WHERE (phase = 'complete' OR JSON_EXTRACT(state_json, '$.aborted') = 1)
+		  AND (? = '' OR type = ?)`, wtype, wtype)
+	var total, aborted int
+	var avgDur float64
+	if err := row.Scan(&total, &aborted, &avgDur); err != nil {
+		return nil, fmt.Errorf("workflow history stats: %w", err)
+	}
+	summary.TotalCompleted = total
+	summary.AbortedCount = aborted
+	summary.AvgDurationMin = avgDur
+	if total > 0 {
+		summary.AbortRate = float64(aborted) / float64(total)
+	}
+
+	// Similar past workflows by type
+	if wtype != "" {
+		rows, err := c.db.SQL().Query(`
+			SELECT
+				id,
+				type,
+				complexity,
+				COALESCE(JSON_EXTRACT(state_json, '$.title'), ''),
+				COALESCE(JSON_EXTRACT(state_json, '$.aborted'), 0),
+				CAST((julianday(updated_at) - julianday(created_at)) * 1440 AS INTEGER)
+			FROM workflows
+			WHERE type = ?
+			  AND (phase = 'complete' OR JSON_EXTRACT(state_json, '$.aborted') = 1)
+			ORDER BY updated_at DESC
+			LIMIT 5`, wtype)
+		if err != nil {
+			return &summary, nil // non-fatal
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var sw SimilarWorkflow
+			var abortedFlag int
+			if err := rows.Scan(&sw.ID, &sw.Type, &sw.Complexity, &sw.Title, &abortedFlag, &sw.DurationMin); err != nil {
+				continue
+			}
+			sw.Aborted = abortedFlag == 1
+			summary.SimilarWorkflows = append(summary.SimilarWorkflows, sw)
+		}
+		_ = rows.Err() // non-fatal; similar workflows are best-effort
+	}
+
+	return &summary, nil
+}
+
 func (c *Coordinator) save(state *WorkflowState) error {
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	data, err := json.Marshal(state)
@@ -636,50 +735,6 @@ func (c *Coordinator) save(state *WorkflowState) error {
 	return err
 }
 
-func (c *Coordinator) RouteWorkflow(ctx context.Context, taskType, repoType string) (*RoutingDecision, error) {
-	if c.synthesisRouter == nil {
-		return &RoutingDecision{
-			UseCandidate:     false,
-			BaselineWorkflow: c.getDefaultWorkflow(taskType),
-		}, nil
-	}
-	return c.synthesisRouter.Route(ctx, taskType, repoType)
-}
-
-func (c *Coordinator) RecordSynthesisResult(
-	ctx context.Context,
-	experimentID string,
-	workflowID string,
-	useCandidate bool,
-	success bool,
-	cycleTimeMin int,
-	retryCount int,
-	reviewPasses int,
-) error {
-	if c.synthesisRouter == nil {
-		return nil
-	}
-	return c.synthesisRouter.RecordResult(ctx, experimentID, workflowID, useCandidate, success, cycleTimeMin, retryCount, reviewPasses)
-}
-
-func (c *Coordinator) GetSynthesizedWorkflow(ctx context.Context, taskType, repoType string) (*db.WorkflowCandidate, error) {
-	if c.synthesisRouter == nil {
-		return nil, nil
-	}
-	return c.synthesisRouter.GetPromotedWorkflow(ctx, taskType, repoType)
-}
-
-func (c *Coordinator) getDefaultWorkflow(taskType string) string {
-	switch taskType {
-	case "bug_fix", "hotfix":
-		return "bug"
-	case "e2e", "test":
-		return "e2e"
-	default:
-		return "spec"
-	}
-}
-
-func (c *Coordinator) SynthesisRouter() *SynthesisRouter {
-	return c.synthesisRouter
-}
+// SetEventBus is a no-op stub so the Insight event bus can be wired in without
+// requiring the orchestration package to import insight/events.
+func (c *Coordinator) SetEventBus(_ interface{}) {}

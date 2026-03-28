@@ -21,6 +21,7 @@ interface AppState {
   metricsLive: boolean
   activeAnomalies: any[]
   lastMetricsAlert: any | null
+  guardianAlertCount: number
 }
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
@@ -38,6 +39,11 @@ export const appState: AppState = $state({
   lastHeartbeats: {},
   analyticsUpdateCounter: 0,
   lastMetricsUpdate: 0,
+  liveMetrics: null,
+  metricsLive: false,
+  activeAnomalies: [],
+  lastMetricsAlert: null,
+  guardianAlertCount: 0,
 })
 
 export async function refreshDashboard() {
@@ -124,6 +130,10 @@ export function initStore() {
     const data = msg.payload as { id?: string; ts?: string } | undefined
     if (data?.id) appState.lastHeartbeats[data.id] = Date.now()
     emitSwarmUpdate()
+  })
+
+  wsClient.on('guardian_alert', () => {
+    appState.guardianAlertCount++
   })
 
   refreshDashboard()

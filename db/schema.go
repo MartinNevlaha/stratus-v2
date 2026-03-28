@@ -224,6 +224,24 @@ CREATE TABLE IF NOT EXISTS forge_entries (
     created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+-- Guardian: proactive codebase health alerts
+CREATE TABLE IF NOT EXISTS guardian_alerts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    type         TEXT NOT NULL,
+    severity     TEXT NOT NULL DEFAULT 'info',
+    message      TEXT NOT NULL,
+    metadata     TEXT NOT NULL DEFAULT '{}',
+    dismissed_at TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- Guardian: baseline values for drift detection
+CREATE TABLE IF NOT EXISTS guardian_baselines (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 -- Insight: State tracking
 CREATE TABLE IF NOT EXISTS insight_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

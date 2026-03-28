@@ -8,9 +8,10 @@
   import Learning from './routes/Learning.svelte'
   import Analytics from './routes/Analytics.svelte'
   import Agents from './routes/Agents.svelte'
+  import Settings from './routes/Settings.svelte'
   import Terminal from './components/Terminal.svelte'
-  
-  let activeTab = $state<'overview' | 'agents' | 'analytics' | 'memory' | 'retrieval' | 'learning' | 'insight' | 'terminal'>('overview')
+
+  let activeTab = $state<'overview' | 'agents' | 'analytics' | 'memory' | 'retrieval' | 'learning' | 'insight' | 'settings' | 'terminal'>('overview')
   
   onMount(() => {
     initStore()
@@ -24,9 +25,11 @@
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
     { id: 'learning' as const, label: 'Learning' },
+    { id: 'settings' as const, label: 'Settings' },
   ]
-  
+
   let pendingProposals = $derived(appState.dashboard?.pending_proposals?.length ?? 0)
+  let guardianAlerts = $derived(appState.guardianAlertCount)
 
   // Resizable split pane
   let splitRatio = $state(parseFloat(localStorage.getItem('stratus-split-ratio') ?? '0.5'))
@@ -73,6 +76,9 @@
           {t.label}
           {#if t.id === 'learning' && pendingProposals > 0}
             <span class="badge">{pendingProposals}</span>
+          {/if}
+          {#if t.id === 'settings' && guardianAlerts > 0}
+            <span class="badge guardian-badge">{guardianAlerts}</span>
           {/if}
         </button>
       {/each}
@@ -142,6 +148,8 @@
         <Retrieval />
       {:else if activeTab === 'learning'}
         <Learning />
+      {:else if activeTab === 'settings'}
+        <Settings />
       {/if}
     {/if}
   </main>
@@ -209,6 +217,10 @@
     padding: 0 5px;
     min-width: 16px;
     text-align: center;
+  }
+
+  .guardian-badge {
+    background: #d29922;
   }
 
   .update-btn {

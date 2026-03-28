@@ -22,6 +22,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/api"
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/hooks"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/mcp"
@@ -167,13 +168,19 @@ func cmdServe() {
 	opencodeAgentsDir := filepath.Join(cfg.ProjectRoot, ".opencode", "agents")
 	agentEvolutionEngine := agent_evolution.NewEngine(database, agent_evolution.DefaultConfig(), claudeAgentsDir, opencodeAgentsDir, logger)
 
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, insightEngine, agentEvolutionEngine)
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, insightEngine, agentEvolutionEngine, &cfg)
 	if eventBus != nil {
 		srv.SetEventBus(eventBus)
 	}
 	if insightEngine != nil {
 		srv.SetProductIntelligenceEngine(insightEngine.ProductIntelligence())
 	}
+
+	// Start Guardian background service.
+	guardianCtx, guardianCancel := context.WithCancel(context.Background())
+	g := guardian.New(database, coord, func() config.GuardianConfig { return config.Load().Guardian }, hub, cfg.ProjectRoot)
+	srv.SetGuardian(g)
+	go g.Run(guardianCtx)
 
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)
@@ -184,6 +191,7 @@ func cmdServe() {
 	go func() {
 		<-sigCh
 		log.Println("stratus shutting down…")
+		guardianCancel()
 		if insightEngine != nil {
 			insightEngine.Stop()
 		}

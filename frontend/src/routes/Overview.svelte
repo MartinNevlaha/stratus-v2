@@ -1,15 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { appState, dismissUpdate } from '$lib/store'
-  import { listWorkflows, deleteWorkflow, listMissions, getMission, listPastItems } from '$lib/api'
+  import { listWorkflows, deleteWorkflow, listMissions, getMission, listPastItems, listGuardianAlerts, dismissGuardianAlert, deleteGuardianAlert, runGuardianScan } from '$lib/api'
   import PhaseTimeline from '../components/PhaseTimeline.svelte'
-  import type { WorkflowState, SwarmMission, SwarmMissionDetail, PastItem } from '$lib/types'
+  import AnalysisPanel from '../components/AnalysisPanel.svelte'
+  import SwarmGraph from '../components/SwarmGraph.svelte'
+  import type { WorkflowState, SwarmMission, SwarmMissionDetail, PastItem, GuardianAlert } from '$lib/types'
 
   let allWorkflows = $state<WorkflowState[]>([])
   let missions = $state<SwarmMission[]>([])
   let expandedMission = $state<string | null>(null)
   let missionDetail = $state<SwarmMissionDetail | null>(null)
   let missionLoading = $state(false)
+  let missionView = $state<'list' | 'graph'>('list')
   let confirmDelete = $state<string | null>(null)
   let copiedId = $state<string | null>(null)
   let expandedTasks = $state<Set<string>>(new Set())
@@ -18,6 +21,46 @@
   let confirmTimer: ReturnType<typeof setTimeout> | null = null
 
   let activeWfs = $derived(allWorkflows.filter(w => !w.aborted && w.phase !== 'complete'))
+
+  // Guardian
+  let guardianAlerts = $state<GuardianAlert[]>([])
+  let guardianExpanded = $state(false)
+  let guardianScanning = $state(false)
+
+  async function loadGuardianAlerts() {
+    try {
+      guardianAlerts = await listGuardianAlerts()
+    } catch { /* ignore */ }
+  }
+
+  async function dismissAlert(id: number) {
+    try {
+      await dismissGuardianAlert(id)
+      guardianAlerts = guardianAlerts.filter(a => a.id !== id)
+    } catch { /* ignore */ }
+  }
+
+  async function deleteAlert(id: number) {
+    try {
+      await deleteGuardianAlert(id)
+      guardianAlerts = guardianAlerts.filter(a => a.id !== id)
+    } catch { /* ignore */ }
+  }
+
+  async function triggerScan() {
+    guardianScanning = true
+    try {
+      await runGuardianScan()
+      setTimeout(() => loadGuardianAlerts(), 3000)
+    } catch { /* ignore */ }
+    finally { guardianScanning = false }
+  }
+
+  function severityIcon(sev: string): string {
+    if (sev === 'critical') return '🔴'
+    if (sev === 'warning') return '⚠'
+    return 'ℹ'
+  }
 
   let pastItems = $state<PastItem[]>([])
   let pastTotal = $state(0)
@@ -115,6 +158,7 @@
     }
     expandedMission = id
     missionDetail = null
+    missionView = 'list'
     missionLoading = true
     const loadId = ++_missionLoadId
     try {
@@ -175,11 +219,18 @@
   onMount(() => {
     loadWorkflows()
     loadPastItems()
+    loadGuardianAlerts()
   })
 
   $effect(() => {
     const _ = appState.dashboard
     loadWorkflows()
+  })
+
+  $effect(() => {
+    const _ = appState.guardianAlertCount
+    if (_ === 0) return
+    loadGuardianAlerts()
   })
 
   // Swarm real-time refresh — re-fetch on every WS event
@@ -245,6 +296,58 @@
     </div>
   {/if}
 
+  <!-- Risk Analyzer -->
+  <AnalysisPanel />
+
+  <!-- Guardian alerts -->
+  <div class="guardian-widget">
+    <div class="guardian-header" role="button" tabindex="0"
+      onclick={() => { guardianExpanded = !guardianExpanded; if (guardianExpanded && guardianAlerts.length === 0) loadGuardianAlerts() }}
+      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { guardianExpanded = !guardianExpanded } }}
+    >
+      <span class="guardian-title">
+        Guardian
+        {#if guardianAlerts.length > 0}
+          <span class="alert-badge">{guardianAlerts.length}</span>
+        {/if}
+      </span>
+      <span class="guardian-actions">
+        <button class="scan-btn" onclick={(e) => { e.stopPropagation(); triggerScan() }} disabled={guardianScanning} title="Run scan now">
+          {guardianScanning ? '⟳' : '↻'}
+        </button>
+        <span class="expand-arrow">{guardianExpanded ? '▲' : '▼'}</span>
+      </span>
+    </div>
+    {#if guardianExpanded}
+      <div class="guardian-body">
+        {#if guardianAlerts.length === 0}
+          <p class="no-alerts">No active alerts. Codebase looks healthy.</p>
+        {:else}
+          {#each guardianAlerts as alert}
+            <div class="alert-row" class:warning={alert.severity === 'warning'} class:critical={alert.severity === 'critical'}>
+              <span class="alert-icon">{severityIcon(alert.severity)}</span>
+              <div class="alert-content">
+                <div class="alert-message">{alert.message}</div>
+                <div class="alert-meta">
+                  <span class="alert-type">{alert.type.replace('_', ' ')}</span>
+                  <span class="alert-time">{relativeTime(alert.created_at)}</span>
+                </div>
+              </div>
+              <div class="alert-btns">
+                {#if alert.type === 'stale_workflow' && alert.metadata?.workflow_id}
+                  <button class="alert-action" onclick={() => navigator.clipboard.writeText(`/resume ${alert.metadata.workflow_id}`)} title="Copy resume command">
+                    Copy /resume
+                  </button>
+                {/if}
+                <button class="alert-dismiss" onclick={() => dismissAlert(alert.id)} title="Dismiss">✕</button>
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
+  </div>
+
   <!-- Active Missions -->
   {#if activeMissions.length > 0}
     <div class="section-title">Active Missions</div>
@@ -268,6 +371,15 @@
           </div>
         {:else if expandedMission === mission.id && missionDetail}
           <div class="mission-detail">
+            {#if missionDetail.tickets.length > 0}
+              <div class="mission-view-toggle">
+                <button class="view-btn" class:active={missionView === 'list'} onclick={() => missionView = 'list'}>List</button>
+                <button class="view-btn" class:active={missionView === 'graph'} onclick={() => missionView = 'graph'}>Graph</button>
+              </div>
+            {/if}
+            {#if missionView === 'graph' && missionDetail.tickets.length > 0}
+              <SwarmGraph detail={missionDetail} />
+            {:else}
             {#if missionDetail.workers.length > 0}
               <div class="detail-section">
                 <div class="detail-label">Workers</div>
@@ -330,6 +442,7 @@
                   </div>
                 {/each}
               </div>
+            {/if}
             {/if}
           </div>
         {/if}
@@ -402,6 +515,54 @@
               <div class="doc-content"><pre>{wf.design_content}</pre></div>
             {/if}
           </div>
+        {/if}
+
+        <!-- Change summary (completed workflows) -->
+        {#if wf.change_summary}
+          <div class="change-summary">
+            <div class="cs-stats">
+              <span class="cs-stat">{wf.change_summary.files_changed} files</span>
+              <span class="cs-stat added">+{wf.change_summary.lines_added}</span>
+              <span class="cs-stat removed">-{wf.change_summary.lines_removed}</span>
+              {#if wf.change_summary.test_coverage_delta}
+                <span class="cs-stat">{wf.change_summary.test_coverage_delta}</span>
+              {/if}
+            </div>
+            {#if wf.change_summary.capabilities_added.length > 0}
+              <div class="cs-section">
+                <span class="cs-label">Added</span>
+                {#each wf.change_summary.capabilities_added as cap}
+                  <span class="cs-item">{cap}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if wf.change_summary.capabilities_modified.length > 0}
+              <div class="cs-section">
+                <span class="cs-label">Modified</span>
+                {#each wf.change_summary.capabilities_modified as cap}
+                  <span class="cs-item">{cap}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if wf.change_summary.downstream_risks.length > 0}
+              <div class="cs-section">
+                <span class="cs-label cs-risk">Risks</span>
+                {#each wf.change_summary.downstream_risks as risk}
+                  <span class="cs-item risk">{risk}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if wf.change_summary.governance_compliance.length > 0}
+              <div class="cs-section">
+                <span class="cs-label">Governance</span>
+                {#each wf.change_summary.governance_compliance as g}
+                  <span class="cs-tag">{g}</span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {:else if wf.phase === 'complete' && wf.base_commit}
+          <div class="cs-pending">Analyzing changes…</div>
         {/if}
 
         <!-- Resume buttons -->
@@ -514,6 +675,13 @@
           </div>
           {#if wf.title}
             <div class="wf-title">{wf.title}</div>
+          {/if}
+          {#if wf.change_summary}
+            <div class="cs-stats">
+              <span class="cs-stat">{wf.change_summary.files_changed} files</span>
+              <span class="cs-stat added">+{wf.change_summary.lines_added}</span>
+              <span class="cs-stat removed">-{wf.change_summary.lines_removed}</span>
+            </div>
           {/if}
         </div>
       {/if}
@@ -661,6 +829,16 @@
     font-size: 14px; color: #c9d1d9;
   }
 
+  .mission-view-toggle {
+    display: flex; gap: 4px; padding: 0 0 8px;
+  }
+  .view-btn {
+    background: #21262d; border: 1px solid #30363d; border-radius: 5px;
+    color: #8b949e; font-size: 11px; padding: 3px 10px; cursor: pointer; transition: all 0.1s;
+  }
+  .view-btn:hover { color: #c9d1d9; border-color: #484f58; }
+  .view-btn.active { background: #1f6feb22; border-color: #1f6feb; color: #58a6ff; }
+
   .mission-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .mission-title { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mission-phase { font-size: 12px; color: #8b949e; }
@@ -705,6 +883,20 @@
   .forge-status { font-size: 11px; }
 
   .detail-loading { font-size: 12px; color: #8b949e; padding: 12px 0; }
+
+  /* === Change summary === */
+  .change-summary { display: flex; flex-direction: column; gap: 6px; }
+  .cs-pending { font-size: 12px; color: #8b949e; font-style: italic; }
+  .cs-stats { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cs-stat { font-size: 12px; color: #8b949e; background: #21262d; padding: 2px 8px; border-radius: 4px; }
+  .cs-stat.added { color: #3fb950; }
+  .cs-stat.removed { color: #f85149; }
+  .cs-section { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+  .cs-label { color: #8b949e; font-weight: 600; min-width: 56px; padding-top: 2px; }
+  .cs-label.cs-risk { color: #d29922; }
+  .cs-item { color: #c9d1d9; background: #21262d; padding: 1px 8px; border-radius: 4px; }
+  .cs-item.risk { color: #d29922; background: #2d2200; }
+  .cs-tag { font-size: 11px; background: #1f2d1f; color: #3fb950; border: 1px solid #238636; padding: 1px 8px; border-radius: 12px; }
 
   /* === Swarm live animations === */
 
@@ -781,4 +973,122 @@
     margin: 0; font-size: 12px; color: #c9d1d9; white-space: pre-wrap;
     word-break: break-word; font-family: monospace; line-height: 1.5;
   }
+
+  /* === Guardian widget === */
+  .guardian-widget {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  .guardian-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    color: #c9d1d9;
+    font-size: 13px;
+    font-weight: 600;
+    user-select: none;
+  }
+
+  .guardian-header:hover { background: #1f2428; }
+
+  .guardian-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .alert-badge {
+    background: #da3633;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+  }
+
+  .guardian-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #8b949e;
+    font-size: 12px;
+  }
+
+  .scan-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #58a6ff;
+    font-size: 14px;
+    padding: 0 2px;
+    line-height: 1;
+  }
+
+  .scan-btn:disabled { opacity: 0.5; cursor: default; }
+
+  .expand-arrow { font-size: 10px; }
+
+  .guardian-body {
+    padding: 4px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .no-alerts { font-size: 12px; color: #8b949e; margin: 4px 0; }
+
+  .alert-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+
+  .alert-row.warning { border-color: #d29922; }
+  .alert-row.critical { border-color: #f85149; }
+
+  .alert-icon { font-size: 13px; flex-shrink: 0; padding-top: 1px; }
+
+  .alert-content { flex: 1; min-width: 0; }
+  .alert-message { font-size: 12px; color: #c9d1d9; line-height: 1.4; }
+  .alert-meta { display: flex; gap: 8px; margin-top: 4px; }
+  .alert-type { font-size: 10px; background: #21262d; color: #8b949e; padding: 1px 6px; border-radius: 3px; }
+  .alert-time { font-size: 10px; color: #6e7681; }
+
+  .alert-btns { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+  .alert-action {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #58a6ff;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .alert-action:hover { background: #2a3040; }
+
+  .alert-dismiss {
+    background: none;
+    border: none;
+    color: #6e7681;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px;
+    line-height: 1;
+  }
+
+  .alert-dismiss:hover { color: #f85149; }
 </style>

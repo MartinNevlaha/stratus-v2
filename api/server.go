@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/insight"
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
@@ -34,13 +36,15 @@ type Server struct {
 	sttModel             string
 	staticFiles          fs.FS
 	version              string
-	syncedVersion        string
-	skippedFiles         []string
+	syncedVersion        string   // version when assets were last refreshed to disk
+	skippedFiles         []string // asset files skipped in last refresh (user-customized)
 	swarm                *swarm.Store
 	insight              *insight.Engine
 	agentEvolutionEngine *agent_evolution.Engine
 	eventBus             events.EventBus
 	piEngine             *product_intelligence.Engine
+	guardianSvc          *guardian.Guardian
+	cfg                  *config.Config // pointer so guardian config updates are reflected
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -66,6 +70,7 @@ func NewServer(
 	swarmStore *swarm.Store,
 	insightEngine *insight.Engine,
 	agentEvolutionEng *agent_evolution.Engine,
+	cfg *config.Config,
 ) *Server {
 	s := &Server{
 		db:                   database,
@@ -83,11 +88,17 @@ func NewServer(
 		swarm:                swarmStore,
 		insight:              insightEngine,
 		agentEvolutionEngine: agentEvolutionEng,
+		cfg:                  cfg,
 		dirtyFiles:           make(map[string]struct{}),
 		dirtyCh:              make(chan struct{}, 1),
 	}
 	go s.indexWorker()
 	return s
+}
+
+// SetGuardian attaches the guardian service so routes can trigger manual scans.
+func (s *Server) SetGuardian(g *guardian.Guardian) {
+	s.guardianSvc = g
 }
 
 // markDirty adds file paths to the dirty set and signals the index worker.
@@ -169,6 +180,7 @@ func (s *Server) Handler() http.Handler {
 	// Health
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/dashboard/state", s.handleDashboardState)
 
 	// Memory / events
 	mux.HandleFunc("POST /api/events", s.handleSaveEvent)
@@ -188,6 +200,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Orchestration
 	mux.HandleFunc("GET /api/past", s.handleListPast)
+	mux.HandleFunc("POST /api/workflows/analyze", s.handleAnalyzeWorkflow)
 	mux.HandleFunc("GET /api/workflows", s.handleListWorkflows)
 	mux.HandleFunc("POST /api/workflows", s.handleStartWorkflow)
 	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
@@ -201,6 +214,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/workflows/{id}/plan", s.handleSetPlanContent)
 	mux.HandleFunc("PUT /api/workflows/{id}/design", s.handleSetDesignContent)
 	mux.HandleFunc("GET /api/workflows/{id}/dispatch", s.handleDispatch)
+	mux.HandleFunc("GET /api/workflows/{id}/summary", s.handleGetSummary)
+	mux.HandleFunc("GET /api/workflows/{id}/summary.md", s.handleGetSummaryMD)
+	mux.HandleFunc("PUT /api/workflows/{id}/summary", s.handleUpdateSummary)
 
 	// Learning
 	mux.HandleFunc("GET /api/learning/candidates", s.handleListCandidates)
@@ -239,6 +255,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/swarm/forge/{id}/status", s.handleUpdateForgeEntry)
 	mux.HandleFunc("POST /api/swarm/forge/submit", s.handleSubmitToForgeByWorker)
 	mux.HandleFunc("GET /api/swarm/workers/{id}", s.handleGetWorker)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/files", s.handleListMissionFiles)
 	mux.HandleFunc("POST /api/swarm/files/reserve", s.handleReserveFiles)
 	mux.HandleFunc("POST /api/swarm/files/release", s.handleReleaseFiles)
 	mux.HandleFunc("POST /api/swarm/files/check", s.handleCheckFileConflicts)
@@ -325,6 +342,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/rules", s.handleCreateRule)
 	mux.HandleFunc("PUT /api/rules/{name}", s.handleUpdateRule)
 	mux.HandleFunc("DELETE /api/rules/{name}", s.handleDeleteRule)
+
+	// Guardian
+	mux.HandleFunc("GET /api/guardian/alerts", s.handleListGuardianAlerts)
+	mux.HandleFunc("PUT /api/guardian/alerts/{id}/dismiss", s.handleDismissGuardianAlert)
+	mux.HandleFunc("DELETE /api/guardian/alerts/{id}", s.handleDeleteGuardianAlert)
+	mux.HandleFunc("GET /api/guardian/config", s.handleGetGuardianConfig)
+	mux.HandleFunc("PUT /api/guardian/config", s.handleUpdateGuardianConfig)
+	mux.HandleFunc("POST /api/guardian/run", s.handleRunGuardianScan)
+	mux.HandleFunc("POST /api/guardian/test-llm", s.handleTestGuardianLLM)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

@@ -364,8 +364,8 @@
       </div>
     </div>
 
-    {#if activeView === 'agents'}
-      <!-- AGENTS VIEW -->
+    <!-- AGENTS VIEW -->
+    <div hidden={activeView !== 'agents'}>
       <div class="agents-grid">
         {#each allAgentNames as name (name)}
           {@const ccAgent = getAgentDef(name, 'claude_code')}
@@ -424,8 +424,10 @@
           </div>
         {/each}
       </div>
-    {:else if activeView === 'skills'}
-      <!-- SKILLS VIEW -->
+    </div>
+
+    <!-- SKILLS VIEW -->
+    <div hidden={activeView !== 'skills'}>
       <div class="skills-header">
         <input
           type="text"
@@ -473,8 +475,10 @@
           </div>
         {/each}
       </div>
-    {:else if activeView === 'rules'}
-      <!-- RULES VIEW -->
+    </div>
+
+    <!-- RULES VIEW -->
+    <div hidden={activeView !== 'rules'}>
       <div class="skills-header">
         <input
           type="text"
@@ -512,7 +516,7 @@
           <div class="empty-state">{ruleSearch ? 'No rules match your search.' : 'No rules yet. Create one to get started.'}</div>
         {/if}
       </div>
-    {/if}
+    </div>
   {/if}
 </div>
 
