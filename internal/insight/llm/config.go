@@ -1,0 +1,85 @@
+package llm
+
+import (
+	"fmt"
+	"os"
+	"time"
+)
+
+type Config struct {
+	Provider    string  `json:"provider"`
+	Model       string  `json:"model"`
+	APIKey      string  `json:"-"`
+	BaseURL     string  `json:"base_url,omitempty"`
+	Timeout     int     `json:"timeout,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	MaxRetries  int     `json:"max_retries,omitempty"`
+}
+
+func DefaultConfig() Config {
+	return Config{
+		Provider:    "zai",
+		Model:       "glm-5",
+		Timeout:     120,
+		MaxTokens:   16384,
+		Temperature: 0.7,
+	}
+}
+
+func (c Config) WithEnv() Config {
+	if c.APIKey == "" {
+		c.APIKey = os.Getenv("LLM_API_KEY")
+	}
+	if c.APIKey == "" {
+		c.APIKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if c.APIKey == "" {
+		c.APIKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	return c
+}
+
+func (c Config) TimeoutDuration() time.Duration {
+	if c.Timeout <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(c.Timeout) * time.Second
+}
+
+func (c Config) Validate() error {
+	if c.Provider == "" {
+		return fmt.Errorf("llm: provider is required")
+	}
+	if c.Model == "" {
+		return fmt.Errorf("llm: model is required")
+	}
+	if c.APIKey == "" && c.Provider != "ollama" {
+		return fmt.Errorf("llm: api_key is required for provider %s", c.Provider)
+	}
+	if c.MaxTokens < 0 || c.MaxTokens > 204800 {
+		return fmt.Errorf("llm: max_tokens must be between 1 and 204800 (200K)")
+	}
+	if c.Temperature < 0 || c.Temperature > 2 {
+		return fmt.Errorf("llm: temperature must be between 0 and 2")
+	}
+	return nil
+}
+
+func (c Config) EffectiveBaseURL() string {
+	if c.BaseURL != "" {
+		return c.BaseURL
+	}
+	switch c.Provider {
+	case "zai":
+		return "https://api.z.ai/api/paas/v4"
+	case "openai":
+		return "https://api.openai.com/v1"
+	case "ollama":
+		return "http://localhost:11434/v1"
+	case "anthropic":
+		return "https://api.anthropic.com"
+	default:
+		return c.BaseURL
+	}
+}

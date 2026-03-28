@@ -4,11 +4,13 @@
   import Overview from './routes/Overview.svelte'
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'
+  import Insight from './routes/Insight.svelte'
   import Learning from './routes/Learning.svelte'
+  import Analytics from './routes/Analytics.svelte'
   import Agents from './routes/Agents.svelte'
   import Terminal from './components/Terminal.svelte'
   
-  let activeTab = $state<'overview' | 'agents' | 'analytics' | 'memory' | 'retrieval' | 'learning' | 'terminal'>('overview')
+  let activeTab = $state<'overview' | 'agents' | 'analytics' | 'memory' | 'retrieval' | 'learning' | 'insight' | 'terminal'>('overview')
   
   onMount(() => {
     initStore()
@@ -18,6 +20,7 @@
     { id: 'overview' as const, label: 'Overview' },
     { id: 'agents' as const, label: 'Agents' },
     { id: 'analytics' as const, label: 'Analytics' },
+    { id: 'insight' as const, label: 'Insight' },
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
     { id: 'learning' as const, label: 'Learning' },
@@ -131,6 +134,10 @@
         <Memory />
       {:else if activeTab === 'agents'}
         <Agents />
+      {:else if activeTab === 'analytics'}
+        <Analytics />
+      {:else if activeTab === 'insight'}
+        <Insight />
       {:else if activeTab === 'retrieval'}
         <Retrieval />
       {:else if activeTab === 'learning'}

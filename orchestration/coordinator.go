@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,11 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
 )
+
+const emitEventTimeout = 5 * time.Second
 
 // ErrWorkflowNotFound is returned when a workflow ID does not exist in the database.
 var ErrWorkflowNotFound = errors.New("workflow not found")
@@ -43,17 +48,55 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db *db.DB
+	db              *db.DB
+	metrics         *MetricsCollector
+	eventBus        events.EventBus
+	synthesisRouter *SynthesisRouter
 }
 
-// NewCoordinator creates a new coordinator.
 func NewCoordinator(db *db.DB) *Coordinator {
 	return &Coordinator{
 		db: db,
 	}
 }
 
-// Start creates a new workflow or returns an existing one with the same ID.
+func NewCoordinatorWithEvents(db *db.DB, eventBus events.EventBus) *Coordinator {
+	return &Coordinator{
+		db:       db,
+		metrics:  NewMetricsCollector(db),
+		eventBus: eventBus,
+	}
+}
+
+func NewCoordinatorWithSynthesis(db *db.DB, eventBus events.EventBus) *Coordinator {
+	c := &Coordinator{
+		db:       db,
+		metrics:  NewMetricsCollector(db),
+		eventBus: eventBus,
+	}
+	c.initSynthesisRouter()
+	return c
+}
+
+func (c *Coordinator) initSynthesisRouter() {
+	store := workflow_synthesis.NewDBStore(c.db)
+	c.synthesisRouter = NewSynthesisRouter(store)
+}
+
+func (c *Coordinator) SetEventBus(bus events.EventBus) {
+	c.eventBus = bus
+}
+
+func (c *Coordinator) emitEvent(eventType events.EventType, source string, payload map[string]any) {
+	if c.eventBus == nil {
+		return
+	}
+	evt := events.NewEvent(eventType, source, payload)
+	ctx, cancel := context.WithTimeout(context.Background(), emitEventTimeout)
+	defer cancel()
+	c.eventBus.Publish(ctx, evt)
+}
+
 func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity, title string) (*WorkflowState, error) {
 	existing, err := c.Get(id)
 	if err == nil {
@@ -74,6 +117,12 @@ func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity
 	if err := c.save(state); err != nil {
 		return nil, err
 	}
+	c.emitEvent(events.EventWorkflowStarted, "orchestration", map[string]any{
+		"workflow_id": id,
+		"type":        string(wtype),
+		"complexity":  string(complexity),
+		"title":       title,
+	})
 	return state, nil
 }
 
@@ -289,6 +338,7 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	if err := ValidateTransition(state.Type, state.Phase, to); err != nil {
 		return nil, err
 	}
+	from := state.Phase
 
 	for _, w := range validatePhaseReadiness(state, to) {
 		log.Printf("warning: workflow %s phase transition: %s", id, w)
@@ -297,6 +347,17 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	state.Phase = to
 	if err := c.save(state); err != nil {
 		return nil, err
+	}
+	c.emitEvent(events.EventPhaseTransition, "orchestration", map[string]any{
+		"workflow_id": id,
+		"from_phase":  string(from),
+		"to_phase":    string(to),
+	})
+	if to == PhaseComplete {
+		c.emitEvent(events.EventWorkflowCompleted, "orchestration", map[string]any{
+			"workflow_id": id,
+			"type":        string(state.Type),
+		})
 	}
 
 	return state, nil
@@ -373,7 +434,14 @@ func (c *Coordinator) Abort(id string) (*WorkflowState, error) {
 		return nil, err
 	}
 	state.Aborted = true
-	return state, c.save(state)
+	if err := c.save(state); err != nil {
+		return nil, err
+	}
+	c.emitEvent(events.EventWorkflowAborted, "orchestration", map[string]any{
+		"workflow_id": id,
+		"type":        string(state.Type),
+	})
+	return state, nil
 }
 
 // SetPlanContent stores the plan markdown content in the workflow state.
@@ -566,4 +634,52 @@ func (c *Coordinator) save(state *WorkflowState) error {
 		state.ID, state.Type, state.Phase, state.Complexity, string(data), state.CreatedAt, state.UpdatedAt,
 	)
 	return err
+}
+
+func (c *Coordinator) RouteWorkflow(ctx context.Context, taskType, repoType string) (*RoutingDecision, error) {
+	if c.synthesisRouter == nil {
+		return &RoutingDecision{
+			UseCandidate:     false,
+			BaselineWorkflow: c.getDefaultWorkflow(taskType),
+		}, nil
+	}
+	return c.synthesisRouter.Route(ctx, taskType, repoType)
+}
+
+func (c *Coordinator) RecordSynthesisResult(
+	ctx context.Context,
+	experimentID string,
+	workflowID string,
+	useCandidate bool,
+	success bool,
+	cycleTimeMin int,
+	retryCount int,
+	reviewPasses int,
+) error {
+	if c.synthesisRouter == nil {
+		return nil
+	}
+	return c.synthesisRouter.RecordResult(ctx, experimentID, workflowID, useCandidate, success, cycleTimeMin, retryCount, reviewPasses)
+}
+
+func (c *Coordinator) GetSynthesizedWorkflow(ctx context.Context, taskType, repoType string) (*db.WorkflowCandidate, error) {
+	if c.synthesisRouter == nil {
+		return nil, nil
+	}
+	return c.synthesisRouter.GetPromotedWorkflow(ctx, taskType, repoType)
+}
+
+func (c *Coordinator) getDefaultWorkflow(taskType string) string {
+	switch taskType {
+	case "bug_fix", "hotfix":
+		return "bug"
+	case "e2e", "test":
+		return "e2e"
+	default:
+		return "spec"
+	}
+}
+
+func (c *Coordinator) SynthesisRouter() *SynthesisRouter {
+	return c.synthesisRouter
 }

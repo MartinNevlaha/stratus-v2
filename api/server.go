@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -10,33 +11,42 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/insight"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
 	"github.com/MartinNevlaha/stratus-v2/vexor"
 )
 
-// Server holds all dependencies and the HTTP mux.
+const emitEventTimeout = 5 * time.Second
+
 type Server struct {
-	db            *db.DB
-	coordinator   *orchestration.Coordinator
-	vexor         *vexor.Client
-	hub           *Hub
-	terminal      *terminal.Manager
-	projectRoot   string
-	sttEndpoint   string
-	sttModel      string
-	staticFiles   fs.FS
-	version       string
-	syncedVersion string   // version when assets were last refreshed to disk
-	skippedFiles  []string // asset files skipped in last refresh (user-customized)
-	swarm         *swarm.Store
+	db                   *db.DB
+	coordinator          *orchestration.Coordinator
+	vexor                *vexor.Client
+	hub                  *Hub
+	terminal             *terminal.Manager
+	projectRoot          string
+	sttEndpoint          string
+	sttModel             string
+	staticFiles          fs.FS
+	version              string
+	syncedVersion        string
+	skippedFiles         []string
+	swarm                *swarm.Store
+	insight              *insight.Engine
+	agentEvolutionEngine *agent_evolution.Engine
+	eventBus             events.EventBus
+	piEngine             *product_intelligence.Engine
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
-	dirtyCh    chan struct{} // buffered(1) signal channel
+	dirtyCh    chan struct{}
 
-	updateMu sync.Mutex // guards runUpdate — prevents concurrent update runs
+	updateMu sync.Mutex
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -54,23 +64,27 @@ func NewServer(
 	syncedVersion string,
 	skippedFiles []string,
 	swarmStore *swarm.Store,
+	insightEngine *insight.Engine,
+	agentEvolutionEng *agent_evolution.Engine,
 ) *Server {
 	s := &Server{
-		db:            database,
-		coordinator:   coord,
-		vexor:         vexorClient,
-		hub:           hub,
-		terminal:      termMgr,
-		projectRoot:   projectRoot,
-		sttEndpoint:   sttEndpoint,
-		sttModel:      sttModel,
-		staticFiles:   staticFiles,
-		version:       version,
-		syncedVersion: syncedVersion,
-		skippedFiles:  skippedFiles,
-		swarm:         swarmStore,
-		dirtyFiles:    make(map[string]struct{}),
-		dirtyCh:       make(chan struct{}, 1),
+		db:                   database,
+		coordinator:          coord,
+		vexor:                vexorClient,
+		hub:                  hub,
+		terminal:             termMgr,
+		projectRoot:          projectRoot,
+		sttEndpoint:          sttEndpoint,
+		sttModel:             sttModel,
+		staticFiles:          staticFiles,
+		version:              version,
+		syncedVersion:        syncedVersion,
+		skippedFiles:         skippedFiles,
+		swarm:                swarmStore,
+		insight:              insightEngine,
+		agentEvolutionEngine: agentEvolutionEng,
+		dirtyFiles:           make(map[string]struct{}),
+		dirtyCh:              make(chan struct{}, 1),
 	}
 	go s.indexWorker()
 	return s
@@ -89,10 +103,24 @@ func (s *Server) markDirty(paths []string) {
 	}
 }
 
-// indexWorker runs a debounced background loop that calls vexor.Index whenever
-// files are marked dirty. It waits for a 5s quiet period after the last dirty
-// signal before indexing, and falls back to a full reindex when the batch
-// exceeds 20 files.
+func (s *Server) emitEvent(eventType events.EventType, source string, payload map[string]any) {
+	if s.eventBus == nil {
+		return
+	}
+	evt := events.NewEvent(eventType, source, payload)
+	ctx, cancel := context.WithTimeout(context.Background(), emitEventTimeout)
+	defer cancel()
+	s.eventBus.Publish(ctx, evt)
+}
+
+func (s *Server) SetEventBus(bus events.EventBus) {
+	s.eventBus = bus
+}
+
+func (s *Server) SetProductIntelligenceEngine(engine *product_intelligence.Engine) {
+	s.piEngine = engine
+}
+
 func (s *Server) indexWorker() {
 	const quietPeriod = 5 * time.Second
 	const maxBatch = 20
@@ -217,6 +245,64 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/swarm/missions/{id}/checkpoint", s.handleSaveCheckpoint)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/checkpoint/latest", s.handleGetLatestCheckpoint)
 	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
+
+	// Insight
+	mux.HandleFunc("GET /api/insight/status", s.handleGetInsightStatus)
+	mux.HandleFunc("POST /api/insight/trigger", s.handleTriggerInsightAnalysis)
+	mux.HandleFunc("GET /api/insight/patterns", s.handleGetInsightPatterns)
+	mux.HandleFunc("GET /api/insight/analyses", s.handleGetInsightAnalyses)
+	mux.HandleFunc("GET /api/insight/proposals", s.handleGetInsightProposals)
+	mux.HandleFunc("GET /api/insight/proposals/{id}", s.handleGetInsightProposal)
+	mux.HandleFunc("POST /api/insight/proposals/generate", s.handleTriggerInsightProposalGeneration)
+	mux.HandleFunc("GET /api/insight/dashboard", s.handleGetInsightDashboard)
+	mux.HandleFunc("PATCH /api/insight/proposals/{id}/status", s.handleUpdateInsightProposalStatus)
+
+	// Insight Scorecards
+	mux.HandleFunc("GET /api/insight/scorecards/agents", s.handleGetAgentScorecards)
+	mux.HandleFunc("GET /api/insight/scorecards/agents/{name}", s.handleGetAgentScorecardByName)
+	mux.HandleFunc("GET /api/insight/scorecards/workflows", s.handleGetWorkflowScorecards)
+	mux.HandleFunc("GET /api/insight/scorecards/workflows/{type}", s.handleGetWorkflowScorecardByType)
+	mux.HandleFunc("POST /api/insight/scorecards/compute", s.handleTriggerScorecardComputation)
+	mux.HandleFunc("GET /api/insight/scorecards/highlights", s.handleGetScorecardHighlights)
+
+	// Insight Routing Recommendations
+	mux.HandleFunc("GET /api/insight/routing/recommendations", s.handleGetRoutingRecommendations)
+	mux.HandleFunc("GET /api/insight/routing/recommendations/{id}", s.handleGetRoutingRecommendation)
+	mux.HandleFunc("POST /api/insight/routing/analyze", s.handleTriggerRoutingAnalysis)
+
+	// Insight LLM
+	mux.HandleFunc("POST /api/insight/llm/test", s.handleTestLLMConnection)
+
+	// Agent Evolution
+	mux.HandleFunc("GET /api/insight/agent-evolution/summary", s.handleGetAgentEvolutionSummary)
+	mux.HandleFunc("GET /api/insight/agent-evolution/opportunities", s.handleGetAgentEvolutionOpportunities)
+	mux.HandleFunc("POST /api/insight/agent-evolution/trigger", s.handleTriggerAgentEvolution)
+	mux.HandleFunc("GET /api/insight/agent-evolution/candidates", s.handleGetAgentCandidates)
+	mux.HandleFunc("GET /api/insight/agent-evolution/candidates/{id}", s.handleGetAgentCandidateByID)
+	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/approve", s.handleApproveAgentCandidate)
+	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/reject", s.handleRejectAgentCandidate)
+	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/experiment", s.handleStartAgentExperiment)
+	mux.HandleFunc("GET /api/insight/agent-evolution/candidates/{id}/markdown", s.handleGetAgentCandidateMarkdown)
+	mux.HandleFunc("GET /api/insight/agent-evolution/experiments", s.handleGetAgentExperiments)
+	mux.HandleFunc("GET /api/insight/agent-evolution/experiments/{id}", s.handleGetAgentExperimentByID)
+	mux.HandleFunc("GET /api/insight/agent-evolution/experiments/{id}/results", s.handleGetAgentExperimentResults)
+	mux.HandleFunc("POST /api/insight/agent-evolution/experiments/{id}/cancel", s.handleCancelAgentExperiment)
+
+	// Product Intelligence
+	mux.HandleFunc("GET /api/pi/projects", s.handlePIListProjects)
+	mux.HandleFunc("POST /api/pi/projects", s.handlePIRegisterProject)
+	mux.HandleFunc("GET /api/pi/projects/{id}", s.handlePIGetProject)
+	mux.HandleFunc("DELETE /api/pi/projects/{id}", s.handlePIDeleteProject)
+	mux.HandleFunc("POST /api/pi/projects/{id}/analyze", s.handlePIAnalyzeProject)
+	mux.HandleFunc("GET /api/pi/projects/{id}/features", s.handlePIGetProjectFeatures)
+	mux.HandleFunc("GET /api/pi/projects/{id}/gaps", s.handlePIGetProjectGaps)
+	mux.HandleFunc("GET /api/pi/projects/{id}/proposals", s.handlePIGetProjectProposals)
+	mux.HandleFunc("GET /api/pi/proposals/{id}", s.handlePIGetProposal)
+	mux.HandleFunc("POST /api/pi/proposals/{id}/accept", s.handlePIAcceptProposal)
+	mux.HandleFunc("POST /api/pi/proposals/{id}/reject", s.handlePIRejectProposal)
+	mux.HandleFunc("GET /api/pi/market-features", s.handlePIGetMarketFeatures)
+	mux.HandleFunc("POST /api/pi/market-research/refresh", s.handlePIRefreshMarketResearch)
+	mux.HandleFunc("GET /api/pi/dashboard", s.handlePIGetDashboard)
 
 	// Agents
 	mux.HandleFunc("GET /api/agents", s.handleListAgents)

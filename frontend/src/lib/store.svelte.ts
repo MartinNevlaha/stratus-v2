@@ -13,6 +13,14 @@ interface AppState {
   updateError: string | null
   swarmUpdateCounter: number
   lastHeartbeats: Record<string, number>
+  // Analytics real-time updates
+  analyticsUpdateCounter: number
+  lastMetricsUpdate: number
+  // Real-time metrics
+  liveMetrics: any | null
+  metricsLive: boolean
+  activeAnomalies: any[]
+  lastMetricsAlert: any | null
 }
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
@@ -28,6 +36,8 @@ export const appState: AppState = $state({
   updateError: null,
   swarmUpdateCounter: 0,
   lastHeartbeats: {},
+  analyticsUpdateCounter: 0,
+  lastMetricsUpdate: 0,
 })
 
 export async function refreshDashboard() {

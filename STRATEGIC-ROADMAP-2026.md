@@ -25,7 +25,7 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 │   ┌─────────────────────────────────────────────────────┐ │
 │   │                                                     │ │
 │   │    🤖 AI-Powered Intelligence                      │ │
-│   │    • OpenClaw autonomous coach                     │ │
+│   │    • Insight autonomous coach                     │ │
 │   │    • Predictive analytics                          │ │
 │   │    • Adaptive workflow optimization                │ │
 │   │                                                     │ │
@@ -61,7 +61,7 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 
 | Initiative | Description | Impact | Timeline |
 |-----------|-------------|--------|----------|
-| **OpenClaw Bot** | Autonomous AI coach that monitors, analyzes, and proposes | 40% efficiency gain | Q1-Q2 |
+| **Insight Bot** | Autonomous AI coach that monitors, analyzes, and proposes | 40% efficiency gain | Q1-Q2 |
 | **Predictive Analytics** | Forecast bottlenecks and resource needs | 30% faster delivery | Q2 |
 | **Adaptive Workflows** | Dynamically optimize phase transitions | 25% reduction in loops | Q3 |
 | **Intelligent Routing** | ML-based agent-task matching | 35% better quality | Q3-Q4 |
@@ -233,14 +233,14 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 
 | Week | Deliverables |
 |------|-------------|
-| 1-2  | OpenClaw agent definition, scheduler |
+| 1-2  | Insight agent definition, scheduler |
 | 3-4  | Basic pattern detection algorithms |
-| 5-6  | OpenClaw proposal generation |
+| 5-6  | Insight proposal generation |
 | 7-8  | Jira integration (auth, sync) |
 | 9-10 | Slack integration (bot, notifications) |
 | 11-12| Advanced pattern recognition, trend analysis |
 
-**Milestone:** OpenClaw running, Jira/Slack integrations live
+**Milestone:** Insight running, Jira/Slack integrations live
 
 ---
 
@@ -305,7 +305,7 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │              AI INTELLIGENCE LAYER                   │   │
 │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐  │   │
-│  │  │OpenClaw │ │Predict  │ │Adaptive │ │Routing  │  │   │
+│  │  │Insight │ │Predict  │ │Adaptive │ │Routing  │  │   │
 │  │  │  Bot    │ │ Engine  │ │Workflow │ │  ML     │  │   │
 │  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘  │   │
 │  └─────────────────────────────────────────────────────┘   │
@@ -387,7 +387,7 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|-----------|
 | LLM costs too high | Medium | High | Optimize prompts, use smaller models |
-| Low adoption of OpenClaw | Medium | Medium | Gamification, Slack integration |
+| Low adoption of Insight | Medium | Medium | Gamification, Slack integration |
 | Integration complexity | High | Medium | Phased rollout, API abstraction |
 | Performance degradation | Low | High | Async processing, caching |
 | Team resistance | Medium | Medium | Training, gradual rollout |
@@ -412,7 +412,7 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 2. **Governance-first** (rules, ADRs, skills)
 3. **Learning system** (memory, proposals)
 4. **Real-time visibility** (dashboard, WebSocket)
-5. **Self-improving** (OpenClaw, adaptive)
+5. **Self-improving** (Insight, adaptive)
 
 ---
 
@@ -430,13 +430,13 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 1. Design metrics database schema
 2. Implement basic analytics collection
 3. Prototype GitHub integration
-4. Draft OpenClaw agent definition
+4. Draft Insight agent definition
 
 ### Medium-term (Next Month)
 
 1. Complete analytics dashboard
 2. GitHub integration MVP
-3. OpenClaw prototype
+3. Insight prototype
 4. User testing & feedback
 
 ---
@@ -445,7 +445,7 @@ This document outlines the strategic vision for Stratus V2 evolution in 2026, fo
 
 Stratus V2 has the potential to become the **definitive AI-powered development platform** by combining:
 
-- **Intelligence** (OpenClaw, predictive analytics)
+- **Intelligence** (Insight, predictive analytics)
 - **Insights** (metrics, trends, quality gates)
 - **Integration** (GitHub, Jira, Slack)
 - **Improvement** (self-evolving governance)

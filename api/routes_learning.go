@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
 )
 
 func (s *Server) handleListCandidates(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +51,11 @@ func (s *Server) handleSaveProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.BroadcastJSON("learning_update", map[string]string{"type": "proposal", "id": id})
+	s.emitEvent(events.EventProposalCreated, "api", map[string]any{
+		"proposal_id": id,
+		"type":        p.Type,
+		"title":       p.Title,
+	})
 	json200(w, map[string]any{"id": id})
 }
 
@@ -115,5 +121,18 @@ func (s *Server) handleDecideProposal(w http.ResponseWriter, r *http.Request) {
 		"decision":    body.Decision,
 		"applied":     applied,
 	})
+
+	switch body.Decision {
+	case "accept":
+		s.emitEvent(events.EventProposalAccepted, "api", map[string]any{
+			"proposal_id": id,
+			"applied":     applied,
+		})
+	case "reject":
+		s.emitEvent(events.EventProposalRejected, "api", map[string]any{
+			"proposal_id": id,
+		})
+	}
+
 	json200(w, map[string]any{"status": "ok", "proposal_id": id, "decision": body.Decision, "applied": applied})
 }

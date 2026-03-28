@@ -187,6 +187,46 @@ export const updateSkill = (name: string, data: { description: string; disable_m
   put<{ status: string; name: string }>(`/skills/${name}`, data)
 export const deleteSkill = (name: string) => del<{ status: string; name: string }>(`/skills/${name}`)
 
+export const triggerAggregation = () =>
+  post<{ status: string }>('/metrics/aggregate', {})
+
+export const getDailyMetrics = (limit = 30) =>
+  get<DailyMetricsResponse>('/metrics/daily', { limit: String(limit) })
+
+export const getAgentMetrics = (agentId?: string, days = 30) =>
+  get<AgentMetricsResponse>('/metrics/agents', {
+    ...(agentId ? { agent_id: agentId } : {}),
+    days: String(days)
+  })
+
+export const getProjectMetrics = (project?: string, days = 30) =>
+  get<ProjectMetricsResponse>('/metrics/projects', {
+    ...(project ? { project } : {}),
+    days: String(days)
+  })
+
+// Insight
+export const getInsightStatus = () =>
+  get<{ enabled: boolean; state: any; metrics: any; recent_patterns: any[]; recent_analyses: any[] }>('/insight/status')
+
+export const triggerInsightAnalysis = () =>
+  post<{ status: string; message: string }>('/insight/trigger', {})
+
+export const getInsightPatterns = (type?: string, minConfidence?: number, limit?: number) => {
+  const params: Record<string, string> = {}
+  if (type) params.type = type
+  if (minConfidence) params.min_confidence = String(minConfidence)
+  if (limit) params.limit = String(limit)
+  return get<{ patterns: any[]; count: number }>('/insight/patterns', params)
+}
+
+export const getInsightAnalyses = (type?: string, limit?: number) => {
+  const params: Record<string, string> = {}
+  if (type) params.type = type
+  if (limit) params.limit = String(limit)
+  return get<{ analyses: any[]; count: number }>('/insight/analyses', params)
+}
+
 // Rules
 export const listRules = () => get<RulesResponse>('/rules')
 export const getRule = (name: string) => get<RuleDef>(`/rules/${name}`)
