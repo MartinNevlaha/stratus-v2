@@ -74,13 +74,13 @@ func Default() Config {
 		},
 		MetricsBroadcastInterval: 30,
 		Insight: InsightConfig{
-			Enabled:       true,
+			Enabled:       false,
 			Interval:      1,
 			MaxProposals:  5,
 			MinConfidence: 0.7,
 			LLM: LLMConfig{
-				Provider:    "zai",
-				Model:       "glm-5",
+				Provider:    "",
+				Model:       "",
 				Timeout:     120,
 				MaxTokens:   16384,
 				Temperature: 0.7,

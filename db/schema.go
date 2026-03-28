@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS insight_feedback (
     impact_score REAL,
     measured_at TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    FOREIGN KEY (proposal_id) REFERENCES proposals(id)
+    FOREIGN KEY (proposal_id) REFERENCES insight_proposals(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_insight_feedback_proposal ON insight_feedback(proposal_id);
