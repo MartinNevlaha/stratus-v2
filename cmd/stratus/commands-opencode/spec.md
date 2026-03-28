@@ -31,16 +31,12 @@ curl -sS -X POST $BASE/api/workflows \
 - Use the `retrieve` MCP tool (corpus: code) to find existing patterns.
 - Use the `retrieve` MCP tool (corpus: governance) to check project rules and ADRs.
 
-**Plan the implementation:**
-
-1. Analyze the requirement from `$ARGUMENTS`
-2. Identify key files, existing patterns, and constraints
-3. Break the work into ordered tasks
-4. Write the plan to `docs/plans/<slug>.md`
-
 **Governance check — delegate to `@delivery-governance-checker`:**
 
-Ask the agent to review the plan at `docs/plans/<slug>.md` for governance compliance. Record the delegation:
+Ask the agent to review the requirement from `$ARGUMENTS` against project governance rules and ADRs:
+- Does this requirement conflict with any accepted ADRs?
+- Are there mandatory practices that must be followed for this type of feature?
+- Are there architectural constraints to consider?
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
@@ -48,7 +44,14 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -d '{"agent_id": "delivery-governance-checker"}'
 ```
 
-If checker returns `[must_update]` findings → update the plan accordingly before proceeding.
+If checker returns `[must_update]` findings → share findings with user and adjust requirements before proceeding.
+
+**Plan the implementation:**
+
+1. Analyze the requirement from `$ARGUMENTS`
+2. Identify key files, existing patterns, and constraints (from exploration and governance check)
+3. Break the work into ordered tasks
+4. Write the plan to `docs/plans/<slug>.md`
 
 **Set tasks once finalized:**
 

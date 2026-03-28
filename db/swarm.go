@@ -165,6 +165,29 @@ func (d *DB) ListMissions() ([]SwarmMission, error) {
 	return missions, rows.Err()
 }
 
+func (d *DB) CountPastMissions() (int, error) {
+	var count int
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM missions WHERE status IN ('complete', 'failed', 'aborted')`).Scan(&count)
+	return count, err
+}
+
+func (d *DB) ListPastMissions(offset, limit int) ([]SwarmMission, error) {
+	rows, err := d.sql.Query(`SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, created_at, updated_at FROM missions WHERE status IN ('complete', 'failed', 'aborted') ORDER BY updated_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list past missions: %w", err)
+	}
+	defer rows.Close()
+	var missions []SwarmMission
+	for rows.Next() {
+		var m SwarmMission
+		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		missions = append(missions, m)
+	}
+	return missions, rows.Err()
+}
+
 func (d *DB) DeleteMission(id string) error {
 	res, err := d.sql.Exec(`DELETE FROM missions WHERE id = ?`, id)
 	if err != nil {

@@ -8,11 +8,13 @@ import type {
   VersionInfo, 
   SwarmMission, 
   SwarmMissionDetail,
-  MetricsSummaryResponse,
-  WorkflowMetricsResponse,
-  DailyMetricsResponse,
-  AgentMetricsResponse,
-  ProjectMetricsResponse
+  AgentsResponse,
+  AgentDetail,
+  SkillsResponse,
+  SkillDef,
+  RulesResponse,
+  RuleDef,
+  PastItemsResponse
 } from './types'
 
 const BASE = '/api'
@@ -22,9 +24,17 @@ async function get<T>(path: string, params?: Record<string, string>): Promise<T>
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
   }
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
-  return res.json()
+  
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000)
+  
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+    return res.json()
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
@@ -84,6 +94,8 @@ export const triggerReIndex = () => post<{ status: string }>('/retrieve/index')
 // Workflows
 export const listWorkflows = () => get<WorkflowState[]>('/workflows')
 export const deleteWorkflow = (id: string) => del<{ deleted: boolean }>(`/workflows/${id}`)
+export const listPastItems = (limit = 20, offset = 0) =>
+  get<PastItemsResponse>('/past', { limit: String(limit), offset: String(offset) })
 
 export const startWorkflow = (id: string, type: 'spec' | 'bug', title: string, complexity = 'simple') =>
   post<WorkflowState>('/workflows', { id, type, title, complexity })
@@ -155,12 +167,25 @@ export async function uploadTerminalImage(blob: Blob, filename: string): Promise
   return res.json()
 }
 
-// Analytics
-export const getMetricsSummary = (days = 7) =>
-  get<MetricsSummaryResponse>('/metrics/summary', { days: String(days) })
+// Agents
+export const listAgents = () => get<AgentsResponse>('/agents')
+export const getAgent = (name: string) => get<AgentDetail>(`/agents/${name}`)
+export const createAgent = (data: { name: string; description: string; tools?: string[]; model?: string; skills?: string[]; body?: string }) =>
+  post<{ status: string; name: string }>('/agents', data)
+export const updateAgent = (name: string, data: { description: string; tools?: string[]; model?: string; skills?: string[]; body?: string }) =>
+  put<{ status: string; name: string }>(`/agents/${name}`, data)
+export const deleteAgent = (name: string) => del<{ status: string; name: string }>(`/agents/${name}`)
+export const assignSkills = (name: string, skills: string[]) =>
+  put<{ status: string; name: string; skills: string[] }>(`/agents/${name}/skills`, { skills })
 
-export const getWorkflowMetrics = (id: string) =>
-  get<WorkflowMetricsResponse>(`/workflows/${id}/metrics`)
+// Skills
+export const listSkills = () => get<SkillsResponse>('/skills')
+export const getSkill = (name: string) => get<SkillDef>(`/skills/${name}`)
+export const createSkill = (data: { name: string; description: string; disable_model_invocation?: boolean; argument_hint?: string; body?: string }) =>
+  post<{ status: string; name: string }>('/skills', data)
+export const updateSkill = (name: string, data: { description: string; disable_model_invocation?: boolean; argument_hint?: string; body?: string }) =>
+  put<{ status: string; name: string }>(`/skills/${name}`, data)
+export const deleteSkill = (name: string) => del<{ status: string; name: string }>(`/skills/${name}`)
 
 export const triggerAggregation = () =>
   post<{ status: string }>('/metrics/aggregate', {})
@@ -201,4 +226,13 @@ export const getInsightAnalyses = (type?: string, limit?: number) => {
   if (limit) params.limit = String(limit)
   return get<{ analyses: any[]; count: number }>('/insight/analyses', params)
 }
+
+// Rules
+export const listRules = () => get<RulesResponse>('/rules')
+export const getRule = (name: string) => get<RuleDef>(`/rules/${name}`)
+export const createRule = (data: { name: string; title?: string; body?: string }) =>
+  post<{ status: string; name: string }>('/rules', data)
+export const updateRule = (name: string, data: { title?: string; body?: string }) =>
+  put<{ status: string; name: string }>(`/rules/${name}`, data)
+export const deleteRule = (name: string) => del<{ status: string; name: string }>(`/rules/${name}`)
 

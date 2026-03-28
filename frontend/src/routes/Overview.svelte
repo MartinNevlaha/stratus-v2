@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { appState, dismissUpdate } from '$lib/store'
-  import { listWorkflows, deleteWorkflow, listMissions, getMission } from '$lib/api'
+  import { listWorkflows, deleteWorkflow, listMissions, getMission, listPastItems } from '$lib/api'
   import PhaseTimeline from '../components/PhaseTimeline.svelte'
-  import type { WorkflowState, SwarmMission, SwarmMissionDetail } from '$lib/types'
+  import type { WorkflowState, SwarmMission, SwarmMissionDetail, PastItem } from '$lib/types'
 
   let allWorkflows = $state<WorkflowState[]>([])
   let missions = $state<SwarmMission[]>([])
@@ -18,7 +18,13 @@
   let confirmTimer: ReturnType<typeof setTimeout> | null = null
 
   let activeWfs = $derived(allWorkflows.filter(w => !w.aborted && w.phase !== 'complete'))
-  let pastWfs   = $derived(allWorkflows.filter(w => w.aborted || w.phase === 'complete'))
+
+  let pastItems = $state<PastItem[]>([])
+  let pastTotal = $state(0)
+  let pastOffset = $state(0)
+  let pastLoading = $state(false)
+  let pastLoadSeq = 0
+  const PAST_LIMIT = 20
 
   function displayType(wf: WorkflowState): string {
     if (wf.title?.startsWith('[SWARM]')) return 'swarm'
@@ -27,7 +33,6 @@
   }
 
   let activeMissions = $derived(missions.filter(m => m.status !== 'complete' && m.status !== 'failed' && m.status !== 'aborted'))
-  let pastMissions = $derived(missions.filter(m => m.status === 'complete' || m.status === 'failed' || m.status === 'aborted'))
 
   let recentEvents = $derived(appState.dashboard?.recent_events ?? [])
   let vexorOk = $derived(appState.dashboard?.vexor_available ?? false)
@@ -41,6 +46,30 @@
     try {
       missions = await listMissions()
     } catch { /* ignore */ }
+  }
+
+  async function loadPastItems(append = false) {
+    if (pastLoading) return
+    const seq = ++pastLoadSeq
+    try {
+      pastLoading = true
+      const res = await listPastItems(PAST_LIMIT, append ? pastOffset : 0)
+      if (seq !== pastLoadSeq) return
+      if (append) {
+        pastItems = [...pastItems, ...res.items]
+      } else {
+        pastItems = res.items
+        pastOffset = 0
+      }
+      pastTotal = res.total
+      pastOffset = append ? pastOffset + res.items.length : res.items.length
+    } catch { /* ignore */ } finally {
+      if (seq === pastLoadSeq) pastLoading = false
+    }
+  }
+
+  async function loadMorePast() {
+    await loadPastItems(true)
   }
 
   async function handleDelete(id: string) {
@@ -58,6 +87,7 @@
     try {
       await deleteWorkflow(id)
       allWorkflows = allWorkflows.filter(w => w.id !== id)
+      loadPastItems()
     } catch (e) {
       console.error('delete workflow failed', e)
       await loadWorkflows()
@@ -142,7 +172,10 @@
     return `${done}/${assigned.length}`
   }
 
-  onMount(loadWorkflows)
+  onMount(() => {
+    loadWorkflows()
+    loadPastItems()
+  })
 
   $effect(() => {
     const _ = appState.dashboard
@@ -155,12 +188,12 @@
     if (_ === 0) return // skip initial
     listMissions().then(m => {
       missions = m
-      // Auto-expand if exactly 1 active mission and none expanded
       const active = m.filter(mi => mi.status !== 'complete' && mi.status !== 'failed' && mi.status !== 'aborted')
       if (active.length === 1 && !expandedMission) {
         toggleMission(active[0].id)
       }
     }).catch(() => {})
+    loadPastItems()
     if (expandedMission) {
       getMission(expandedMission).then(d => missionDetail = d).catch(() => {})
     }
@@ -448,40 +481,48 @@
     {/each}
   {/if}
 
-  <!-- Past workflows + missions -->
-  {#if pastWfs.length > 0 || pastMissions.length > 0}
-    <div class="section-title">Past</div>
-    {#each pastMissions as mission}
-      <div class="mission-card past">
-        <div class="mission-header-static">
-          <span class="mission-title">{mission.title}</span>
-          <span class="mission-phase" class:failed={mission.status === 'failed'}>{mission.status}</span>
-          <span class="wf-ts">{new Date(mission.updated_at).toLocaleDateString()}</span>
-        </div>
-      </div>
-    {/each}
-    {#each pastWfs as wf}
-      <div class="workflow-card past">
-        <div class="workflow-header">
-          <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
-          <span class="wf-id">{wf.id}</span>
-          <span class="wf-phase" class:aborted={wf.aborted}>{wf.aborted ? 'aborted' : wf.phase}</span>
-          <span class="wf-ts">{new Date(wf.updated_at).toLocaleDateString()}</span>
-          <div class="wf-actions">
-            {#if confirmDelete === wf.id}
-              <span class="confirm-label">Delete?</span>
-              <button class="btn-confirm" onclick={() => handleDelete(wf.id)}>Yes</button>
-              <button class="btn-cancel" onclick={cancelDelete}>No</button>
-            {:else}
-              <button class="btn-delete" onclick={() => handleDelete(wf.id)} title="Delete workflow">✕</button>
-            {/if}
+  <!-- Past workflows + missions (paginated) -->
+  {#if pastItems.length > 0}
+    <div class="section-title">Past ({pastTotal})</div>
+    {#each pastItems as item}
+      {#if item.kind === 'mission'}
+        {@const mission = item.data}
+        <div class="mission-card past">
+          <div class="mission-header-static">
+            <span class="mission-title">{mission.title}</span>
+            <span class="mission-phase" class:failed={mission.status === 'failed'}>{mission.status}</span>
+            <span class="wf-ts">{new Date(mission.updated_at).toLocaleDateString()}</span>
           </div>
         </div>
-        {#if wf.title}
-          <div class="wf-title">{wf.title}</div>
-        {/if}
-      </div>
+      {:else}
+        {@const wf = item.data}
+        <div class="workflow-card past">
+          <div class="workflow-header">
+            <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
+            <span class="wf-id">{wf.id}</span>
+            <span class="wf-phase" class:aborted={wf.aborted}>{wf.aborted ? 'aborted' : wf.phase}</span>
+            <span class="wf-ts">{new Date(wf.updated_at).toLocaleDateString()}</span>
+            <div class="wf-actions">
+              {#if confirmDelete === wf.id}
+                <span class="confirm-label">Delete?</span>
+                <button class="btn-confirm" onclick={() => handleDelete(wf.id)}>Yes</button>
+                <button class="btn-cancel" onclick={cancelDelete}>No</button>
+              {:else}
+                <button class="btn-delete" onclick={() => handleDelete(wf.id)} title="Delete workflow">✕</button>
+              {/if}
+            </div>
+          </div>
+          {#if wf.title}
+            <div class="wf-title">{wf.title}</div>
+          {/if}
+        </div>
+      {/if}
     {/each}
+    {#if pastOffset < pastTotal}
+      <button class="load-more-btn" onclick={loadMorePast} disabled={pastLoading}>
+        {pastLoading ? 'Loading…' : `Load more (${pastTotal - pastOffset} remaining)`}
+      </button>
+    {/if}
   {/if}
 
   <!-- Recent events -->
@@ -584,6 +625,14 @@
   .log-line.error-line { color: #f85149; }
 
   .section-title { font-size: 13px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .load-more-btn {
+    background: #21262d; border: 1px solid #30363d; color: #8b949e; cursor: pointer;
+    font-size: 12px; padding: 8px 16px; border-radius: 6px; text-align: center;
+    transition: background 0.1s, color 0.1s;
+  }
+  .load-more-btn:hover:not(:disabled) { background: #30363d; color: #c9d1d9; }
+  .load-more-btn:disabled { opacity: 0.5; cursor: default; }
 
   .events-list { display: flex; flex-direction: column; gap: 2px; }
   .event-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; font-size: 13px; }

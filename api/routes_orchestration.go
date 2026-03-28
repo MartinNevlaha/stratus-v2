@@ -3,7 +3,9 @@ package api
 import (
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 )
@@ -45,6 +47,12 @@ func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
+	s.hub.BroadcastJSON("workflow_started", map[string]any{
+		"workflow_id": body.ID,
+		"type":        body.Type,
+		"complexity":  body.Complexity,
+		"title":       body.Title,
+	})
 	json200(w, state)
 }
 
@@ -73,6 +81,16 @@ func (s *Server) handleTransitionPhase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
+	s.hub.BroadcastJSON("phase_changed", map[string]any{
+		"workflow_id": id,
+		"phase":       body.Phase,
+	})
+	if body.Phase == "complete" {
+		s.hub.BroadcastJSON("workflow_completed", map[string]any{
+			"workflow_id": id,
+			"success":     true,
+		})
+	}
 	json200(w, state)
 }
 
@@ -141,6 +159,10 @@ func (s *Server) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
+	s.hub.BroadcastJSON("task_completed", map[string]any{
+		"workflow_id": id,
+		"task_index":  index,
+	})
 	json200(w, state)
 }
 
@@ -263,12 +285,88 @@ func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {
 		delegated = []string{}
 	}
 	json200(w, map[string]any{
-		"workflow_id":       id,
-		"type":              state.Type,
-		"phase":             phase,
-		"delegated_agents":  delegated,
-		"total_tasks":       state.TotalTasks,
-		"current_task":      state.CurrentTask,
-		"tasks":             state.Tasks,
+		"workflow_id":      id,
+		"type":             state.Type,
+		"phase":            phase,
+		"delegated_agents": delegated,
+		"total_tasks":      state.TotalTasks,
+		"current_task":     state.CurrentTask,
+		"tasks":            state.Tasks,
+	})
+}
+
+type pastItem struct {
+	Kind      string      `json:"kind"`
+	Data      interface{} `json:"data"`
+	UpdatedAt string      `json:"-"`
+}
+
+func (s *Server) handleListPast(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 20)
+	offset := queryInt(r, "offset", 0)
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	wfCount, err := s.coordinator.CountPastWorkflows()
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	mCount, err := s.swarm.CountPastMissions()
+	if err != nil {
+		mCount = 0
+	}
+	total := wfCount + mCount
+
+	fetchLimit := offset + limit
+
+	workflows, err := s.coordinator.ListPastWorkflows(0, fetchLimit)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	missions, err := s.swarm.ListPastMissions(0, fetchLimit)
+	if err != nil {
+		missions = nil
+	}
+
+	items := make([]pastItem, 0, len(workflows)+len(missions))
+	for _, wf := range workflows {
+		items = append(items, pastItem{Kind: "workflow", Data: wf, UpdatedAt: wf.UpdatedAt})
+	}
+	for _, m := range missions {
+		items = append(items, pastItem{Kind: "mission", Data: m, UpdatedAt: m.UpdatedAt})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		ti, _ := time.Parse(time.RFC3339Nano, items[i].UpdatedAt)
+		tj, _ := time.Parse(time.RFC3339Nano, items[j].UpdatedAt)
+		return ti.After(tj)
+	})
+
+	if offset > len(items) {
+		offset = len(items)
+	}
+	end := offset + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	page := items[offset:end]
+	if page == nil {
+		page = []pastItem{}
+	}
+
+	json200(w, map[string]any{
+		"items":  page,
+		"total":  total,
+		"offset": offset,
+		"limit":  limit,
 	})
 }

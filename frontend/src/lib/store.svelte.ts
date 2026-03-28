@@ -11,7 +11,6 @@ interface AppState {
   updateInProgress: boolean
   updateLog: string[]
   updateError: string | null
-  // Swarm real-time state
   swarmUpdateCounter: number
   lastHeartbeats: Record<string, number>
   // Analytics real-time updates
@@ -26,7 +25,6 @@ interface AppState {
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
 
-// Svelte 5 reactive state — must live in .svelte.ts to use $state rune.
 export const appState: AppState = $state({
   dashboard: null,
   connected: false,
@@ -116,27 +114,6 @@ export function initStore() {
     if (data?.error) appState.updateLog.push(`Error: ${data.error}`)
   })
 
-  // Analytics real-time updates
-  wsClient.on('workflow_started', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
-  wsClient.on('phase_changed', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
-  wsClient.on('task_completed', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
-  wsClient.on('workflow_completed', () => {
-    appState.analyticsUpdateCounter++
-    appState.lastMetricsUpdate = Date.now()
-  })
-  
   // Swarm real-time events — targeted refresh instead of full dashboard reload
   const swarmTypes = ['mission_status', 'worker_spawned', 'worker_status', 'ticket_status', 'forge_update', 'signal_sent']
   for (const type of swarmTypes) {

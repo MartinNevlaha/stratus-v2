@@ -36,7 +36,7 @@ import (
 const (
 	sttContainerName = "stratus-stt"
 	sttImage         = "ghcr.io/speaches-ai/speaches:latest-cpu"
-	sttDefaultModel  = "Systran/faster-whisper-small"
+	sttDefaultModel  = "Systran/faster-whisper-large-v3"
 	sttHost          = "http://localhost:8011"
 )
 
@@ -329,18 +329,20 @@ func cmdHook() {
 	}
 	hookName := os.Args[2]
 	handlers := map[string]hooks.Handler{
-		"phase_guard":       hooks.PhaseGuard,
-		"delegation_guard":  hooks.DelegationGuard,
-		"workflow_enforcer": hooks.WorkflowEnforcer,
-		"watcher":           hooks.Watcher,
-		"teammate_idle":     hooks.TeammateIdle,
-		"task_completed":    hooks.TaskCompleted,
+		"phase_guard":              hooks.PhaseGuard,
+		"workflow_existence_guard": hooks.WorkflowExistenceGuard,
+		"delegation_guard":         hooks.DelegationGuard,
+		"workflow_enforcer":        hooks.WorkflowEnforcer,
+		"bash_write_guard":         hooks.BashWriteGuard,
+		"watcher":                  hooks.Watcher,
+		"teammate_idle":            hooks.TeammateIdle,
+		"task_completed":           hooks.TaskCompleted,
 	}
 	hooks.Run(hookName, handlers)
 }
 
 func parseInitFlags() (force bool, target string) {
-	target = "claude-code"
+	target = "both"
 	for i := 2; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--force":
@@ -377,7 +379,8 @@ func cmdInit() {
     "timeout_sec": 15
   },
   "stt": {
-    "endpoint": "http://localhost:8011"
+    "endpoint": "http://localhost:8011",
+    "model": "Systran/faster-whisper-large-v3"
   }
 }
 `
@@ -510,6 +513,7 @@ func printInitSummary(target string) {
   /security-review             — security audit (OWASP, secrets, injection)
   /frontend-design             — distinctive UI design guidance
   /react-native-best-practices — React Native / Expo performance patterns
+  /system-reminder             — read-only reminder for planning and review agents
   /e2e                         — Playwright E2E testing (setup→plan→generate→heal)`
 
 	const ccAgents = `Agents written to .claude/agents/:
@@ -563,8 +567,11 @@ Prompts written to .opencode/prompts/:
   playwright-test-healer.md`
 
 	const ocPlugin = `Plugin written to .opencode/plugin/stratus.ts:
-  phase_guard — blocks write tools during verify/review phases
-  watcher     — queues modified files for vexor reindexing`
+  phase_guard              — blocks write tools during verify/review phases
+  workflow_existence_guard — requires active workflow for Task delegation
+  delegation_guard         — enforces phase-agent matching for delivery agents
+  bash_write_guard         — blocks bash write commands for delivery agents without workflow
+  watcher                  — queues modified files for vexor reindexing`
 
 	const rules = `Rules written to .claude/rules/:
   review-verdict-format — structured PASS/FAIL verdicts
@@ -572,9 +579,11 @@ Prompts written to .opencode/prompts/:
   error-handling        — consistent error patterns`
 
 	const ccHooks = `Hooks registered in .claude/settings.json:
-  PreToolUse  phase_guard       — blocks write tools during review/verify
-  PreToolUse  delegation_guard  — requires active workflow for delivery agents
-  PostToolUse watcher           — queues modified files for vexor reindexing
+  PreToolUse  phase_guard              — blocks write tools during review/verify
+  PreToolUse  workflow_existence_guard — requires session-scoped active workflow for Task delegation
+  PreToolUse  delegation_guard         — applies delivery-agent delegation policy and phase-agent matching
+  PreToolUse  bash_write_guard         — blocks file-modifying bash commands for delivery agents without workflow
+  PostToolUse watcher                  — queues modified files for vexor reindexing
 
 Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar`
 
@@ -1065,6 +1074,12 @@ func writeOpenCodeConfig(projectRoot string) error {
 	}
 	existing["agent"] = agentSection
 
+	// Register plugin if not present
+	pluginSection, _ := existing["plugin"].([]any)
+	if len(pluginSection) == 0 {
+		existing["plugin"] = []any{".opencode/plugin/stratus.ts"}
+	}
+
 	// Remove stale "plugins" key from older Stratus versions — OpenCode
 	// auto-discovers local plugins from .opencode/plugins/.
 	delete(existing, "plugins")
@@ -1112,7 +1127,9 @@ func writeHooks(projectRoot string) error {
 			event: "PreToolUse",
 			hooks: []hookDef{
 				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
+				{"Task", "stratus hook workflow_existence_guard"},
 				{"Task", "stratus hook delegation_guard"},
+				{"Bash", "stratus hook bash_write_guard"},
 			},
 		},
 		{

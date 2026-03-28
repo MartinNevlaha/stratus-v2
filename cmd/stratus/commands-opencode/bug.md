@@ -62,7 +62,7 @@ Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
 
 ### 1c. Plan (if COMPLEX)
 
-If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "plan"`):
+If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "Plan"`):
 
 Pass full context:
 - The bug description from `$ARGUMENTS`
@@ -75,6 +75,21 @@ The Plan agent will return:
 - Files to modify with changes needed
 - Test coverage requirements
 - Risk mitigation strategies
+
+**Governance check (if COMPLEX) — delegate to `@delivery-governance-checker`:**
+
+Ask the agent to review the fix plan against project governance:
+- Does the proposed fix violate any architectural constraints?
+- Are there security or data handling requirements to consider?
+- Will this fix require updates to ADRs or documentation?
+
+```bash
+curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "delivery-governance-checker"}'
+```
+
+If checker returns `[must_update]` findings → incorporate into the plan before user approval.
 
 Present the plan to the user using the `question` tool. **Wait for explicit approval.**
 

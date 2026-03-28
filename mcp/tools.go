@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"strconv"
 )
 
 // RegisterTools registers Stratus MCP tools on the server.
@@ -120,7 +121,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			opt("project", "string", "Project name"),
 		),
 		Handler: func(args map[string]any) (any, error) {
-			return client.post("/api/events", args)
+			return client.post("/api/events", convertMemoryArgs(args))
 		},
 	})
 
@@ -166,7 +167,6 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			if id, ok := args["workflow_id"].(string); ok && id != "" {
 				return client.get(fmt.Sprintf("/api/workflows/%s/dispatch", id), nil)
 			}
-			// Return active workflow dispatch info (first active workflow)
 			dash, err := client.get("/api/dashboard/state", nil)
 			if err != nil {
 				return nil, err
@@ -181,6 +181,140 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 				}
 			}
 			return map[string]any{"workflows": []any{}, "message": "no active workflows"}, nil
+		},
+	})
+
+	// --- Workflow management tools ---
+
+	s.Register(Tool{
+		Name:        "register_workflow",
+		Description: "Register a new workflow. REQUIRED before any Task delegation to delivery agents. Use this to start a spec, bug, or e2e workflow.",
+		InputSchema: obj(
+			req("id", "string", "Unique workflow ID (use format: <type>-<slug>, e.g. 'bug-fix-login', 'spec-user-auth')"),
+			req("type", "string", "Workflow type: 'spec' | 'bug' | 'e2e'"),
+			req("title", "string", "Human-readable title for the workflow"),
+			opt("session_id", "string", "Claude session ID (use ${CLAUDE_SESSION_ID} for automatic tracking)"),
+			opt("complexity", "string", "For spec workflows: 'simple' | 'complex'"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			return client.post("/api/workflows", args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "transition_phase",
+		Description: "Transition a workflow to the next phase. Optionally set tasks and plan before transitioning. Validates against state machine rules.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID to transition"),
+			req("phase", "string", "Target phase (e.g. 'implement', 'verify', 'review', 'complete')"),
+			opt("tasks", "array", "Task titles to set before transitioning (for plan→implement)"),
+			opt("plan_content", "string", "Full markdown plan content to set before transitioning"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			phase, _ := args["phase"].(string)
+			if phase == "" {
+				return nil, fmt.Errorf("phase is required")
+			}
+
+			if tasks, err := convertTasksArg(args["tasks"]); err != nil {
+				return nil, fmt.Errorf("invalid tasks: %w", err)
+			} else if len(tasks) > 0 {
+				if _, err := client.post(fmt.Sprintf("/api/workflows/%s/tasks", id), map[string]any{"tasks": tasks}); err != nil {
+					return nil, fmt.Errorf("failed to set tasks: %w", err)
+				}
+			}
+
+			if plan, _ := args["plan_content"].(string); plan != "" {
+				if _, err := client.put(fmt.Sprintf("/api/workflows/%s/plan", id), map[string]any{"content": plan}); err != nil {
+					return nil, fmt.Errorf("failed to set plan: %w", err)
+				}
+			}
+
+			return client.put(fmt.Sprintf("/api/workflows/%s/phase", id), map[string]any{"phase": phase})
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "delegate_agent",
+		Description: "Record an agent delegation for the current workflow phase. Call this after delegating work via Task tool to track which agents worked on which phases.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+			req("agent_id", "string", "Agent being delegated (e.g. 'delivery-backend-engineer', 'delivery-code-reviewer')"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			return client.post(fmt.Sprintf("/api/workflows/%s/delegate", id), args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "start_task",
+		Description: "Mark a workflow task as in_progress. Call this before delegating a task to an agent.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+			req("task_index", "integer", "Zero-based task index"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			index := intArg(args, "task_index", -1)
+			if index < 0 {
+				return nil, fmt.Errorf("task_index is required")
+			}
+			return client.post(fmt.Sprintf("/api/workflows/%s/tasks/%d/start", id, index), nil)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "complete_task",
+		Description: "Mark a workflow task as done. Call this after an agent successfully completes a task.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+			req("task_index", "integer", "Zero-based task index"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			index := intArg(args, "task_index", -1)
+			if index < 0 {
+				return nil, fmt.Errorf("task_index is required")
+			}
+			return client.post(fmt.Sprintf("/api/workflows/%s/tasks/%d/complete", id, index), nil)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "get_workflow",
+		Description: "Get current workflow state including phase, tasks, and delegation history.",
+		InputSchema: obj(
+			req("workflow_id", "string", "Workflow ID"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			id, _ := args["workflow_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("workflow_id is required")
+			}
+			return client.get(fmt.Sprintf("/api/workflows/%s", id), nil)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "list_workflows",
+		Description: "List all active workflows.",
+		InputSchema: obj(),
+		Handler: func(args map[string]any) (any, error) {
+			return client.get("/api/dashboard/state", nil)
 		},
 	})
 
@@ -402,7 +536,11 @@ func obj(fields ...map[string]any) map[string]any {
 	required := []string{}
 	for _, f := range fields {
 		name := f["name"].(string)
-		properties[name] = map[string]any{"type": f["type"], "description": f["description"]}
+		prop := map[string]any{"type": f["type"], "description": f["description"]}
+		if f["type"] == "array" {
+			prop["items"] = map[string]any{"type": "string"}
+		}
+		properties[name] = prop
 		if r, ok := f["required"].(bool); ok && r {
 			required = append(required, name)
 		}
@@ -434,4 +572,54 @@ func intArg(args map[string]any, key string, def int) int {
 		return n
 	}
 	return def
+}
+
+func convertMemoryArgs(args map[string]any) map[string]any {
+	result := make(map[string]any)
+	for k, v := range args {
+		switch k {
+		case "importance":
+			if s, ok := v.(string); ok {
+				if f, err := strconv.ParseFloat(s, 64); err == nil {
+					result[k] = f
+					continue
+				}
+			}
+		case "tags":
+			if s, ok := v.(string); ok {
+				var arr []string
+				if json.Unmarshal([]byte(s), &arr) == nil {
+					result[k] = arr
+					continue
+				}
+			}
+		}
+		result[k] = v
+	}
+	return result
+}
+
+func convertTasksArg(v any) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	if arr, ok := v.([]any); ok {
+		result := make([]string, 0, len(arr))
+		for i, item := range arr {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			} else {
+				return nil, fmt.Errorf("task at index %d is not a string (got %T)", i, item)
+			}
+		}
+		return result, nil
+	}
+	if s, ok := v.(string); ok && s != "" {
+		var arr []string
+		if err := json.Unmarshal([]byte(s), &arr); err != nil {
+			return nil, fmt.Errorf("invalid JSON array: %w", err)
+		}
+		return arr, nil
+	}
+	return nil, nil
 }

@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/insight"
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
@@ -37,7 +37,7 @@ type Server struct {
 	syncedVersion        string
 	skippedFiles         []string
 	swarm                *swarm.Store
-	insight             *insight.Engine
+	insight              *insight.Engine
 	agentEvolutionEngine *agent_evolution.Engine
 	eventBus             events.EventBus
 	piEngine             *product_intelligence.Engine
@@ -81,7 +81,7 @@ func NewServer(
 		syncedVersion:        syncedVersion,
 		skippedFiles:         skippedFiles,
 		swarm:                swarmStore,
-		insight:             insightEngine,
+		insight:              insightEngine,
 		agentEvolutionEngine: agentEvolutionEng,
 		dirtyFiles:           make(map[string]struct{}),
 		dirtyCh:              make(chan struct{}, 1),
@@ -187,6 +187,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/retrieve/dirty", s.handleMarkDirty)
 
 	// Orchestration
+	mux.HandleFunc("GET /api/past", s.handleListPast)
 	mux.HandleFunc("GET /api/workflows", s.handleListWorkflows)
 	mux.HandleFunc("POST /api/workflows", s.handleStartWorkflow)
 	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
@@ -207,9 +208,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/learning/proposals", s.handleListProposals)
 	mux.HandleFunc("POST /api/learning/proposals", s.handleSaveProposal)
 	mux.HandleFunc("POST /api/learning/proposals/{id}/decide", s.handleDecideProposal)
-
-	// Dashboard
-	mux.HandleFunc("GET /api/dashboard/state", s.handleDashboardState)
 
 	// System
 	mux.HandleFunc("GET /api/system/version", s.handleVersion)
@@ -305,6 +303,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/pi/market-features", s.handlePIGetMarketFeatures)
 	mux.HandleFunc("POST /api/pi/market-research/refresh", s.handlePIRefreshMarketResearch)
 	mux.HandleFunc("GET /api/pi/dashboard", s.handlePIGetDashboard)
+
+	// Agents
+	mux.HandleFunc("GET /api/agents", s.handleListAgents)
+	mux.HandleFunc("GET /api/agents/{name}", s.handleGetAgent)
+	mux.HandleFunc("POST /api/agents", s.handleCreateAgent)
+	mux.HandleFunc("PUT /api/agents/{name}", s.handleUpdateAgent)
+	mux.HandleFunc("DELETE /api/agents/{name}", s.handleDeleteAgent)
+	mux.HandleFunc("PUT /api/agents/{name}/skills", s.handleAssignSkills)
+
+	// Skills
+	mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	mux.HandleFunc("GET /api/skills/{name}", s.handleGetSkill)
+	mux.HandleFunc("POST /api/skills", s.handleCreateSkill)
+	mux.HandleFunc("PUT /api/skills/{name}", s.handleUpdateSkill)
+	mux.HandleFunc("DELETE /api/skills/{name}", s.handleDeleteSkill)
+
+	// Rules
+	mux.HandleFunc("GET /api/rules", s.handleListRules)
+	mux.HandleFunc("GET /api/rules/{name}", s.handleGetRule)
+	mux.HandleFunc("POST /api/rules", s.handleCreateRule)
+	mux.HandleFunc("PUT /api/rules/{name}", s.handleUpdateRule)
+	mux.HandleFunc("DELETE /api/rules/{name}", s.handleDeleteRule)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

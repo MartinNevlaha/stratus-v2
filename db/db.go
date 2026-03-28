@@ -51,7 +51,7 @@ func (d *DB) migrate() error {
 	// "duplicate column" errors from ALTER TABLE.
 	for _, stmt := range migrations {
 		if _, err := d.sql.Exec(stmt); err != nil {
-			if !isDuplicateColumn(err) {
+			if !isMigrationError(err) {
 				return fmt.Errorf("migration: %w", err)
 			}
 		}
@@ -67,11 +67,79 @@ var migrations = []string{
 	`ALTER TABLE insight_patterns ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium'`,
 	`ALTER TABLE insight_patterns ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'`,
 	`CREATE INDEX IF NOT EXISTS idx_insight_events_source ON insight_events(source)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    last_analysis TEXT NOT NULL,
+    next_analysis TEXT NOT NULL,
+    patterns_detected INTEGER DEFAULT 0,
+    proposals_generated INTEGER DEFAULT 0,
+    proposals_accepted INTEGER DEFAULT 0,
+    acceptance_rate REAL DEFAULT 0,
+    model_version TEXT NOT NULL DEFAULT 'v1',
+    config_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M-%fZ', 'now'))
+)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_type TEXT NOT NULL,
+    pattern_name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    frequency INTEGER DEFAULT 1,
+    confidence REAL NOT NULL,
+    examples_json TEXT,
+    metadata_json TEXT,
+    last_seen TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_type ON openclaw_patterns(pattern_type)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_patterns_confidence ON openclaw_patterns(confidence DESC)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id TEXT NOT NULL,
+    feedback_type TEXT NOT NULL,
+    reason TEXT,
+    impact_score REAL,
+    measured_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (proposal_id) REFERENCES proposals(id)
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_feedback_proposal ON openclaw_feedback(proposal_id)`,
+	`
+CREATE TABLE IF NOT EXISTS openclaw_analyses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_type TEXT NOT NULL,
+    scope TEXT,
+    findings_json TEXT NOT NULL,
+    recommendations_json TEXT,
+    patterns_found INTEGER DEFAULT 0,
+    proposals_created INTEGER DEFAULT 0,
+    execution_time_ms INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_type ON openclaw_analyses(analysis_type)`,
+	`CREATE INDEX IF NOT EXISTS idx_openclaw_analyses_created ON openclaw_analyses(created_at DESC)`,
+	`
+-- Rebuild FTS5 index with trigram tokenizer
+DROP TABLE IF EXISTS docs_fts;
+CREATE VIRTUAL TABLE docs_fts USING fts5(
+    title, content, doc_type,
+    content='docs', content_rowid='id',
+    tokenize='trigram'
+);
+INSERT INTO docs_fts(rowid, title, content, doc_type)
+SELECT id, title, content, doc_type FROM docs;
+`,
 }
 
-func isDuplicateColumn(err error) bool {
-	// modernc.org/sqlite returns "duplicate column name: <col>" for ALTER TABLE ADD COLUMN
-	// when the column already exists.
+func isMigrationError(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
+	return strings.Contains(msg, "duplicate column") ||
+		strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "docs_fts")
 }

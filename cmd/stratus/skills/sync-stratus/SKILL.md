@@ -1,6 +1,7 @@
 ---
 name: sync-stratus
 description: "Stratus health check + integration. Audits agents, skills, rules, hooks, config, discovers custom skills, detects tech stack, mines conventions — then offers to apply integration patches."
+context: fork
 ---
 
 # /sync-stratus — Health Check & Integration
@@ -24,6 +25,7 @@ Check for `.mcp.json`:
 
 Check `.claude/settings.json` for hooks:
 - Is `stratus hook phase_guard` registered under `PreToolUse`?
+- Is `stratus hook workflow_existence_guard` registered under `PreToolUse`?
 - Is `stratus hook delegation_guard` registered under `PreToolUse`?
 
 ---
@@ -51,7 +53,7 @@ For each user-added skill (anything beyond the 3 expected):
 ### Step 2.5: Custom Skills Discovery
 
 **Stratus-owned skills** (baseline — these are installed by `stratus init`):
-`spec`, `spec-complex`, `bug`, `learn`, `sync-stratus`, `vexor-cli`, `governance-db`, `run-tests`, `code-review`, `find-bugs`, `security-review`, `create-architecture`, `explain-architecture`, `frontend-design`, `react-native-best-practices`
+`spec`, `spec-complex`, `bug`, `learn`, `sync-stratus`, `vexor-cli`, `governance-db`, `run-tests`, `code-review`, `find-bugs`, `security-review`, `create-architecture`, `explain-architecture`, `frontend-design`, `react-native-best-practices`, `system-reminder`
 
 For each skill in `.claude/skills/` that is NOT in the above list:
 1. Read its `SKILL.md` — record `name`, `description`, `context` field

@@ -61,101 +61,37 @@ Based on `type` and `phase` from the dispatch response:
 
 ---
 
-### spec — `plan` phase
-Tasks exist but implementation hasn't started. Present the task list to the user and confirm.
-Transition to implement:
-```bash
-curl -sS -X PUT $BASE/api/workflows/<id>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "implement"}'
-```
-Then continue with the implement flow below.
+All phase transitions use: `curl -sS -X PUT $BASE/api/workflows/<id>/phase -H 'Content-Type: application/json' -d '{"phase": "<next>"}'`
 
----
+### spec — `plan`
+Present task list, confirm with user. Transition to `implement`, then continue with implement below.
 
-### spec — `discovery` phase (complex workflow)
-Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis, constraints, technology landscape.
-Record delegation. Transition to design:
-```bash
-curl -sS -X PUT $BASE/api/workflows/<id>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "design"}'
-```
-Then continue with the design phase below.
+### spec — `discovery` (complex)
+Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis. Record delegation. Transition to `design`.
 
----
+### spec — `design` (complex)
+Delegate to `delivery-system-architect` (Task tool) — component design, API contracts. Produce/update `docs/plans/<id>-design.md`. Record delegation. Transition to `plan`.
 
-### spec — `design` phase (complex workflow)
-Delegate to `delivery-system-architect` (Task tool) — component design, API contracts, data models.
-Produce / update the Technical Design Document at `docs/plans/<id>-design.md`.
-Record delegation. Transition to plan:
-```bash
-curl -sS -X PUT $BASE/api/workflows/<id>/phase \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "plan"}'
-```
-Then continue with the plan phase below.
+### spec — `implement`
+Find first `pending`/`in_progress` task. Start it: `POST $BASE/api/workflows/<id>/tasks/<index>/start`. Route to delivery agent (same routing as /spec). Delegate, record, complete, repeat until all done. Transition to `verify`.
 
----
+### spec — `verify`
+Delegate to `delivery-code-reviewer`. If `[must_fix]` → back to `implement`. On pass → `learn`.
 
-### spec — `implement` phase
-Find the first task with status `"pending"` or `"in_progress"`. That is the next task to work on.
+### spec — `learn`
+Save memory events. Create learning candidates via `POST $BASE/api/learning/candidates`. Transition to `complete`.
 
-Mark it started:
-```bash
-curl -sS -X POST $BASE/api/workflows/<id>/tasks/<index>/start
-```
+### bug — `analyze`
+Delegate to `delivery-debugger`. Present diagnosis, get approval. Transition to `fix`.
 
-Route to the correct delivery agent based on task title (same routing as `/spec`):
-- Backend, API, handlers → `delivery-backend-engineer`
-- Frontend, UI, components → `delivery-frontend-engineer`
-- Database, migrations, schema → `delivery-database-engineer`
-- Infrastructure, CI/CD → `delivery-devops-engineer`
-- Architecture, ADRs → `delivery-system-architect`
-- Testing, coverage → `delivery-qa-engineer`
-- Unknown / mixed → `delivery-implementation-expert`
+### bug — `fix`
+Delegate to appropriate agent. Record delegation. Transition to `review`.
 
-Delegate via Task tool, record delegation, complete task, move to next pending task.
-Continue until all tasks are done, then transition to verify.
-
----
-
-### spec — `verify` phase
-Delegate to `delivery-code-reviewer` (Task tool).
-Record delegation. If `[must_fix]` issues found → transition back to implement, fix, re-verify.
-On pass → transition to learn.
-
----
-
-### spec — `learn` phase
-Save memory events for key decisions made during the workflow.
-Create learning candidates via `POST $BASE/api/learning/candidates`.
-Transition to complete.
-
----
-
-### bug — `analyze` phase
-Delegate to `delivery-debugger` (Task tool) for root cause analysis.
-Record delegation. Present diagnosis to user. Get explicit approval before fixing.
-On approval → transition to fix.
-
----
-
-### bug — `fix` phase
-Delegate to the appropriate delivery agent based on bug type.
-Record delegation. Transition to review.
-
----
-
-### bug — `review` phase
-Delegate to `delivery-code-reviewer` (Task tool).
-Record delegation. If issues → transition back to fix (max 5 loops).
-On pass → transition to complete.
-
----
+### bug — `review`
+Delegate to `delivery-code-reviewer`. If issues → back to `fix` (max 5 loops). On pass → `complete`.
 
 ### `complete` or `aborted`
-Inform the user: "This workflow is already **<phase>** — there's nothing to resume."
+Inform user: "This workflow is already **<phase>** — nothing to resume."
 
 ---
 

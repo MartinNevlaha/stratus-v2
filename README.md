@@ -56,7 +56,7 @@ Out of the box, Claude Code and OpenCode have no memory across sessions, no stru
 - **Bug workflow**: `analyze → fix → review → complete` (review loops back to fix)
 - **E2E workflow**: `setup → plan → generate → heal → complete` (heal loops back to generate)
 - **Task tracking** — per-workflow task list with progress visible in dashboard
-- **Guard hooks** — `phase_guard` blocks invalid transitions, `delegation_guard` enforces agent rules
+- **Guard hooks** — `phase_guard` blocks invalid transitions, `workflow_existence_guard` requires a registered workflow before delegation, `delegation_guard` enforces agent rules
 
 ### Multi-Agent Swarm
 
@@ -126,11 +126,63 @@ Each agent runs as an OpenCode subagent with fine-grained Playwright MCP tool pe
 - **Voice input (STT)** — talk instead of type: describe a feature, dictate a bug report, or think out loud while your hands stay on code. One click to record, one click to transcribe. Runs locally via faster-whisper — no cloud, no API keys, no latency
 - **Real-time** — all updates via WebSocket, no polling
 
+### Analytics Dashboard
+
+Real-time metrics visualization for workflow performance:
+
+**Components:**
+- **Summary Cards** — Total Workflows, Success Rate, Avg Duration, Tasks Completed
+- **Workflow Trend Chart** — Line chart showing completed workflows over time
+- **Agent Performance Chart** — Bar chart of tasks completed per agent
+- **Success Rate Distribution** — Doughnut chart (High ≥80%, Medium 50-80%, Low <50%, Failed 0%)
+- **Task by Domain** — Stacked bar chart showing success/failed tasks grouped by agent domain
+- **Daily Metrics Table** — Historical metrics with newest first
+- **Agent Performance Cards** — Per-agent stats (tasks, success rate, avg time)
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────┐
+│                   FRONTEND                          │
+│  Analytics.svelte                                   │
+│  ├── onMount() → loadMetrics()                     │
+│  ├── $effect() → WebSocket updates (debounced 2s)  │
+│  └── generateChartData() → 4 Chart.js charts       │
+└─────────────────────────────────────────────────────┘
+                        │
+                        │ HTTP GET /api/metrics/*
+                        ▼
+┌─────────────────────────────────────────────────────┐
+│                   BACKEND                           │
+│  api/routes_analytics.go                            │
+│  ├── GET /api/metrics/summary?days=7              │
+│  ├── GET /api/metrics/daily?limit=30              │
+│  ├── GET /api/metrics/agents?days=30              │
+│  └── GET /api/metrics/export?days=30 (CSV)        │
+└─────────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────┐
+│                   DATABASE                          │
+│  db/metrics.go + db/aggregator.go                   │
+│  Tables: daily_metrics, agent_metrics              │
+│  AggregateYesterday() runs at server start         │
+└─────────────────────────────────────────────────────┘
+```
+
+**Data Flow:**
+1. Page load → 3 parallel API calls (summary, daily, agents)
+2. WebSocket event → `analyticsUpdateCounter++` → debounced reload (2s)
+3. LIVE badge shows for 30s after last WebSocket update
+4. Charts auto-update with real data; "No Data" fallback when empty
+
+**Time Range:** 7d / 30d / 90d selector with smart reload (skips if already selected)
+
 ### Hooks
 | Hook | Behaviour |
 |------|-----------|
 | `phase_guard` | Blocks invalid workflow phase transitions before they reach the DB |
-| `delegation_guard` | Enforces which agents can be delegated to in each phase |
+| `workflow_existence_guard` | Blocks Task delegation when the current session has no active workflow |
+| `delegation_guard` | Applies delivery-agent delegation policy for the active session workflow |
 | `workflow_enforcer` | Ensures agent follows active workflow phase |
 | `watcher` | Re-indexes governance docs on every file write |
 
@@ -300,6 +352,20 @@ POST   /api/learning/proposals               Create a proposal
 POST   /api/learning/proposals/{id}/decide   Accept / reject / snooze / ignore
 ```
 
+### Analytics
+```
+GET    /api/metrics/summary        Summary metrics (total workflows, success rate, avg duration)
+GET    /api/metrics/daily          Daily metrics history (limit up to 365)
+GET    /api/metrics/agents         Agent performance metrics
+GET    /api/metrics/workflows/{id} Metrics for a specific workflow
+GET    /api/metrics/export         Export metrics as CSV
+GET    /api/metrics/report/{type}  Reports: daily / weekly / monthly
+GET    /api/metrics/predictions    Trend predictions and bottleneck analysis
+GET    /api/metrics/anomalies      Detected anomalies with alert status
+GET    /api/metrics/trends         Trend analysis with top performers
+POST   /api/metrics/aggregate      Trigger daily aggregation manually
+```
+
 ### Swarm
 ```
 POST   /api/swarm/missions                          Create mission
@@ -362,7 +428,7 @@ WS     /api/terminal/ws        PTY terminal I/O
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "Systran/faster-whisper-small"
+    "model": "Systran/faster-whisper-large-v3"
   }
 }
 ```
@@ -390,13 +456,13 @@ The fastest way to give instructions to an AI agent is to just say them out loud
 3. Click again — audio is transcribed and injected at the terminal cursor
 4. Press Enter
 
-The container (`stratus-stt`) starts with `stratus serve` and stops when you exit. First launch pulls the model (~244 MB); subsequent starts are instant.
+The container (`stratus-stt`) starts with `stratus serve` and stops when you exit. First launch pulls the model (~3 GB with the default `large-v3`); subsequent starts are instant.
 
 | Model | Size | Speed | Use case |
 |-------|------|-------|----------|
-| `Systran/faster-whisper-small` | ~244 MB | ~1s | Default — fast iteration, quick prompts |
+| `Systran/faster-whisper-small` | ~244 MB | ~1s | Fast iteration, quick prompts |
 | `Systran/faster-whisper-medium` | ~769 MB | ~2s | Longer dictation, technical terms |
-| `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Maximum accuracy, heavy accents |
+| `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Default — maximum accuracy, heavy accents |
 
 Set `stt.model` in `.stratus.json` to switch models. **Docker is only required for STT** — all other Stratus features work without it.
 
@@ -412,7 +478,7 @@ orchestration/      Pure phase state machine (spec + bug + e2e workflows)
 swarm/              Swarm engine: worktree manager, dispatch, signal bus, store
 api/                HTTP server, all REST routes, WebSocket hub, SPA handler
 mcp/                MCP stdio server (JSON-RPC, 15 tools) — thin HTTP proxy
-hooks/              Hook handlers: phase_guard, delegation_guard, workflow_enforcer
+hooks/              Hook handlers: phase_guard, workflow_existence_guard, delegation_guard, workflow_enforcer
 terminal/           PTY session management + WebSocket I/O (creack/pty + xterm.js)
 vexor/              CLI wrapper for Vexor code embedding
 frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
@@ -424,7 +490,7 @@ frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
 - **State machine is pure** — `orchestration/state.go` defines `validTransitions`; every phase change is validated before any DB write
 - **Single SQLite connection** — `db.DB` is the shared connection passed to all subsystems; no connection pools, no ORMs
 
-### Database (1 SQLite, 16 tables)
+### Database (1 SQLite, 20+ tables)
 
 | Table | Purpose |
 |-------|---------|
@@ -436,6 +502,8 @@ frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
 | `candidates` | Learning pattern candidates |
 | `proposals` | Learning proposals (rule / ADR / template) |
 | `workflows` | Orchestration state machine |
+| `workflow_metrics` | Per-workflow performance metrics |
+| `daily_metrics` | Aggregated daily statistics |
 | `missions` | Swarm missions with strategy + outcome |
 | `workers` | Swarm workers + git worktree info |
 | `tickets` | Atomic work units with domain + dependencies |
@@ -443,6 +511,10 @@ frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
 | `file_reservations` | Atomic file pattern locks (conflict prevention) |
 | `swarm_checkpoints` | Coordinator state snapshots for crash recovery |
 | `forge_entries` | Merge queue — worker branches awaiting integration |
+| `openclaw_state` | OpenClaw state management |
+| `openclaw_patterns` | OpenClaw pattern storage |
+| `openclaw_feedback` | OpenClaw feedback records |
+| `openclaw_analyses` | OpenClaw analysis results |
 | `schema_versions` | Applied migration tracking |
 
 ---

@@ -51,6 +51,16 @@ func (s *Store) ListMissions() ([]db.SwarmMission, error) {
 	return s.db.ListMissions()
 }
 
+// CountPastMissions returns the total number of completed/failed/aborted missions.
+func (s *Store) CountPastMissions() (int, error) {
+	return s.db.CountPastMissions()
+}
+
+// ListPastMissions returns past missions with offset/limit pagination.
+func (s *Store) ListPastMissions(offset, limit int) ([]db.SwarmMission, error) {
+	return s.db.ListPastMissions(offset, limit)
+}
+
 // UpdateMissionStatus updates the mission status.
 func (s *Store) UpdateMissionStatus(id, status string) error {
 	return s.db.UpdateMissionStatus(id, status)

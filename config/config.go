@@ -70,7 +70,7 @@ func Default() Config {
 		},
 		STT: STTConfig{
 			Endpoint: "http://localhost:8011",
-			Model:    "Systran/faster-whisper-small",
+			Model:    "Systran/faster-whisper-large-v3",
 		},
 		MetricsBroadcastInterval: 30,
 		Insight: InsightConfig{
