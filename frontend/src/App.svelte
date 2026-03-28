@@ -8,7 +8,7 @@
   import Agents from './routes/Agents.svelte'
   import Terminal from './components/Terminal.svelte'
   
-  let activeTab = $state<'overview' | 'agents' | 'memory' | 'retrieval' | 'learning' | 'terminal'>('overview')
+  let activeTab = $state<'overview' | 'agents' | 'analytics' | 'memory' | 'retrieval' | 'learning' | 'terminal'>('overview')
   
   onMount(() => {
     initStore()

@@ -100,11 +100,15 @@
     try {
       const [agentsData, skillsData, rulesData] = await Promise.all([listAgents(), listSkills(), listRules()])
       agents = agentsData
-      skills = skillsData.skills ?? []
-      rules = rulesData.rules ?? []
+      skills = skillsData?.skills ?? []
+      rules = rulesData?.rules ?? []
       error = null
     } catch (e: any) {
-      error = e.message
+      console.error('Failed to load data:', e)
+      error = e.message || 'Failed to load data'
+      if (!agents) {
+        agents = { claude_code: [], opencode: [] }
+      }
     } finally {
       loading = false
     }
