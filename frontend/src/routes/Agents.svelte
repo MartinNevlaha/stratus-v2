@@ -428,8 +428,11 @@
                   {#if ocAgent}
                     <span class="badge oc" title="OpenCode">OC</span>
                   {/if}
-                  {#if primary?.model}
-                    <span class="badge model">{primary.model}</span>
+                  {#if ccAgent?.model}
+                    <span class="badge model" title="Claude Code model">{ccAgent.model}</span>
+                  {/if}
+                  {#if ocAgent?.model && ocAgent.model !== ccAgent?.model}
+                    <span class="badge model oc-model" title="OpenCode model">{ocAgent.model}</span>
                   {/if}
                 </div>
               </div>
@@ -1065,6 +1068,7 @@
   .badge.cc { background: #1f3a5f; color: #58a6ff; }
   .badge.oc { background: #3a2f1f; color: #d29922; }
   .badge.model { background: #1f3a1f; color: #3fb950; }
+  .badge.model.oc-model { background: #1a2f3a; color: #58a6ff; }
   .badge.locked { background: #3a1f2f; }
   .badge.resources { background: #2f1f3a; }
 
