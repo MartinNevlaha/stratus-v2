@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { getGuardianConfig, updateGuardianConfig, testGuardianLLM } from '$lib/api'
-  import type { GuardianConfig } from '$lib/types'
+  import { getGuardianConfig, updateGuardianConfig, testGuardianLLM, getInsightConfig, updateInsightConfig } from '$lib/api'
+  import type { GuardianConfig, InsightConfig } from '$lib/types'
 
   let cfg = $state<GuardianConfig>({
     enabled: true,
@@ -17,6 +17,14 @@
     llm_max_tokens: 1024,
   })
 
+  let insightCfg = $state<InsightConfig>({
+    enabled: false,
+    interval: 1,
+    max_proposals: 5,
+    min_confidence: 0.7,
+    llm: { provider: '', model: '', api_key: '', base_url: '', timeout: 120, max_tokens: 16384, temperature: 0.7 },
+  })
+
   let loading = $state(true)
   let saving = $state(false)
   let testing = $state(false)
@@ -26,9 +34,19 @@
   let testError = $state<string | null>(null)
   let apiKeyChanged = $state(false)
 
+  let insightSaving = $state(false)
+  let insightSaveMsg = $state<string | null>(null)
+  let insightSaveError = $state<string | null>(null)
+  let insightApiKeyChanged = $state(false)
+
   onMount(async () => {
     try {
-      cfg = await getGuardianConfig()
+      const [guardianCfg, iCfg] = await Promise.all([
+        getGuardianConfig(),
+        getInsightConfig(),
+      ])
+      cfg = guardianCfg
+      insightCfg = iCfg
     } catch (e) {
       saveError = 'Failed to load config'
     } finally {
@@ -72,6 +90,22 @@
       testing = false
     }
   }
+
+  async function saveInsight() {
+    insightSaving = true
+    insightSaveMsg = null
+    insightSaveError = null
+    try {
+      insightCfg = await updateInsightConfig(insightCfg)
+      insightSaveMsg = 'Saved — restart stratus serve to apply'
+      insightApiKeyChanged = false
+      setTimeout(() => { insightSaveMsg = null }, 5000)
+    } catch (e) {
+      insightSaveError = e instanceof Error ? e.message : 'Save failed'
+    } finally {
+      insightSaving = false
+    }
+  }
 </script>
 
 <div class="settings-root">
@@ -80,6 +114,96 @@
   {#if loading}
     <p class="muted">Loading…</p>
   {:else}
+    <section class="card">
+      <h3>Insight — AI Coach</h3>
+      <p class="section-desc">
+        Autonomous pattern detection, proposal generation, scorecards, and routing recommendations.
+        Requires server restart after enabling/disabling.
+      </p>
+
+      <div class="form-group row">
+        <label class="checkbox-label">
+          <input type="checkbox" bind:checked={insightCfg.enabled} />
+          Enabled
+        </label>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Analysis interval (hours)</label>
+          <input type="number" min="1" max="168" bind:value={insightCfg.interval} />
+        </div>
+        <div class="form-group">
+          <label>Max proposals per run</label>
+          <input type="number" min="1" max="50" bind:value={insightCfg.max_proposals} />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Min confidence (0–1)</label>
+          <input type="number" min="0" max="1" step="0.05" bind:value={insightCfg.min_confidence} />
+        </div>
+      </div>
+
+      <div class="insight-llm-section">
+        <h4>LLM (optional — for Product Intelligence)</h4>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Provider</label>
+            <input type="text" placeholder="anthropic, openai, zai" bind:value={insightCfg.llm.provider} />
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <input type="text" placeholder="claude-3-5-haiku, gpt-4o" bind:value={insightCfg.llm.model} />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Base URL</label>
+          <input type="url" placeholder="https://api.anthropic.com" bind:value={insightCfg.llm.base_url} />
+        </div>
+
+        <div class="form-group">
+          <label>API Key</label>
+          <input
+            type="password"
+            placeholder={insightCfg.llm.api_key === '***' ? '(saved — enter new value to change)' : ''}
+            bind:value={insightCfg.llm.api_key}
+            oninput={() => { insightApiKeyChanged = true }}
+          />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Temperature</label>
+            <input type="number" min="0" max="2" step="0.05" bind:value={insightCfg.llm.temperature} />
+          </div>
+          <div class="form-group">
+            <label>Max tokens</label>
+            <input type="number" min="64" max="65536" bind:value={insightCfg.llm.max_tokens} />
+          </div>
+          <div class="form-group">
+            <label>Timeout (seconds)</label>
+            <input type="number" min="10" max="600" bind:value={insightCfg.llm.timeout} />
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" onclick={saveInsight} disabled={insightSaving}>
+          {insightSaving ? 'Saving…' : 'Save Insight settings'}
+        </button>
+        {#if insightSaveMsg}
+          <span class="ok-msg">{insightSaveMsg}</span>
+        {/if}
+        {#if insightSaveError}
+          <span class="err-msg">{insightSaveError}</span>
+        {/if}
+      </div>
+    </section>
+
     <section class="card">
       <h3>Guardian — Ambient Codebase Monitor</h3>
       <p class="section-desc">Background checks that surface codebase health issues proactively.</p>
@@ -184,7 +308,7 @@
 
     <div class="actions">
       <button class="btn-primary" onclick={save} disabled={saving}>
-        {saving ? 'Saving…' : 'Save settings'}
+        {saving ? 'Saving…' : 'Save Guardian settings'}
       </button>
       {#if saveMsg}
         <span class="ok-msg">{saveMsg}</span>
@@ -213,6 +337,12 @@
     font-size: 0.95rem;
     color: #e6edf3;
     margin: 0 0 4px;
+  }
+
+  h4 {
+    font-size: 0.85rem;
+    color: #8b949e;
+    margin: 12px 0 8px;
   }
 
   .section-desc {
@@ -330,4 +460,10 @@
   .err-msg { color: #f85149; font-size: 0.82rem; }
 
   .muted { color: #8b949e; font-size: 0.85rem; }
+
+  .insight-llm-section {
+    border-top: 1px solid #21262d;
+    margin-top: 8px;
+    padding-top: 4px;
+  }
 </style>

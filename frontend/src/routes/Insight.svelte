@@ -3,6 +3,7 @@
 	import { appState } from '$lib/store'
 
 	let loading = $state(true)
+	let enabled = $state(false)
 	let error = $state<string | null>(null)
 	let dashboard = $state<any>(null)
 	let patterns = $state<any[]>([])
@@ -28,13 +29,23 @@
 	let patternSeverityFilter = $state('')
 
 	onMount(async () => {
-		await Promise.all([
-			loadDashboard(),
-			loadPatterns(),
-			loadAnalyses(),
-			loadProposals(),
-			loadRoutingRecommendations()
-		])
+		try {
+			const statusRes = await fetch('/api/insight/status')
+			if (statusRes.ok) {
+				const status = await statusRes.json()
+				enabled = status.enabled === true
+			}
+		} catch {}
+
+		if (enabled) {
+			await Promise.all([
+				loadDashboard(),
+				loadPatterns(),
+				loadAnalyses(),
+				loadProposals(),
+				loadRoutingRecommendations()
+			])
+		}
 		loading = false
 	})
 
@@ -336,8 +347,15 @@
 		</div>
 	{/if}
 
-	{#if loading && !dashboard}
+	{#if loading}
 		<div class="loading">Loading Insight status...</div>
+	{:else if !enabled}
+		<div class="disabled-banner">
+			<div class="disabled-icon">&#x1f6c8;</div>
+			<h3>Insight is not enabled</h3>
+			<p>Enable Insight in <strong>Settings</strong>, then restart <code>stratus serve</code> to activate the AI Coach engine.</p>
+			<p class="disabled-hint">Once enabled, Insight will automatically detect patterns, generate improvement proposals, compute agent scorecards, and provide routing recommendations.</p>
+		</div>
 	{:else}
 		<div class="dashboard">
 			<!-- Dashboard Summary -->
@@ -805,6 +823,48 @@
 		padding: 2rem;
 		max-width: 1400px;
 		margin: 0 auto;
+	}
+
+	.disabled-banner {
+		text-align: center;
+		padding: 60px 40px;
+		color: #8b949e;
+	}
+
+	.disabled-banner .disabled-icon {
+		font-size: 2.5rem;
+		margin-bottom: 12px;
+	}
+
+	.disabled-banner h3 {
+		color: #c9d1d9;
+		font-size: 1.1rem;
+		margin: 0 0 10px;
+	}
+
+	.disabled-banner p {
+		font-size: 0.85rem;
+		line-height: 1.5;
+		margin: 0 0 8px;
+	}
+
+	.disabled-banner code {
+		background: #161b22;
+		border: 1px solid #30363d;
+		border-radius: 3px;
+		padding: 1px 5px;
+		font-size: 0.82rem;
+		color: #79c0ff;
+	}
+
+	.disabled-banner strong {
+		color: #c9d1d9;
+	}
+
+	.disabled-hint {
+		color: #6e7681;
+		font-size: 0.78rem !important;
+		margin-top: 16px !important;
 	}
 
 	header {

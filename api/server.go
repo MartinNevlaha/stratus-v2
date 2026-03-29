@@ -264,6 +264,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
 
 	// Insight
+	mux.HandleFunc("GET /api/insight/config", s.handleGetInsightConfig)
+	mux.HandleFunc("PUT /api/insight/config", s.handleUpdateInsightConfig)
 	mux.HandleFunc("GET /api/insight/status", s.handleGetInsightStatus)
 	mux.HandleFunc("POST /api/insight/trigger", s.handleTriggerInsightAnalysis)
 	mux.HandleFunc("GET /api/insight/patterns", s.handleGetInsightPatterns)

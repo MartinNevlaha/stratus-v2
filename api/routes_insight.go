@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
+	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 )
@@ -34,7 +36,7 @@ func (s *Server) handleGetInsightStatus(w http.ResponseWriter, r *http.Request) 
 	}
 
 	status := map[string]any{
-		"enabled":         true,
+		"enabled":         s.insight != nil,
 		"state":           state,
 		"metrics":         metrics,
 		"recent_patterns": patterns,
@@ -642,4 +644,39 @@ func (s *Server) handleTestLLMConnection(w http.ResponseWriter, r *http.Request)
 		"input_tokens":  resp.InputTokens,
 		"output_tokens": resp.OutputTokens,
 	})
+}
+
+// GET /api/insight/config
+func (s *Server) handleGetInsightConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfg.Insight
+	masked := cfg
+	if masked.LLM.APIKey != "" {
+		masked.LLM.APIKey = "***"
+	}
+	json200(w, masked)
+}
+
+// PUT /api/insight/config
+func (s *Server) handleUpdateInsightConfig(w http.ResponseWriter, r *http.Request) {
+	var incoming config.InsightConfig
+	if err := decodeBody(r, &incoming); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+
+	if incoming.LLM.APIKey == "***" {
+		incoming.LLM.APIKey = s.cfg.Insight.LLM.APIKey
+	}
+
+	s.cfg.Insight = incoming
+	if err := s.cfg.Save(filepath.Join(s.projectRoot, ".stratus.json")); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "save config: "+err.Error())
+		return
+	}
+
+	masked := incoming
+	if masked.LLM.APIKey != "" {
+		masked.LLM.APIKey = "***"
+	}
+	json200(w, masked)
 }

@@ -20,6 +20,7 @@ import type {
   AnalysisResult,
   GuardianAlert,
   GuardianConfig,
+  InsightConfig,
   MetricsSummary,
   DailyMetricsResponse,
   AgentMetricsResponse,
@@ -273,3 +274,7 @@ export const updateGuardianConfig = (cfg: GuardianConfig) =>
 export const runGuardianScan = () => post<{ ok: boolean }>('/guardian/run', {})
 export const testGuardianLLM = (cfg: Partial<GuardianConfig>) =>
   post<{ ok: boolean }>('/guardian/test-llm', cfg)
+
+export const getInsightConfig = () => get<InsightConfig>('/insight/config')
+export const updateInsightConfig = (cfg: InsightConfig) =>
+  put<InsightConfig>('/insight/config', cfg)

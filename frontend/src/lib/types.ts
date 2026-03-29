@@ -378,3 +378,21 @@ export interface GuardianConfig {
   llm_temperature: number
   llm_max_tokens: number
 }
+
+export interface InsightLLMConfig {
+  provider: string
+  model: string
+  api_key: string
+  base_url: string
+  timeout: number
+  max_tokens: number
+  temperature: number
+}
+
+export interface InsightConfig {
+  enabled: boolean
+  interval: number
+  max_proposals: number
+  min_confidence: number
+  llm: InsightLLMConfig
+}
