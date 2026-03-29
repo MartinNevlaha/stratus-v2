@@ -174,6 +174,16 @@ func (c Config) ProjectDataDir() string {
 func Load() Config {
 	cfg := Default()
 
+	// Load .stratus.json — walk up from cwd to find it (like git does).
+	if data, path := findStratusJSON(); data != nil {
+		_ = json.Unmarshal(data, &cfg)
+		// If project_root is not set in JSON, derive it from the file location.
+		if cfg.ProjectRoot == "" || cfg.ProjectRoot == Default().ProjectRoot {
+			cfg.ProjectRoot = filepath.Dir(path)
+		}
+	}
+
+	// Env vars override JSON values.
 	if v := os.Getenv("STRATUS_DATA_DIR"); v != "" {
 		cfg.DataDir = v
 	}
@@ -183,10 +193,26 @@ func Load() Config {
 		}
 	}
 
-	data, err := os.ReadFile(".stratus.json")
-	if err != nil {
-		return cfg
-	}
-	_ = json.Unmarshal(data, &cfg)
 	return cfg
+}
+
+// findStratusJSON walks up from the current working directory looking for
+// .stratus.json. Returns the file contents and its absolute path, or nil if
+// not found.
+func findStratusJSON() ([]byte, string) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, ""
+	}
+	for {
+		p := filepath.Join(dir, ".stratus.json")
+		if data, err := os.ReadFile(p); err == nil {
+			return data, p
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, ""
+		}
+		dir = parent
+	}
 }

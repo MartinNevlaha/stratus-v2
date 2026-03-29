@@ -394,21 +394,29 @@ func fetchDashboardStateStrict() (*dashboardState, error) {
 }
 
 func getPort() string {
+	// Env var takes highest priority.
 	if p := os.Getenv("STRATUS_PORT"); p != "" {
 		return p
 	}
-	// Try to read from .stratus.json
-	data, err := os.ReadFile(filepath.Join(mustGetwd(), ".stratus.json"))
-	if err != nil {
-		return "41777"
+	// Walk up from cwd to find .stratus.json (matches config.Load behavior).
+	dir := mustGetwd()
+	for {
+		data, err := os.ReadFile(filepath.Join(dir, ".stratus.json"))
+		if err == nil {
+			var cfg struct {
+				Port int `json:"port"`
+			}
+			if json.Unmarshal(data, &cfg) == nil && cfg.Port > 0 {
+				return fmt.Sprintf("%d", cfg.Port)
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
-	var cfg struct {
-		Port int `json:"port"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil || cfg.Port == 0 {
-		return "41777"
-	}
-	return fmt.Sprintf("%d", cfg.Port)
+	return "41777"
 }
 
 func mustGetwd() string {
