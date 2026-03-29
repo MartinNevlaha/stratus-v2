@@ -20,6 +20,7 @@ import type {
   AnalysisResult,
   GuardianAlert,
   GuardianConfig,
+  PhaseRoutingConfig,
   MetricsSummary,
   DailyMetricsResponse,
   AgentMetricsResponse,
@@ -273,3 +274,6 @@ export const updateGuardianConfig = (cfg: GuardianConfig) =>
 export const runGuardianScan = () => post<{ ok: boolean }>('/guardian/run', {})
 export const testGuardianLLM = (cfg: Partial<GuardianConfig>) =>
   post<{ ok: boolean }>('/guardian/test-llm', cfg)
+export const getPhaseRouting = () => get<PhaseRoutingConfig>('/config/phase-routing')
+export const updatePhaseRouting = (cfg: PhaseRoutingConfig) =>
+  put<PhaseRoutingConfig>('/config/phase-routing', cfg)

@@ -378,3 +378,11 @@ export interface GuardianConfig {
   llm_temperature: number
   llm_max_tokens: number
 }
+
+export interface PhaseRoutingConfig {
+  enabled: boolean
+  bug: Record<string, string>
+  spec: Record<string, string>
+  spec_complex: Record<string, string>
+  swarm: Record<string, string>
+}

@@ -352,6 +352,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/guardian/run", s.handleRunGuardianScan)
 	mux.HandleFunc("POST /api/guardian/test-llm", s.handleTestGuardianLLM)
 
+	// Config
+	mux.HandleFunc("GET /api/config/phase-routing", s.handleGetPhaseRouting)
+	mux.HandleFunc("PUT /api/config/phase-routing", s.handleUpdatePhaseRouting)
+
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)
 

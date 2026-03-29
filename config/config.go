@@ -49,17 +49,27 @@ type GuardianConfig struct {
 	LLMMaxTokens       int     `json:"llm_max_tokens"`
 }
 
+// PhaseRoutingConfig configures which executor (cc/oc) handles each workflow phase.
+type PhaseRoutingConfig struct {
+	Enabled     bool              `json:"enabled"`
+	Bug         map[string]string `json:"bug,omitempty"`
+	Spec        map[string]string `json:"spec,omitempty"`
+	SpecComplex map[string]string `json:"spec_complex,omitempty"`
+	Swarm       map[string]string `json:"swarm,omitempty"`
+}
+
 // Config holds the stratus configuration.
 type Config struct {
-	Port                     int            `json:"port"`
-	DataDir                  string         `json:"data_dir"`
-	ProjectRoot              string         `json:"project_root"`
-	Vexor                    VexorConfig    `json:"vexor"`
-	STT                      STTConfig      `json:"stt"`
-	Guardian                 GuardianConfig `json:"guardian"`
-	SyncState                *SyncState     `json:"sync_state,omitempty"`
-	MetricsBroadcastInterval int            `json:"metrics_broadcast_interval"`
-	Insight                  InsightConfig  `json:"insight"`
+	Port                     int                `json:"port"`
+	DataDir                  string             `json:"data_dir"`
+	ProjectRoot              string             `json:"project_root"`
+	Vexor                    VexorConfig        `json:"vexor"`
+	STT                      STTConfig          `json:"stt"`
+	Guardian                 GuardianConfig     `json:"guardian"`
+	PhaseRouting             PhaseRoutingConfig `json:"phase_routing"`
+	SyncState                *SyncState         `json:"sync_state,omitempty"`
+	MetricsBroadcastInterval int                `json:"metrics_broadcast_interval"`
+	Insight                  InsightConfig      `json:"insight"`
 }
 
 type VexorConfig struct {

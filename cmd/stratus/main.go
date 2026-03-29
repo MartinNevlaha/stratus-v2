@@ -342,6 +342,7 @@ func cmdHook() {
 		"delegation_guard":         hooks.DelegationGuard,
 		"workflow_enforcer":        hooks.WorkflowEnforcer,
 		"bash_write_guard":         hooks.BashWriteGuard,
+		"executor_routing_guard":   hooks.ExecutorRoutingGuard,
 		"watcher":                  hooks.Watcher,
 		"teammate_idle":            hooks.TeammateIdle,
 		"task_completed":           hooks.TaskCompleted,
@@ -971,13 +972,24 @@ func writeOpenCodeConfig(projectRoot string) error {
 	if mcpSection == nil {
 		mcpSection = map[string]any{}
 	}
-	if _, ok := mcpSection["stratus"]; !ok {
-		mcpSection["stratus"] = map[string]any{
+	stratusEntry, ok := mcpSection["stratus"].(map[string]any)
+	if !ok {
+		stratusEntry = map[string]any{
 			"type":    "local",
 			"command": []string{"stratus", "mcp-serve"},
 			"enabled": true,
 		}
+		mcpSection["stratus"] = stratusEntry
 	}
+	// Always ensure STRATUS_EXECUTOR is set non-destructively (also upgrades existing entries).
+	envBlock, _ := stratusEntry["environment"].(map[string]any)
+	if envBlock == nil {
+		envBlock = map[string]any{}
+	}
+	if _, ok := envBlock["STRATUS_EXECUTOR"]; !ok {
+		envBlock["STRATUS_EXECUTOR"] = "oc"
+	}
+	stratusEntry["environment"] = envBlock
 	if _, ok := mcpSection["playwright-test"]; !ok {
 		mcpSection["playwright-test"] = map[string]any{
 			"type":    "local",
@@ -1134,6 +1146,7 @@ func writeHooks(projectRoot string) error {
 		{
 			event: "PreToolUse",
 			hooks: []hookDef{
+				{"Write|Edit|Bash|NotebookEdit|MultiEdit|Task", "stratus hook executor_routing_guard"},
 				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
 				{"Task", "stratus hook workflow_existence_guard"},
 				{"Task", "stratus hook delegation_guard"},
@@ -1183,6 +1196,9 @@ func writeHooks(projectRoot string) error {
 	}
 	if _, ok := envSection["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]; !ok {
 		envSection["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+	}
+	if _, ok := envSection["STRATUS_EXECUTOR"]; !ok {
+		envSection["STRATUS_EXECUTOR"] = "cc"
 	}
 	settings["env"] = envSection
 

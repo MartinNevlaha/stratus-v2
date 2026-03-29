@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { getGuardianConfig, updateGuardianConfig, testGuardianLLM } from '$lib/api'
-  import type { GuardianConfig } from '$lib/types'
+  import { getGuardianConfig, updateGuardianConfig, testGuardianLLM, getPhaseRouting, updatePhaseRouting } from '$lib/api'
+  import type { GuardianConfig, PhaseRoutingConfig } from '$lib/types'
 
   let cfg = $state<GuardianConfig>({
     enabled: true,
@@ -17,6 +17,19 @@
     llm_max_tokens: 1024,
   })
 
+  const defaultRouting: PhaseRoutingConfig = {
+    enabled: false,
+    bug: { analyze: '', fix: '', review: '' },
+    spec: { plan: '', implement: '', verify: '', learn: '' },
+    spec_complex: { plan: '', discovery: '', design: '', governance: '', implement: '', verify: '', learn: '' },
+    swarm: { hub: '', workers: '' },
+  }
+
+  let routing = $state<PhaseRoutingConfig>(structuredClone(defaultRouting))
+  let routingSaving = $state(false)
+  let routingSaveMsg = $state<string | null>(null)
+  let routingSaveError = $state<string | null>(null)
+
   let loading = $state(true)
   let saving = $state(false)
   let testing = $state(false)
@@ -28,13 +41,61 @@
 
   onMount(async () => {
     try {
-      cfg = await getGuardianConfig()
+      const [guardianCfg, routingCfg] = await Promise.all([
+        getGuardianConfig(),
+        getPhaseRouting(),
+      ])
+      cfg = guardianCfg
+      // Merge fetched routing over defaults so all phase keys are present
+      routing = {
+        ...defaultRouting,
+        ...routingCfg,
+        bug: { ...defaultRouting.bug, ...(routingCfg.bug ?? {}) },
+        spec: { ...defaultRouting.spec, ...(routingCfg.spec ?? {}) },
+        spec_complex: { ...defaultRouting.spec_complex, ...(routingCfg.spec_complex ?? {}) },
+        swarm: { ...defaultRouting.swarm, ...(routingCfg.swarm ?? {}) },
+      }
     } catch (e) {
       saveError = 'Failed to load config'
     } finally {
       loading = false
     }
   })
+
+  async function saveRouting() {
+    routingSaving = true
+    routingSaveMsg = null
+    routingSaveError = null
+    try {
+      routing = await updatePhaseRouting(routing)
+      routingSaveMsg = 'Saved'
+      setTimeout(() => { routingSaveMsg = null }, 3000)
+    } catch (e) {
+      routingSaveError = e instanceof Error ? e.message : 'Save failed'
+    } finally {
+      routingSaving = false
+    }
+  }
+
+  const WORKFLOW_PHASES: Record<string, { key: keyof PhaseRoutingConfig; label: string; phases: string[] }> = {
+    Bug: { key: 'bug', label: 'Bug Workflow', phases: ['analyze', 'fix', 'review'] },
+    Spec: { key: 'spec', label: 'Spec Workflow (simple)', phases: ['plan', 'implement', 'verify', 'learn'] },
+    'Spec Complex': { key: 'spec_complex', label: 'Spec Workflow (complex)', phases: ['plan', 'discovery', 'design', 'governance', 'implement', 'verify', 'learn'] },
+    Swarm: { key: 'swarm', label: 'Swarm', phases: ['hub', 'workers'] },
+  }
+
+  function executorLabel(val: string) {
+    if (val === 'cc') return 'Claude Code'
+    if (val === 'oc') return 'OpenCode'
+    return 'Any'
+  }
+
+  function isHandoff(phases: string[], phaseMap: Record<string, string>, i: number): boolean {
+    if (i === 0) return false
+    const prev = phaseMap[phases[i - 1]] ?? ''
+    const curr = phaseMap[phases[i]] ?? ''
+    return prev !== curr && (prev === 'cc' || prev === 'oc') && (curr === 'cc' || curr === 'oc')
+  }
 
   async function save() {
     saving = true
@@ -193,6 +254,61 @@
         <span class="err-msg">{saveError}</span>
       {/if}
     </div>
+
+    <section class="card">
+      <h3>Phase Routing — CC / OC Collaboration</h3>
+      <p class="section-desc">
+        Assign individual workflow phases to Claude Code (CC) or OpenCode (OC).
+        When enabled, the wrong executor is blocked and shown a handoff message.
+        Requires <code>stratus init</code> (or <code>stratus init --target both</code>) to inject executor identity.
+      </p>
+
+      <div class="form-group row">
+        <label class="checkbox-label">
+          <input type="checkbox" bind:checked={routing.enabled} />
+          Enable phase routing
+        </label>
+      </div>
+
+      <div class:routing-disabled={!routing.enabled}>
+        {#each Object.entries(WORKFLOW_PHASES) as [, wf]}
+          <div class="routing-section">
+            <div class="routing-title">{wf.label}</div>
+            {#each wf.phases as phase, i}
+              {#if isHandoff(wf.phases, (routing[wf.key] as Record<string, string>) ?? {}, i)}
+                <div class="handoff-arrow" title="Handoff between executors here">⇄ handoff</div>
+              {/if}
+              <div class="routing-row">
+                <span class="phase-label">{phase}</span>
+                <select
+                  bind:value={(routing[wf.key] as Record<string, string>)[phase]}
+                  disabled={!routing.enabled}
+                >
+                  <option value="">Any</option>
+                  <option value="cc">Claude Code</option>
+                  <option value="oc">OpenCode</option>
+                </select>
+                <span class="executor-badge executor-{(routing[wf.key] as Record<string, string>)[phase] || 'any'}">
+                  {executorLabel((routing[wf.key] as Record<string, string>)[phase] ?? '')}
+                </span>
+              </div>
+            {/each}
+          </div>
+        {/each}
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" onclick={saveRouting} disabled={routingSaving}>
+          {routingSaving ? 'Saving…' : 'Save routing'}
+        </button>
+        {#if routingSaveMsg}
+          <span class="ok-msg">{routingSaveMsg}</span>
+        {/if}
+        {#if routingSaveError}
+          <span class="err-msg">{routingSaveError}</span>
+        {/if}
+      </div>
+    </section>
   {/if}
 </div>
 
@@ -330,4 +446,87 @@
   .err-msg { color: #f85149; font-size: 0.82rem; }
 
   .muted { color: #8b949e; font-size: 0.85rem; }
+
+  .routing-section {
+    margin-bottom: 16px;
+  }
+
+  .routing-title {
+    font-size: 0.78rem;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .routing-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+
+  .phase-label {
+    width: 90px;
+    font-size: 0.82rem;
+    color: #c9d1d9;
+    flex-shrink: 0;
+  }
+
+  .routing-row select {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #c9d1d9;
+    padding: 4px 8px;
+    font-size: 0.82rem;
+    width: 140px;
+  }
+
+  .routing-row select:disabled {
+    opacity: 0.4;
+  }
+
+  .executor-badge {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .executor-cc {
+    background: #1f3d6b;
+    color: #79c0ff;
+  }
+
+  .executor-oc {
+    background: #3d1f6b;
+    color: #d2a8ff;
+  }
+
+  .executor-any {
+    background: #21262d;
+    color: #6e7681;
+  }
+
+  .handoff-arrow {
+    font-size: 0.75rem;
+    color: #f0883e;
+    padding: 2px 0 4px 0;
+    letter-spacing: 0.03em;
+  }
+
+  .routing-disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  code {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.78rem;
+    color: #79c0ff;
+  }
 </style>
