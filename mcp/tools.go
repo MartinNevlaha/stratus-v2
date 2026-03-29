@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
-	"os"
 	"strconv"
 )
 
@@ -166,7 +165,6 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 		),
 		Handler: func(args map[string]any) (any, error) {
 			var wfID string
-			var wf map[string]any
 
 			if id, ok := args["workflow_id"].(string); ok && id != "" {
 				wfID = id
@@ -178,7 +176,6 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 				if m, ok := dash.(map[string]any); ok {
 					if workflows, ok := m["workflows"].([]any); ok && len(workflows) > 0 {
 						if w, ok := workflows[0].(map[string]any); ok {
-							wf = w
 							wfID, _ = w["id"].(string)
 						}
 					}
@@ -192,24 +189,6 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			result, err := client.get(fmt.Sprintf("/api/workflows/%s/dispatch", wfID), nil)
 			if err != nil {
 				return nil, err
-			}
-
-			// Append executor routing info if phase routing is configured.
-			if executor := os.Getenv("STRATUS_EXECUTOR"); executor != "" {
-				if wf == nil {
-					if w, err := client.get(fmt.Sprintf("/api/workflows/%s", wfID), nil); err == nil {
-						wf, _ = w.(map[string]any)
-					}
-				}
-				if wf != nil {
-					if handoff := buildHandoffInfo(client, executor, wf); handoff != nil {
-						if m, ok := result.(map[string]any); ok {
-							for k, v := range handoff {
-								m[k] = v
-							}
-						}
-					}
-				}
 			}
 
 			return result, nil
@@ -269,17 +248,6 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			result, err := client.put(fmt.Sprintf("/api/workflows/%s/phase", id), map[string]any{"phase": phase})
 			if err != nil {
 				return nil, err
-			}
-
-			// Append executor routing info after successful transition.
-			if executor := os.Getenv("STRATUS_EXECUTOR"); executor != "" {
-				if wf, ok := result.(map[string]any); ok {
-					if handoff := buildHandoffInfo(client, executor, wf); handoff != nil {
-						for k, v := range handoff {
-							wf[k] = v
-						}
-					}
-				}
 			}
 
 			return result, nil
@@ -672,58 +640,3 @@ func convertTasksArg(v any) ([]string, error) {
 	return nil, nil
 }
 
-// buildHandoffInfo checks phase routing config and returns handoff metadata
-// if the current workflow phase is assigned to a different executor.
-// Returns nil when no handoff is needed or routing is disabled.
-func buildHandoffInfo(client *apiClient, executor string, wf map[string]any) map[string]any {
-	routing, err := client.get("/api/config/phase-routing", nil)
-	if err != nil {
-		return nil
-	}
-	rm, ok := routing.(map[string]any)
-	if !ok {
-		return nil
-	}
-	enabled, _ := rm["enabled"].(bool)
-	if !enabled {
-		return nil
-	}
-
-	wtype, _ := wf["type"].(string)
-	phase, _ := wf["phase"].(string)
-
-	assigned := phaseRoutingLookupMCP(rm, wtype, phase)
-	if assigned == "" || assigned == executor {
-		return nil
-	}
-
-	names := map[string]string{"cc": "Claude Code", "oc": "OpenCode"}
-	other := names[assigned]
-	if other == "" {
-		other = assigned
-	}
-	return map[string]any{
-		"handoff_required": true,
-		"next_executor":    assigned,
-		"handoff_message":  fmt.Sprintf("Phase '%s' is assigned to %s. Please switch to %s to continue.", phase, other, other),
-	}
-}
-
-func phaseRoutingLookupMCP(rm map[string]any, wtype, phase string) string {
-	keyMap := map[string]string{
-		"bug":          "bug",
-		"spec":         "spec",
-		"spec_complex": "spec_complex",
-		"swarm":        "swarm",
-	}
-	key, ok := keyMap[wtype]
-	if !ok {
-		return ""
-	}
-	section, _ := rm[key].(map[string]any)
-	if section == nil {
-		return ""
-	}
-	v, _ := section[phase].(string)
-	return v
-}

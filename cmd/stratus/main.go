@@ -342,7 +342,6 @@ func cmdHook() {
 		"delegation_guard":         hooks.DelegationGuard,
 		"workflow_enforcer":        hooks.WorkflowEnforcer,
 		"bash_write_guard":         hooks.BashWriteGuard,
-		"executor_routing_guard":   hooks.ExecutorRoutingGuard,
 		"watcher":                  hooks.Watcher,
 		"teammate_idle":            hooks.TeammateIdle,
 		"task_completed":           hooks.TaskCompleted,

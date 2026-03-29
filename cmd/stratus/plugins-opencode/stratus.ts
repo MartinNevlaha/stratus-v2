@@ -56,37 +56,6 @@ interface Workflow {
   session_id?: string
 }
 
-interface PhaseRoutingConfig {
-  enabled: boolean
-  bug?: Record<string, string>
-  spec?: Record<string, string>
-  spec_complex?: Record<string, string>
-  swarm?: Record<string, string>
-}
-
-async function fetchPhaseRouting(): Promise<PhaseRoutingConfig | null> {
-  try {
-    const res = await fetch(`${BASE}/api/config/phase-routing`)
-    if (!res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-function phaseRoutingLookup(routing: PhaseRoutingConfig, wtype: string, phase: string): string {
-  const keyMap: Record<string, keyof PhaseRoutingConfig> = {
-    bug: "bug",
-    spec: "spec",
-    spec_complex: "spec_complex",
-    swarm: "swarm",
-  }
-  const key = keyMap[wtype]
-  if (!key) return ""
-  const section = routing[key] as Record<string, string> | undefined
-  return section?.[phase] ?? ""
-}
-
 interface DashboardState {
   workflows: Workflow[]
 }
@@ -249,31 +218,6 @@ export const Stratus: Plugin = async () => {
       execute: {
         before: async (input: { tool: string; sessionID?: string }, output: { args: Record<string, unknown> }) => {
           const toolName = input.tool.toLowerCase()
-
-          // executor_routing_guard: block wrong executor for phase-assigned phases.
-          // Only applies to write/action tools and delivery Task delegations — not read-only tools.
-          const stratusExecutor = process.env["STRATUS_EXECUTOR"]
-          if (stratusExecutor) {
-            const isWriteOrAction = WRITE_TOOLS.includes(toolName)
-            const isDeliveryTask =
-              toolName === "task" && isDeliverySubagent((output.args["subagent_type"] as string) ?? "")
-            if (isWriteOrAction || isDeliveryTask) {
-              const routing = await fetchPhaseRouting()
-              if (routing?.enabled) {
-                const wf = await getActiveWorkflow(input.sessionID)
-                if (wf) {
-                  const assigned = phaseRoutingLookup(routing, wf.type, wf.phase)
-                  if (assigned && assigned !== stratusExecutor) {
-                    const names: Record<string, string> = { cc: "Claude Code", oc: "OpenCode" }
-                    const other = names[assigned] ?? assigned
-                    throw new Error(
-                      `[Stratus] Phase '${wf.phase}' is assigned to ${other}. Please switch to ${other} to continue.`,
-                    )
-                  }
-                }
-              }
-            }
-          }
 
           // workflow_existence_guard: block Task delegation without workflow
           if (toolName === "task") {

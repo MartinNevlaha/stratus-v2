@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MartinNevlaha/stratus-v2/config"
 )
 
 const noActiveWorkflowReason = "No active workflow registered. Use mcp__stratus__register_workflow first."
@@ -415,93 +414,6 @@ func getPort() string {
 func mustGetwd() string {
 	wd, _ := os.Getwd()
 	return wd
-}
-
-// ExecutorRoutingGuard blocks the wrong executor from acting in a phase assigned to the other.
-// Reads STRATUS_EXECUTOR env var ("cc" or "oc") and GET /api/config/phase-routing.
-// Fail-open: allows if executor env is unset, routing disabled, or API unreachable.
-//
-// For Task tool calls: only blocks delivery agents (delivery-*), allowing read-only agents
-// like Plan/Explore to run regardless of executor assignment.
-func ExecutorRoutingGuard(event HookEvent) Decision {
-	executor := os.Getenv("STRATUS_EXECUTOR")
-	if executor == "" {
-		return Decision{Continue: true}
-	}
-
-	// For Task: only apply routing enforcement to delivery subagents.
-	if event.ToolName == "Task" {
-		subagentType, _ := event.ToolInput["subagent_type"].(string)
-		if !isDeliverySubagent(subagentType) {
-			return Decision{Continue: true}
-		}
-	}
-
-	routing, err := fetchPhaseRouting()
-	if err != nil || !routing.Enabled {
-		return Decision{Continue: true}
-	}
-
-	// Use fetchActiveWorkflow (with fallback chain) so sessions without CLAUDE_SESSION_ID
-	// are handled correctly — consistent with PhaseGuard and BashWriteGuard.
-	wf := fetchActiveWorkflow(event.SessionID)
-	if wf == nil {
-		return Decision{Continue: true}
-	}
-
-	phase, _ := wf["phase"].(string)
-	wtype, _ := wf["type"].(string)
-
-	assigned := phaseRoutingLookup(routing, wtype, phase)
-	if assigned == "" || assigned == executor {
-		return Decision{Continue: true}
-	}
-
-	names := map[string]string{"cc": "Claude Code", "oc": "OpenCode"}
-	other := names[assigned]
-	if other == "" {
-		other = assigned
-	}
-	return Decision{
-		Continue: false,
-		Reason:   fmt.Sprintf("Phase '%s' is assigned to %s. Please switch to %s to continue.", phase, other, other),
-	}
-}
-
-func fetchPhaseRouting() (config.PhaseRoutingConfig, error) {
-	port := getPort()
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://localhost:" + port + "/api/config/phase-routing")
-	if err != nil {
-		return config.PhaseRoutingConfig{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return config.PhaseRoutingConfig{}, fmt.Errorf("stratus API returned status %d", resp.StatusCode)
-	}
-	var cfg config.PhaseRoutingConfig
-	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return config.PhaseRoutingConfig{}, err
-	}
-	return cfg, nil
-}
-
-func phaseRoutingLookup(routing config.PhaseRoutingConfig, wtype, phase string) string {
-	var m map[string]string
-	switch wtype {
-	case "bug":
-		m = routing.Bug
-	case "spec":
-		m = routing.Spec
-	case "spec_complex":
-		m = routing.SpecComplex
-	case "swarm":
-		m = routing.Swarm
-	}
-	if m == nil {
-		return ""
-	}
-	return m[phase]
 }
 
 // TeammateIdle is called when a CC Agent Teams teammate goes idle.

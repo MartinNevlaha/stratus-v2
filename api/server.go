@@ -360,10 +360,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics/agents", s.handleMetricsAgents)
 	mux.HandleFunc("GET /api/metrics/projects", s.handleMetricsProjects)
 
-	// Config
-	mux.HandleFunc("GET /api/config/phase-routing", s.handleGetPhaseRouting)
-	mux.HandleFunc("PUT /api/config/phase-routing", s.handleUpdatePhaseRouting)
-
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)
 

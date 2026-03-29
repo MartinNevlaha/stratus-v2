@@ -75,7 +75,7 @@
   }
 
   // Map workflow_id → active mission (for swarm workflows)
-  let swarmMissionByWfId = $derived(new Map(missions.filter(m => m.status !== 'complete' && m.status !== 'failed' && m.status !== 'aborted').map(m => [m.workflow_id, m])))
+  let swarmMissionByWfId = $derived(new Map(missions.map(m => [m.workflow_id, m])))
 
   let recentEvents = $derived(appState.dashboard?.recent_events ?? [])
   let vexorOk = $derived(appState.dashboard?.vexor_available ?? false)
@@ -89,6 +89,7 @@
     try {
       missions = await listMissions()
     } catch { /* ignore */ }
+    refreshSwarmDetails(allWorkflows, missions)
   }
 
   async function loadPastItems(append = false) {
@@ -185,14 +186,28 @@
     return `${done}/${assigned.length}`
   }
 
-  async function loadSwarmDetail(wfId: string) {
-    const mission = swarmMissionByWfId.get(wfId)
+  async function loadSwarmDetail(wfId: string, missionList?: typeof missions) {
+    const list = missionList ?? missions
+    const mission = list.find(m => m.workflow_id === wfId)
     if (!mission) { swarmDetails[wfId] = null; return }
     swarmLoading[wfId] = true
     try {
-      swarmDetails[wfId] = await getMission(mission.id)
-    } catch { swarmDetails[wfId] = null }
-    finally { swarmLoading[wfId] = false }
+      const detail = await getMission(mission.id)
+      swarmDetails[wfId] = detail
+    } catch (e) {
+      console.error('[swarm] loadSwarmDetail failed for', wfId, e)
+      swarmDetails[wfId] = null
+    } finally {
+      swarmLoading[wfId] = false
+    }
+  }
+
+  function refreshSwarmDetails(wfs: typeof allWorkflows, missionList: typeof missions) {
+    for (const wf of wfs) {
+      if (!wf.aborted && wf.phase !== 'complete' && displayType(wf) === 'swarm') {
+        loadSwarmDetail(wf.id, missionList)
+      }
+    }
   }
 
   onMount(() => {
@@ -212,20 +227,14 @@
     loadGuardianAlerts()
   })
 
-  // Auto-load swarm detail when mission map or active workflows change
-  $effect(() => {
-    const swarmWfs = activeWfs.filter(wf => displayType(wf) === 'swarm')
-    const _map = swarmMissionByWfId // track as dependency
-    for (const wf of swarmWfs) {
-      loadSwarmDetail(wf.id)
-    }
-  })
-
   // Swarm real-time refresh on WS events
   $effect(() => {
     const _ = appState.swarmUpdateCounter
     if (_ === 0) return
-    listMissions().then(m => { missions = m }).catch(() => {})
+    listMissions().then(m => {
+      missions = m
+      refreshSwarmDetails(allWorkflows, m)
+    }).catch(() => {})
     loadPastItems()
   })
 
@@ -235,12 +244,12 @@
   onMount(() => {
     _pollInterval = setInterval(() => {
       _heartbeatTick++
-      const swarmWfs = activeWfs.filter(wf => displayType(wf) === 'swarm')
-      if (swarmWfs.length > 0) {
-        listMissions().then(m => { missions = m }).catch(() => {})
-        for (const wf of swarmWfs) {
-          loadSwarmDetail(wf.id)
-        }
+      const hasSwarm = allWorkflows.some(wf => !wf.aborted && wf.phase !== 'complete' && displayType(wf) === 'swarm')
+      if (hasSwarm) {
+        listMissions().then(m => {
+          missions = m
+          refreshSwarmDetails(allWorkflows, m)
+        }).catch(() => {})
       }
     }, 5000)
     return () => clearInterval(_pollInterval)
