@@ -11,7 +11,7 @@ You analyze the codebase for repeating patterns and anti-patterns, create learni
 ## API Base
 
 ```bash
-BASE=http://127.0.0.1:41777
+BASE=http://127.0.0.1:{{STRATUS_PORT}}
 ```
 
 ---

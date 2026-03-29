@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"embed"
@@ -10,11 +11,13 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -207,10 +210,42 @@ func cmdServe() {
 		os.Exit(0)
 	}()
 
-	log.Printf("stratus serving on http://localhost:%d", cfg.Port)
-	if err := srv.ListenAndServe(cfg.Port); err != nil {
+	ln, actualPort, err := listenAutoPort(cfg.Port)
+	if err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+	if actualPort != cfg.Port {
+		log.Printf("stratus: port %d in use, serving on http://localhost:%d", cfg.Port, actualPort)
+		cfg.Port = actualPort
+		if err := config.SavePort(".stratus.json", actualPort); err != nil {
+			log.Printf("warning: could not update .stratus.json with port %d: %v", actualPort, err)
+		}
+	} else {
+		log.Printf("stratus serving on http://localhost:%d", cfg.Port)
+	}
+	if err := srv.Serve(ln); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
+}
+
+// listenAutoPort tries to listen on the given port. If STRATUS_PORT is set,
+// it fails immediately on conflict. Otherwise it tries port+1 through port+10.
+func listenAutoPort(port int) (net.Listener, int, error) {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err == nil {
+		return ln, port, nil
+	}
+	// If port was explicitly set via env var, don't auto-detect.
+	if os.Getenv("STRATUS_PORT") != "" {
+		return nil, 0, fmt.Errorf("port %d is not available (set via STRATUS_PORT): %w", port, err)
+	}
+	for p := port + 1; p <= port+10; p++ {
+		ln, err = net.Listen("tcp", fmt.Sprintf(":%d", p))
+		if err == nil {
+			return ln, p, nil
+		}
+	}
+	return nil, 0, fmt.Errorf("no available port in range %d–%d", port, port+10)
 }
 
 // sttStart starts the speaches STT container. Returns true if this process
@@ -397,18 +432,18 @@ func cmdInit() {
 	}
 
 	allHashes := make(map[string]string)
+	initCfg := config.Load()
 	switch target {
 	case "opencode":
-		initOpenCode(wd, allHashes)
+		initOpenCode(wd, allHashes, initCfg.Port)
 	case "both":
-		initClaudeCode(wd, allHashes)
-		initOpenCode(wd, allHashes)
+		initClaudeCode(wd, allHashes, initCfg.Port)
+		initOpenCode(wd, allHashes, initCfg.Port)
 	default: // "claude-code"
-		initClaudeCode(wd, allHashes)
+		initClaudeCode(wd, allHashes, initCfg.Port)
 	}
 
 	// Record sync state so future refreshes can detect user customizations.
-	initCfg := config.Load()
 	initCfg.SyncState = &config.SyncState{
 		SyncedVersion: Version,
 		AssetHashes:   allHashes,
@@ -431,7 +466,7 @@ func cmdInit() {
 
 // initClaudeCode writes all Claude Code integration files: .mcp.json,
 // .claude/skills|agents|rules, and registers hooks in .claude/settings.json.
-func initClaudeCode(wd string, allHashes map[string]string) {
+func initClaudeCode(wd string, allHashes map[string]string, port int) {
 	if err := writeMCP(wd); err != nil {
 		log.Printf("warning: could not write .mcp.json: %v", err)
 	}
@@ -444,7 +479,7 @@ func initClaudeCode(wd string, allHashes map[string]string) {
 		{agentsFS, "agents", "agents"},
 		{rulesFS, "rules", "rules"},
 	} {
-		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, nil)
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, nil, port)
 		if err != nil {
 			log.Printf("warning: could not write %s: %v", spec.root, err)
 		}
@@ -459,7 +494,7 @@ func initClaudeCode(wd string, allHashes map[string]string) {
 
 // initOpenCode writes all OpenCode integration files: opencode.json (MCP + plugin),
 // .opencode/agents|commands|plugin, and .claude/skills|rules (shared with Claude Code).
-func initOpenCode(wd string, allHashes map[string]string) {
+func initOpenCode(wd string, allHashes map[string]string, port int) {
 	if err := writeOpenCodeConfig(wd); err != nil {
 		log.Printf("warning: could not write opencode.json: %v", err)
 	}
@@ -474,7 +509,7 @@ func initOpenCode(wd string, allHashes map[string]string) {
 		{skillsFS, "skills", "skills"},
 		{rulesFS, "rules", "rules"},
 	} {
-		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, nil)
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, nil, port)
 		if err != nil {
 			log.Printf("warning: could not write %s: %v", spec.root, err)
 		}
@@ -494,7 +529,7 @@ func initOpenCode(wd string, allHashes map[string]string) {
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
 		{promptsOpenCodeFS, "prompts-opencode", filepath.Join(openCodeDir, "prompts")},
 	} {
-		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, nil)
+		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, nil, port)
 		if err != nil {
 			log.Printf("warning: could not write %s: %v", spec.root, err)
 		}
@@ -674,7 +709,10 @@ type assetWriteResult struct {
 func writeAssetsTo(
 	fsys embed.FS, fsRoot, destDir string,
 	storedHashes map[string]string,
+	port int,
 ) (assetWriteResult, error) {
+	portPlaceholder := []byte("{{STRATUS_PORT}}")
+	portValue := []byte(strconv.Itoa(port))
 	result := assetWriteResult{hashes: make(map[string]string)}
 	err := fs.WalkDir(fsys, fsRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -684,6 +722,7 @@ func writeAssetsTo(
 		if err != nil {
 			return err
 		}
+		data = bytes.ReplaceAll(data, portPlaceholder, portValue)
 		rel, _ := filepath.Rel(fsRoot, path)
 		dest := filepath.Join(destDir, rel)
 
@@ -724,8 +763,9 @@ func writeAssetsTo(
 func writeAssetsFS(
 	fsys embed.FS, fsRoot, claudeSubdir, projectRoot string,
 	storedHashes map[string]string,
+	port int,
 ) (assetWriteResult, error) {
-	return writeAssetsTo(fsys, fsRoot, filepath.Join(projectRoot, ".claude", claudeSubdir), storedHashes)
+	return writeAssetsTo(fsys, fsRoot, filepath.Join(projectRoot, ".claude", claudeSubdir), storedHashes, port)
 }
 
 // cmdUpdate updates the stratus binary via `go install`, then re-execs the new
@@ -799,15 +839,15 @@ func cmdRefresh() {
 
 	switch target {
 	case "opencode":
-		skipped := refreshOpenCode(wd, storedHashes, allHashes)
+		skipped := refreshOpenCode(wd, storedHashes, allHashes, cfg.Port)
 		allSkipped = append(allSkipped, skipped...)
 	case "both":
-		skipped := refreshClaudeCode(wd, storedHashes, allHashes)
+		skipped := refreshClaudeCode(wd, storedHashes, allHashes, cfg.Port)
 		allSkipped = append(allSkipped, skipped...)
-		skipped = refreshOpenCode(wd, storedHashes, allHashes)
+		skipped = refreshOpenCode(wd, storedHashes, allHashes, cfg.Port)
 		allSkipped = append(allSkipped, skipped...)
 	default: // "claude-code"
-		skipped := refreshClaudeCode(wd, storedHashes, allHashes)
+		skipped := refreshClaudeCode(wd, storedHashes, allHashes, cfg.Port)
 		allSkipped = append(allSkipped, skipped...)
 	}
 
@@ -836,7 +876,7 @@ func cmdRefresh() {
 }
 
 // refreshClaudeCode refreshes Claude Code assets (skills, agents, rules, hooks).
-func refreshClaudeCode(wd string, storedHashes map[string]string, allHashes map[string]string) []string {
+func refreshClaudeCode(wd string, storedHashes map[string]string, allHashes map[string]string, port int) []string {
 	var allSkipped []string
 	for _, spec := range []struct {
 		fsys   embed.FS
@@ -847,7 +887,7 @@ func refreshClaudeCode(wd string, storedHashes map[string]string, allHashes map[
 		{agentsFS, "agents", "agents"},
 		{rulesFS, "rules", "rules"},
 	} {
-		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes)
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes, port)
 		if err != nil {
 			log.Printf("warning: %v", err)
 		}
@@ -864,7 +904,7 @@ func refreshClaudeCode(wd string, storedHashes map[string]string, allHashes map[
 
 // refreshOpenCode refreshes OpenCode assets (skills, rules to .claude/; agents,
 // commands, plugin to .opencode/).
-func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[string]string) []string {
+func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[string]string, port int) []string {
 	var allSkipped []string
 	openCodeDir := filepath.Join(wd, ".opencode")
 
@@ -877,7 +917,7 @@ func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[st
 		{skillsFS, "skills", "skills"},
 		{rulesFS, "rules", "rules"},
 	} {
-		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes)
+		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes, port)
 		if err != nil {
 			log.Printf("warning: %v", err)
 		}
@@ -898,7 +938,7 @@ func refreshOpenCode(wd string, storedHashes map[string]string, allHashes map[st
 		{pluginsOpenCodeFS, "plugins-opencode", filepath.Join(openCodeDir, "plugin")},
 		{promptsOpenCodeFS, "prompts-opencode", filepath.Join(openCodeDir, "prompts")},
 	} {
-		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, storedHashes)
+		res, err := writeAssetsTo(spec.fsys, spec.root, spec.destDir, storedHashes, port)
 		if err != nil {
 			log.Printf("warning: %v", err)
 		}

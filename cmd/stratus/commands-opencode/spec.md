@@ -11,7 +11,7 @@ You are the **coordinator** for a spec-driven development workflow. You orchestr
 All calls use the stratus server (default port 41777).
 
 ```bash
-BASE=http://127.0.0.1:41777
+BASE=http://127.0.0.1:{{STRATUS_PORT}}
 ```
 
 ---

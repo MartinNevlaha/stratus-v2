@@ -11,7 +11,7 @@ You are the **coordinator** for a team-based spec workflow. You orchestrate work
 ## API Base
 
 ```bash
-BASE=http://localhost:41777
+BASE=http://localhost:{{STRATUS_PORT}}
 ```
 
 ---

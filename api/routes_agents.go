@@ -117,7 +117,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "write claude code agent: "+err.Error())
 		return
 	}
-	if err := agents.WriteAgentOpenCode(s.projectRoot+"/.opencode/agents", agent); err != nil {
+	if err := agents.WriteAgentOpenCode(s.projectRoot+"/.opencode/agents", agent, s.cfg.Port); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "write opencode agent: "+err.Error())
 		return
 	}
@@ -170,7 +170,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if ocExists {
-		if err := agents.WriteAgentOpenCode(ocDir, agent); err != nil {
+		if err := agents.WriteAgentOpenCode(ocDir, agent, s.cfg.Port); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "update opencode: "+err.Error())
 			return
 		}

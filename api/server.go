@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -385,6 +386,11 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) ListenAndServe(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	return http.ListenAndServe(addr, s.Handler())
+}
+
+// Serve starts the HTTP server on an existing listener.
+func (s *Server) Serve(ln net.Listener) error {
+	return http.Serve(ln, s.Handler())
 }
 
 // spaHandler serves the embedded Svelte frontend. For any path that doesn't

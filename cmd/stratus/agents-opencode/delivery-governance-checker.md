@@ -17,7 +17,7 @@ You are a **governance review delivery agent**. You are READ-ONLY - you never mo
 Check for active workflow context before starting:
 
 ```bash
-curl -sS http://localhost:41777/api/dashboard/state | jq '.workflows[0]'
+curl -sS http://localhost:{{STRATUS_PORT}}/api/dashboard/state | jq '.workflows[0]'
 ```
 
 Use the workflow context (phase, tasks, delegated agents) to inform your analysis.

@@ -1,6 +1,18 @@
 import type { Plugin } from "@opencode-ai/plugin"
+import { readFileSync } from "fs"
 
-const BASE = "http://localhost:41777"
+function getBase(): string {
+  if (process.env.STRATUS_PORT) {
+    return `http://localhost:${process.env.STRATUS_PORT}`
+  }
+  try {
+    const cfg = JSON.parse(readFileSync(".stratus.json", "utf-8"))
+    if (cfg.port) return `http://localhost:${cfg.port}`
+  } catch {}
+  return "http://localhost:{{STRATUS_PORT}}"
+}
+
+const BASE = getBase()
 
 const WRITE_TOOLS = ["write", "edit", "bash", "patch"]
 const WATCH_TOOLS = ["write", "edit"]

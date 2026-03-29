@@ -264,11 +264,11 @@ importance: 0.8
 
 **Step 2 — MANDATORY: Create learning candidates + proposals** for each significant pattern, rule, or decision:
 
-Use Bash with curl to the local API (`http://localhost:41777`):
+Use Bash with curl to the local API (`http://localhost:{{STRATUS_PORT}}`):
 
 ```bash
 # 2a. Save candidate
-CANDIDATE_ID=$(curl -sS -X POST http://localhost:41777/api/learning/candidates \
+CANDIDATE_ID=$(curl -sS -X POST http://localhost:{{STRATUS_PORT}}/api/learning/candidates \
   -H 'Content-Type: application/json' \
   -d '{
     "detection_type": "pattern|decision|anti_pattern",
@@ -279,7 +279,7 @@ CANDIDATE_ID=$(curl -sS -X POST http://localhost:41777/api/learning/candidates \
   }' | jq -r '.id')
 
 # 2b. Generate proposal from candidate
-curl -sS -X POST http://localhost:41777/api/learning/proposals \
+curl -sS -X POST http://localhost:{{STRATUS_PORT}}/api/learning/proposals \
   -H 'Content-Type: application/json' \
   -d '{
     "candidate_id": "'$CANDIDATE_ID'",

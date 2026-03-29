@@ -11,7 +11,7 @@ You are the **coordinator** for a swarm workflow. You decompose a feature into t
 ## API Base
 
 ```bash
-BASE=http://localhost:41777
+BASE=http://localhost:{{STRATUS_PORT}}
 ```
 
 ---

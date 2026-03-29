@@ -299,7 +299,7 @@ func WriteAgentClaudeCode(dir string, agent *AgentDef) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-func WriteAgentOpenCode(dir string, agent *AgentDef) error {
+func WriteAgentOpenCode(dir string, agent *AgentDef, port int) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -349,7 +349,7 @@ func WriteAgentOpenCode(dir string, agent *AgentDef) error {
 Before starting ANY work, verify there is an active workflow:
 
 ` + "```bash" + `
-curl -sS http://localhost:41777/api/dashboard/state | jq '.workflows[0]'
+curl -sS http://localhost:` + fmt.Sprintf("%d", port) + `/api/dashboard/state | jq '.workflows[0]'
 ` + "```" + `
 
 If no active workflow exists (null response), **STOP** and tell the user:

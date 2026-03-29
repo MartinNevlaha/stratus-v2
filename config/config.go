@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 )
 
@@ -126,6 +128,33 @@ func (c Config) Save(path string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// SavePort updates the "port" field in an existing .stratus.json file
+// using a targeted text replacement to preserve field ordering and formatting.
+// If the file doesn't exist or has no port field, it falls back to a full
+// Load+Save cycle.
+func SavePort(path string, port int) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		cfg := Default()
+		cfg.Port = port
+		return cfg.Save(path)
+	}
+	// Try targeted replacement of the existing port value.
+	re := regexp.MustCompile(`("port"\s*:\s*)\d+`)
+	if re.Match(data) {
+		updated := re.ReplaceAll(data, []byte(fmt.Sprintf("${1}%d", port)))
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, updated, 0o644); err != nil {
+			return err
+		}
+		return os.Rename(tmp, path)
+	}
+	// No port field found — load, set, and save.
+	cfg := Load()
+	cfg.Port = port
+	return cfg.Save(path)
 }
 
 func (c Config) ProjectDataDir() string {

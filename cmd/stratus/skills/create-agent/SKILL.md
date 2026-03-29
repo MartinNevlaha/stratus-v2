@@ -63,7 +63,7 @@ Agent instructions.
 
 Before starting ANY work, verify there is an active workflow:
 
-    curl -sS http://localhost:41777/api/dashboard/state | jq '.workflows[0]'
+    curl -sS http://localhost:{{STRATUS_PORT}}/api/dashboard/state | jq '.workflows[0]'
 
 If no active workflow exists (null response), **STOP** and tell the user:
 > "No active workflow found. Start a /spec or /bug workflow first."
@@ -101,7 +101,7 @@ Draft:
 Prefer using the Stratus API — it writes both CC and OC formats in one call:
 
 ```bash
-curl -sS -X POST http://localhost:41777/api/agents \
+curl -sS -X POST http://localhost:{{STRATUS_PORT}}/api/agents \
   -H "Content-Type: application/json" \
   -d '{
     "name": "agent-name",

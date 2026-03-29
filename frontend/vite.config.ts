@@ -15,7 +15,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:41777',
+      '/api': `http://localhost:${process.env.STRATUS_PORT || '41777'}`,
     },
   },
 })
