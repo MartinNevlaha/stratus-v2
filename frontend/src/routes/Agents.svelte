@@ -59,6 +59,30 @@
   let selectedSkillsForAssignment = $state<string[]>([])
   let agentFilter = $state<'all' | 'claude_code' | 'opencode'>('all')
 
+  let showSkillPicker = $state(false)
+  let showSkillCreatorLauncher = $state(false)
+  let skillCreatorTarget = $state<'claude_code' | 'opencode'>('claude_code')
+  let skillCreatorCopied = $state(false)
+
+  function copySkillCreatorCommand() {
+    const cmd = skillCreatorTarget === 'claude_code' ? 'claude /skill-creator' : 'opencode /skill-creator'
+    navigator.clipboard.writeText(cmd)
+    skillCreatorCopied = true
+    setTimeout(() => { skillCreatorCopied = false }, 2000)
+  }
+
+  let showAgentPicker = $state(false)
+  let showAgentCreatorLauncher = $state(false)
+  let agentCreatorTarget = $state<'claude_code' | 'opencode'>('claude_code')
+  let agentCreatorCopied = $state(false)
+
+  function copyAgentCreatorCommand() {
+    const cmd = agentCreatorTarget === 'claude_code' ? 'claude /create-agent' : 'opencode /create-agent'
+    navigator.clipboard.writeText(cmd)
+    agentCreatorCopied = true
+    setTimeout(() => { agentCreatorCopied = false }, 2000)
+  }
+
   let allAgentNames = $derived.by(() => {
     if (!agents) return []
     const names = new Set<string>()
@@ -375,9 +399,9 @@
       {/if}
       <div class="actions">
         {#if activeView === 'agents'}
-          <button class="btn-primary" onclick={() => (showCreateAgent = true)}>+ New Agent</button>
+          <button class="btn-primary" onclick={() => (showAgentPicker = true)}>+ New Agent</button>
         {:else if activeView === 'skills'}
-          <button class="btn-primary" onclick={() => (showCreateSkill = true)}>+ New Skill</button>
+          <button class="btn-primary" onclick={() => (showSkillPicker = true)}>+ New Skill</button>
         {:else}
           <button class="btn-primary" onclick={() => (showCreateRule = true)}>+ New Rule</button>
         {/if}
@@ -540,6 +564,69 @@
   {/if}
 </div>
 
+<!-- Agent Creation Picker -->
+{#if showAgentPicker}
+  <div class="modal-overlay" onclick={() => (showAgentPicker = false)} role="presentation">
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h3>Create New Agent</h3>
+      <div class="skill-create-options">
+        <button class="create-option" onclick={() => { showAgentPicker = false; showAgentCreatorLauncher = true }}>
+          <div class="option-icon">✨</div>
+          <div class="option-label">AI-assisted</div>
+          <div class="option-desc">Use <code>create-agent</code> skill via Claude Code or OpenCode</div>
+        </button>
+        <button class="create-option" onclick={() => { showAgentPicker = false; showCreateAgent = true }}>
+          <div class="option-icon">✏️</div>
+          <div class="option-label">Manual</div>
+          <div class="option-desc">Fill in the agent form manually (creates both CC + OC)</div>
+        </button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick={() => (showAgentPicker = false)}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Agent Creator Launcher -->
+{#if showAgentCreatorLauncher}
+  <div class="modal-overlay" onclick={() => (showAgentCreatorLauncher = false)} role="presentation">
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h3>Launch create-agent</h3>
+      <p class="launcher-desc">Run the command below in your project directory. The <code>create-agent</code> skill will guide you through naming, tools, skills, and body — and write both Claude Code and OpenCode formats.</p>
+      <div class="target-toggle">
+        <button class:active={agentCreatorTarget === 'claude_code'} onclick={() => (agentCreatorTarget = 'claude_code')}>
+          <span class="badge cc">CC</span> Claude Code
+        </button>
+        <button class:active={agentCreatorTarget === 'opencode'} onclick={() => (agentCreatorTarget = 'opencode')}>
+          <span class="badge oc">OC</span> OpenCode
+        </button>
+      </div>
+      <div class="command-block">
+        <code class="command-text">{agentCreatorTarget === 'claude_code' ? 'claude /create-agent' : 'opencode /create-agent'}</code>
+        <button class="btn-sm" onclick={copyAgentCreatorCommand}>
+          {agentCreatorCopied ? '✓ Copied' : 'Copy'}
+        </button>
+      </div>
+      <div class="agent-format-note">
+        <div class="format-note-row">
+          <span class="badge cc">CC</span>
+          <span>Creates <code>.claude/agents/&lt;name&gt;.md</code> — name, description, tools (CSV), model, skills list</span>
+        </div>
+        <div class="format-note-row">
+          <span class="badge oc">OC</span>
+          <span>Creates <code>.opencode/agents/&lt;name&gt;.md</code> — mode: subagent, boolean tools, Workflow Guard section</span>
+        </div>
+      </div>
+      <p class="launcher-note">After the agent is created, click <strong>Refresh</strong> to see it here.</p>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick={() => (showAgentCreatorLauncher = false)}>Close</button>
+        <button class="btn-primary" onclick={async () => { await loadData() }}>Refresh Agents</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <!-- Create Agent Modal -->
 {#if showCreateAgent}
   <div class="modal-overlay" onclick={() => (showCreateAgent = false)} role="presentation">
@@ -573,6 +660,59 @@
       <div class="modal-actions">
         <button class="btn-secondary" onclick={() => (showCreateAgent = false)}>Cancel</button>
         <button class="btn-primary" onclick={handleCreateAgent} disabled={!newAgentName.trim()}>Create</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Skill Creation Picker -->
+{#if showSkillPicker}
+  <div class="modal-overlay" onclick={() => (showSkillPicker = false)} role="presentation">
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h3>Create New Skill</h3>
+      <div class="skill-create-options">
+        <button class="create-option" onclick={() => { showSkillPicker = false; showSkillCreatorLauncher = true }}>
+          <div class="option-icon">✨</div>
+          <div class="option-label">AI-assisted</div>
+          <div class="option-desc">Use <code>skill-creator</code> via Claude Code or OpenCode</div>
+        </button>
+        <button class="create-option" onclick={() => { showSkillPicker = false; showCreateSkill = true }}>
+          <div class="option-icon">✏️</div>
+          <div class="option-label">Manual</div>
+          <div class="option-desc">Fill in the skill form manually</div>
+        </button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick={() => (showSkillPicker = false)}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Skill Creator Launcher -->
+{#if showSkillCreatorLauncher}
+  <div class="modal-overlay" onclick={() => (showSkillCreatorLauncher = false)} role="presentation">
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h3>Launch skill-creator</h3>
+      <p class="launcher-desc">Run the command below in your project directory. The <code>skill-creator</code> skill will guide you through the process interactively.</p>
+      <div class="target-toggle">
+        <button class:active={skillCreatorTarget === 'claude_code'} onclick={() => (skillCreatorTarget = 'claude_code')}>
+          <span class="badge cc">CC</span> Claude Code
+        </button>
+        <button class:active={skillCreatorTarget === 'opencode'} onclick={() => (skillCreatorTarget = 'opencode')}>
+          <span class="badge oc">OC</span> OpenCode
+        </button>
+      </div>
+      <div class="command-block">
+        <code class="command-text">{skillCreatorTarget === 'claude_code' ? 'claude /skill-creator' : 'opencode /skill-creator'}</code>
+        <button class="btn-sm" onclick={copySkillCreatorCommand}>
+          {skillCreatorCopied ? '✓ Copied' : 'Copy'}
+        </button>
+      </div>
+      <p class="launcher-note">After the skill is created, click <strong>Refresh</strong> to see it here.</p>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick={() => (showSkillCreatorLauncher = false)}>Close</button>
+        <button class="btn-primary" onclick={async () => { await loadData() }}>Refresh Skills</button>
       </div>
     </div>
   </div>
@@ -1144,5 +1284,136 @@
     font-size: 11px;
     max-height: 80px;
     overflow: hidden;
+  }
+
+  /* Skill creation picker */
+  .skill-create-options {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .create-option {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 18px 12px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    color: inherit;
+    text-align: center;
+  }
+  .create-option:hover {
+    border-color: #58a6ff;
+    background: #161b22;
+  }
+  .option-icon { font-size: 24px; }
+  .option-label {
+    font-weight: 600;
+    color: #c9d1d9;
+    font-size: 14px;
+  }
+  .option-desc {
+    color: #8b949e;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .option-desc code {
+    background: #21262d;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+
+  /* Skill creator launcher */
+  .launcher-desc {
+    color: #8b949e;
+    font-size: 13px;
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+  .launcher-desc code {
+    background: #21262d;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .target-toggle {
+    display: flex;
+    gap: 2px;
+    background: #0d1117;
+    border-radius: 8px;
+    padding: 3px;
+    margin-bottom: 12px;
+  }
+  .target-toggle button {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 14px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+  .target-toggle button.active {
+    background: #21262d;
+    color: #c9d1d9;
+  }
+  .target-toggle button:hover:not(.active) { color: #c9d1d9; }
+  .command-block {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+  }
+  .command-text {
+    flex: 1;
+    font-family: monospace;
+    font-size: 14px;
+    color: #79c0ff;
+    user-select: all;
+  }
+  .launcher-note {
+    color: #8b949e;
+    font-size: 12px;
+    margin: 0;
+  }
+  .launcher-note strong { color: #c9d1d9; }
+
+  .agent-format-note {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+  }
+  .format-note-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+    color: #8b949e;
+  }
+  .format-note-row code {
+    background: #21262d;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
   }
 </style>

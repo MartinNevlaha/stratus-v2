@@ -35,6 +35,7 @@
 			loadProposals(),
 			loadRoutingRecommendations()
 		])
+		loading = false
 	})
 
 	async function loadDashboard() {

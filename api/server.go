@@ -352,6 +352,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/guardian/run", s.handleRunGuardianScan)
 	mux.HandleFunc("POST /api/guardian/test-llm", s.handleTestGuardianLLM)
 
+	// Metrics
+	mux.HandleFunc("POST /api/metrics/aggregate", s.handleMetricsAggregate)
+	mux.HandleFunc("GET /api/metrics/summary", s.handleMetricsSummary)
+	mux.HandleFunc("GET /api/metrics/workflows", s.handleMetricsWorkflows)
+	mux.HandleFunc("GET /api/metrics/daily", s.handleMetricsDaily)
+	mux.HandleFunc("GET /api/metrics/agents", s.handleMetricsAgents)
+	mux.HandleFunc("GET /api/metrics/projects", s.handleMetricsProjects)
+
 	// Config
 	mux.HandleFunc("GET /api/config/phase-routing", s.handleGetPhaseRouting)
 	mux.HandleFunc("PUT /api/config/phase-routing", s.handleUpdatePhaseRouting)
