@@ -95,6 +95,9 @@ func (g *Guardian) runChecks(ctx context.Context) {
 	// 1. Stale workflows
 	candidates = append(candidates, checkStaleWorkflows(g.coord, cfg)...)
 
+	// 1b. Stale swarm workers
+	candidates = append(candidates, checkStaleWorkers(g.db, cfg)...)
+
 	// 2. Memory health
 	candidates = append(candidates, checkMemoryHealth(g.db, cfg)...)
 

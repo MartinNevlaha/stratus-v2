@@ -134,6 +134,32 @@ CREATE VIRTUAL TABLE docs_fts USING fts5(
 INSERT INTO docs_fts(rowid, title, content, doc_type)
 SELECT id, title, content, doc_type FROM docs;
 `,
+	// Swarm: bounded retry discipline
+	`ALTER TABLE tickets ADD COLUMN revision_count INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE tickets ADD COLUMN rejection_count INTEGER NOT NULL DEFAULT 0`,
+	// Swarm: evidence tracking
+	`CREATE TABLE IF NOT EXISTS swarm_evidence (
+		id          TEXT PRIMARY KEY,
+		ticket_id   TEXT NOT NULL,
+		mission_id  TEXT NOT NULL,
+		type        TEXT NOT NULL,
+		content     TEXT NOT NULL DEFAULT '',
+		agent       TEXT NOT NULL DEFAULT '',
+		verdict     TEXT NOT NULL DEFAULT '',
+		created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_swarm_evidence_ticket ON swarm_evidence(ticket_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_swarm_evidence_mission ON swarm_evidence(mission_id)`,
+	// Swarm: guardrails tracking
+	`CREATE TABLE IF NOT EXISTS swarm_guardrails (
+		worker_id        TEXT PRIMARY KEY,
+		mission_id       TEXT NOT NULL,
+		tool_calls       INTEGER NOT NULL DEFAULT 0,
+		last_tool        TEXT NOT NULL DEFAULT '',
+		repetition_count INTEGER NOT NULL DEFAULT 0,
+		started_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+		updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	)`,
 }
 
 func isMigrationError(err error) bool {

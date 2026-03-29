@@ -214,15 +214,20 @@ You are a swarm worker executing tickets for a multi-agent mission.
 ## MCP Tools Available
 Use these stratus MCP tools during your work:
 
-1. `swarm_heartbeat(worker_id="<worker-id>")` — call at start
+1. `swarm_heartbeat(worker_id="<worker-id>")` — call at start and periodically
 2. `swarm_ticket_update(ticket_id="<id>", status="in_progress")` — before starting each ticket
 3. `swarm_ticket_update(ticket_id="<id>", status="done", result="<summary>")` — after completing
 4. `swarm_ticket_update(ticket_id="<id>", status="failed", result="<reason>")` — on failure
+5. `swarm_record_evidence(ticket_id="<id>", type="diff", content="<git diff summary>")` — after changes
+6. `swarm_record_evidence(ticket_id="<id>", type="test_result", content="<test output>", verdict="pass|fail")` — after tests
+7. `swarm_record_evidence(ticket_id="<id>", type="build", content="<build output>", verdict="pass|fail")` — after build check
 
 ## Rules
 - Commit your changes regularly — small, atomic commits
 - Focus only on your assigned tickets
 - Report meaningful results in the ticket_update result field
+- **Record evidence** after each significant action (diff, test, build) — reviewers use this
+- Tickets have a **max 5 revision limit** — if you keep failing, escalate instead of looping
 ```
 
 Record the delegation:
@@ -278,6 +283,11 @@ If a worker fails:
 - Save checkpoint with current state
 - Ask the user: retry this worker, skip it, or abort the mission?
 
+**Bounded retry discipline:**
+- Tickets have a **max 5 revision** limit (server-enforced). If a ticket status update returns an error about exceeded revisions, the ticket must be escalated — do NOT attempt further retries.
+- After **3 QA rejections** (done→in_progress loops), consult `@delivery-system-architect` as a critic before retrying, or escalate to the user.
+- The `revision_count` and `rejection_count` fields on tickets track these limits automatically.
+
 ---
 
 ## Phase 3: Verify
@@ -298,7 +308,13 @@ curl -sS -X PUT $BASE/api/swarm/missions/<mission-id>/status \
   -d '{"status": "verifying"}'
 ```
 
-Delegate to reviewers:
+Fetch evidence collected by workers — this gives the reviewer structured context:
+
+```bash
+curl -sS $BASE/api/swarm/missions/<mission-id>/evidence
+```
+
+Delegate to reviewers, passing the evidence as context:
 
 **Code review** — `@delivery-code-reviewer` for quality and correctness.
 
@@ -307,6 +323,11 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -H 'Content-Type: application/json' \
   -d '{"agent_id": "delivery-code-reviewer"}'
 ```
+
+The reviewer should inspect:
+- Evidence records (diffs, test results, build outputs) for each ticket
+- Whether all tickets have evidence recorded
+- Whether verdicts are all "pass"
 
 If `[must_fix]` issues → transition back to implement, create fix-up tickets, assign to appropriate worker, re-verify.
 
@@ -332,9 +353,10 @@ Fetch all swarm data:
 curl -sS $BASE/api/swarm/missions/<mission-id>/tickets
 curl -sS $BASE/api/swarm/missions/<mission-id>/workers
 curl -sS $BASE/api/swarm/missions/<mission-id>/forge
+curl -sS $BASE/api/swarm/missions/<mission-id>/evidence
 ```
 
-Review every ticket's `result` field — this is what each worker reported.
+Review every ticket's `result` field and evidence records — this is the full audit trail of what each worker did.
 
 ### Step 2 — Save memory events
 

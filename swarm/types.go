@@ -43,6 +43,10 @@ const (
 	SignalHelp           = "HELP"
 	SignalAbort          = "ABORT"
 	SignalMissionDone    = "MISSION_DONE"
+	SignalEscalate       = "ESCALATE"
+	SignalPlanDrift      = "PLAN_DRIFT"
+	SignalGuardrailWarn  = "GUARDRAIL_WARN"
+	SignalGuardrailBlock = "GUARDRAIL_BLOCK"
 )
 
 // Forge entry status lifecycle: pending → merging → merged | conflict | failed
@@ -78,8 +82,39 @@ var ValidForgeStatuses = map[string]bool{
 	ForgeConflict: true, ForgeFailed: true,
 }
 
+// Retry limits for ticket revisions and QA rejections.
+const (
+	MaxTicketRevisions  = 5
+	MaxTicketRejections = 3
+)
+
+// Evidence types for structured audit trail.
+const (
+	EvidenceDiff       = "diff"
+	EvidenceTestResult = "test_result"
+	EvidenceReview     = "review"
+	EvidenceBuild      = "build"
+	EvidenceNote       = "note"
+	EvidenceGate       = "gate"
+)
+
+// ValidEvidenceTypes is the set of valid evidence type values.
+var ValidEvidenceTypes = map[string]bool{
+	EvidenceDiff: true, EvidenceTestResult: true, EvidenceReview: true,
+	EvidenceBuild: true, EvidenceNote: true, EvidenceGate: true,
+}
+
 // Assignment represents a ticket-to-worker dispatch result.
 type Assignment struct {
 	TicketID string `json:"ticket_id"`
 	WorkerID string `json:"worker_id"`
+}
+
+// CheckpointState is the structured schema for checkpoint state_json.
+type CheckpointState struct {
+	CompletedTicketIDs []string `json:"completed_ticket_ids"`
+	FailedTicketIDs    []string `json:"failed_ticket_ids"`
+	CurrentWorkerID    string   `json:"current_worker_id,omitempty"`
+	ProgressPct        int      `json:"progress_pct"`
+	Notes              string   `json:"notes,omitempty"`
 }

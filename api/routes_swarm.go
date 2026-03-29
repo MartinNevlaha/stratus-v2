@@ -1,8 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
@@ -104,9 +109,57 @@ func (s *Server) handleUpdateMissionStatus(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	// Run automated quality gates when transitioning to verifying
+	if body.Status == swarm.MissionVerifying {
+		go s.runQualityGates(id)
+	}
+
 	mission, _ := s.swarm.GetMission(id)
 	s.hub.BroadcastJSON("mission_status", mission)
 	json200(w, mission)
+}
+
+// runQualityGates executes Stage A automated checks (build, vet, placeholder scan)
+// and records results as evidence on the mission's tickets.
+func (s *Server) runQualityGates(missionID string) {
+	tickets, err := s.swarm.ListTickets(missionID)
+	if err != nil || len(tickets) == 0 {
+		return
+	}
+	// Use the first ticket as the evidence anchor for mission-level gates
+	ticketID := tickets[0].ID
+
+	// Gate 1: go build
+	if out, err := runGateCmd(s.projectRoot, "go", "build", "./..."); err != nil {
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go build FAILED:\n"+out, "quality-gate", "fail")
+		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "build", "passed": false, "output": truncate(out, 500)})
+	} else {
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go build: OK", "quality-gate", "pass")
+		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "build", "passed": true})
+	}
+
+	// Gate 2: go vet
+	if out, err := runGateCmd(s.projectRoot, "go", "vet", "./..."); err != nil {
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go vet FAILED:\n"+out, "quality-gate", "fail")
+		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "vet", "passed": false, "output": truncate(out, 500)})
+	} else {
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go vet: OK", "quality-gate", "pass")
+		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "vet", "passed": true})
+	}
+
+	// Gate 3: placeholder scan (TODO/FIXME/PLACEHOLDER in recently changed lines)
+	if out, _ := runGateCmd(s.projectRoot, "git", "diff", "--unified=0", "HEAD~5"); len(out) > 0 {
+		placeholders := scanPlaceholders(out)
+		if len(placeholders) > 0 {
+			content := fmt.Sprintf("Found %d placeholder markers in recent changes:\n%s", len(placeholders), strings.Join(placeholders, "\n"))
+			s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, content, "quality-gate", "fail")
+			s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "placeholder_scan", "passed": false, "count": len(placeholders)})
+		} else {
+			s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "Placeholder scan: clean", "quality-gate", "pass")
+			s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "placeholder_scan", "passed": true})
+		}
+	}
 }
 
 func (s *Server) handleDeleteMission(w http.ResponseWriter, r *http.Request) {
@@ -561,6 +614,165 @@ func (s *Server) handleGetLatestCheckpoint(w http.ResponseWriter, r *http.Reques
 	json200(w, checkpoint)
 }
 
+// --- Evidence ---
+
+func (s *Server) handleRecordEvidence(w http.ResponseWriter, r *http.Request) {
+	ticketID := r.PathValue("id")
+	var body struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+		Agent   string `json:"agent"`
+		Verdict string `json:"verdict"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if !swarm.ValidEvidenceTypes[body.Type] {
+		jsonErr(w, http.StatusBadRequest, "invalid evidence type: "+body.Type+". Valid: diff, test_result, review, build, note, gate")
+		return
+	}
+	// Get ticket to find mission_id
+	ticket, err := s.swarm.GetTicket(ticketID)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found: "+err.Error())
+		return
+	}
+	evidence, err := s.swarm.RecordEvidence(ticketID, ticket.MissionID, body.Type, body.Content, body.Agent, body.Verdict)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.hub.BroadcastJSON("evidence_recorded", evidence)
+	json200(w, evidence)
+}
+
+func (s *Server) handleListTicketEvidence(w http.ResponseWriter, r *http.Request) {
+	ticketID := r.PathValue("id")
+	evidence, err := s.swarm.ListTicketEvidence(ticketID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if evidence == nil {
+		evidence = []db.SwarmEvidence{}
+	}
+	json200(w, evidence)
+}
+
+func (s *Server) handleListMissionEvidence(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	evidence, err := s.swarm.ListMissionEvidence(missionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if evidence == nil {
+		evidence = []db.SwarmEvidence{}
+	}
+	json200(w, evidence)
+}
+
+// --- Guardrails ---
+
+func (s *Server) handleTrackToolCall(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WorkerID  string `json:"worker_id"`
+		MissionID string `json:"mission_id"`
+		ToolName  string `json:"tool_name"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	if body.WorkerID == "" || body.ToolName == "" {
+		jsonErr(w, http.StatusBadRequest, "worker_id and tool_name are required")
+		return
+	}
+	// Auto-detect mission_id from worker if not provided
+	if body.MissionID == "" {
+		worker, err := s.swarm.GetWorker(body.WorkerID)
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, "worker not found: "+err.Error())
+			return
+		}
+		body.MissionID = worker.MissionID
+	}
+	guardrail, err := s.swarm.TrackToolCall(body.WorkerID, body.MissionID, body.ToolName)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Check guardrail limits and emit signals
+	const toolCallCeiling = 200
+	const repetitionWarn = 3
+	const repetitionBlock = 5
+
+	if guardrail.RepetitionCount >= repetitionBlock {
+		s.hub.BroadcastJSON("guardrail_block", guardrail)
+		json200(w, map[string]any{"guardrail": guardrail, "action": "block", "reason": "loop detected: same tool called " + string(rune('0'+guardrail.RepetitionCount)) + " times consecutively"})
+		return
+	}
+	if guardrail.RepetitionCount >= repetitionWarn {
+		s.hub.BroadcastJSON("guardrail_warn", guardrail)
+	}
+	if guardrail.ToolCalls >= toolCallCeiling {
+		s.hub.BroadcastJSON("guardrail_block", guardrail)
+		json200(w, map[string]any{"guardrail": guardrail, "action": "block", "reason": "tool call ceiling exceeded"})
+		return
+	}
+
+	json200(w, map[string]any{"guardrail": guardrail, "action": "allow"})
+}
+
+func (s *Server) handleGetGuardrail(w http.ResponseWriter, r *http.Request) {
+	workerID := r.PathValue("id")
+	guardrail, err := s.swarm.GetGuardrail(workerID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if guardrail == nil {
+		json200(w, map[string]any{"guardrail": nil})
+		return
+	}
+	json200(w, guardrail)
+}
+
+// --- Plan Drift Detection ---
+
+func (s *Server) handleCheckDrift(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	var body struct {
+		ChangedFiles []string `json:"changed_files"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	// If no files provided, try to get from git diff
+	if len(body.ChangedFiles) == 0 {
+		out, err := runGateCmd(s.projectRoot, "git", "diff", "--name-only", "HEAD~5")
+		if err == nil && len(out) > 0 {
+			for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					body.ChangedFiles = append(body.ChangedFiles, line)
+				}
+			}
+		}
+	}
+	drifts, err := s.swarm.DetectDrift(missionID, body.ChangedFiles)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(drifts) > 0 {
+		s.hub.BroadcastJSON("plan_drift", map[string]any{"mission_id": missionID, "drifts": drifts})
+	}
+	json200(w, map[string]any{"drifts": drifts, "drift_detected": len(drifts) > 0})
+}
+
 // --- Strategy outcome ---
 
 func (s *Server) handleUpdateStrategyOutcome(w http.ResponseWriter, r *http.Request) {
@@ -582,3 +794,34 @@ func (s *Server) handleUpdateStrategyOutcome(w http.ResponseWriter, r *http.Requ
 	}
 	json200(w, map[string]string{"status": "updated"})
 }
+
+// --- Quality gate helpers ---
+
+// runGateCmd executes a command and returns its combined output.
+func runGateCmd(dir string, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// scanPlaceholders finds TODO/FIXME/PLACEHOLDER markers in diff output.
+func scanPlaceholders(diff string) []string {
+	var found []string
+	for _, line := range strings.Split(diff, "\n") {
+		if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+			continue
+		}
+		upper := strings.ToUpper(line)
+		if strings.Contains(upper, "TODO") || strings.Contains(upper, "FIXME") || strings.Contains(upper, "PLACEHOLDER") || strings.Contains(upper, "XXX") {
+			if len(line) > 120 {
+				line = line[:120] + "..."
+			}
+			found = append(found, line)
+		}
+	}
+	return found
+}
+

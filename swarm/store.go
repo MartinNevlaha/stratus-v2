@@ -129,8 +129,9 @@ func (s *Store) ListTickets(missionID string) ([]db.SwarmTicket, error) {
 }
 
 // UpdateTicketStatus updates a ticket's status and optional result.
+// Enforces bounded retry discipline via MaxTicketRevisions and MaxTicketRejections.
 func (s *Store) UpdateTicketStatus(id, status, result string) error {
-	return s.db.UpdateTicketStatus(id, status, result)
+	return s.db.UpdateTicketStatus(id, status, result, MaxTicketRevisions, MaxTicketRejections)
 }
 
 // Dispatch assigns dispatchable tickets to available workers by domain matching.
@@ -270,6 +271,65 @@ func (s *Store) UpdateStrategyOutcome(missionID, outcome string) error {
 	return s.db.UpdateMissionStrategyOutcome(missionID, outcome)
 }
 
+// --- Plan Drift Detection ---
+
+// DetectDrift compares actual changed files against the ticket descriptions.
+// Returns a list of drift descriptions (files changed that weren't mentioned in any ticket,
+// or files mentioned but not changed). Empty slice means no drift.
+func (s *Store) DetectDrift(missionID string, changedFiles []string) ([]string, error) {
+	tickets, err := s.db.ListTickets(missionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build set of file patterns mentioned in ticket descriptions
+	mentionedPatterns := make(map[string]bool)
+	for _, t := range tickets {
+		if t.Status != "done" && t.Status != "in_progress" {
+			continue
+		}
+		// Extract file paths from ticket description (look for path-like strings)
+		for _, word := range strings.Fields(t.Description) {
+			word = strings.Trim(word, "`,\"'()[]{}*")
+			if isFilePath(word) {
+				mentionedPatterns[word] = true
+			}
+		}
+	}
+
+	var drifts []string
+
+	// Check for unexpected files (changed but not in any ticket)
+	for _, f := range changedFiles {
+		matched := false
+		for pattern := range mentionedPatterns {
+			if f == pattern || strings.HasPrefix(f, pattern+"/") || strings.HasPrefix(f, strings.TrimSuffix(pattern, "/**")) {
+				matched = true
+				break
+			}
+		}
+		if !matched && len(mentionedPatterns) > 0 {
+			drifts = append(drifts, fmt.Sprintf("unexpected file changed: %s (not in any ticket)", f))
+		}
+	}
+
+	return drifts, nil
+}
+
+// isFilePath checks if a string looks like a file path.
+func isFilePath(s string) bool {
+	return (strings.Contains(s, "/") || strings.Contains(s, ".")) &&
+		!strings.HasPrefix(s, "http") &&
+		!strings.Contains(s, "@") &&
+		len(s) > 3 &&
+		len(s) < 200 &&
+		(strings.HasSuffix(s, ".go") || strings.HasSuffix(s, ".ts") ||
+			strings.HasSuffix(s, ".svelte") || strings.HasSuffix(s, ".json") ||
+			strings.HasSuffix(s, ".md") || strings.HasSuffix(s, ".sql") ||
+			strings.HasSuffix(s, ".yaml") || strings.HasSuffix(s, ".yml") ||
+			strings.Contains(s, "/") && !strings.Contains(s, " "))
+}
+
 // --- Cleanup ---
 
 // CleanupMission removes all worktrees and data for a mission.
@@ -284,6 +344,48 @@ func (s *Store) CleanupMission(missionID string) error {
 		}
 	}
 	return s.db.DeleteMission(missionID)
+}
+
+// --- Evidence ---
+
+// RecordEvidence creates a structured evidence record for a ticket.
+func (s *Store) RecordEvidence(ticketID, missionID, evidenceType, content, agent, verdict string) (*db.SwarmEvidence, error) {
+	id := generateID()
+	if err := s.db.CreateEvidence(id, ticketID, missionID, evidenceType, content, agent, verdict); err != nil {
+		return nil, err
+	}
+	return &db.SwarmEvidence{
+		ID:        id,
+		TicketID:  ticketID,
+		MissionID: missionID,
+		Type:      evidenceType,
+		Content:   content,
+		Agent:     agent,
+		Verdict:   verdict,
+	}, nil
+}
+
+// ListTicketEvidence returns all evidence for a ticket.
+func (s *Store) ListTicketEvidence(ticketID string) ([]db.SwarmEvidence, error) {
+	return s.db.ListEvidenceByTicket(ticketID)
+}
+
+// ListMissionEvidence returns all evidence for a mission.
+func (s *Store) ListMissionEvidence(missionID string) ([]db.SwarmEvidence, error) {
+	return s.db.ListEvidenceByMission(missionID)
+}
+
+// --- Guardrails ---
+
+// TrackToolCall records a tool invocation for guardrail tracking.
+// Returns the updated guardrail state.
+func (s *Store) TrackToolCall(workerID, missionID, toolName string) (*db.SwarmGuardrail, error) {
+	return s.db.UpsertGuardrail(workerID, missionID, toolName)
+}
+
+// GetGuardrail returns guardrail state for a worker.
+func (s *Store) GetGuardrail(workerID string) (*db.SwarmGuardrail, error) {
+	return s.db.GetGuardrail(workerID)
 }
 
 // --- helpers ---

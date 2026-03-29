@@ -158,18 +158,20 @@ CREATE INDEX IF NOT EXISTS idx_workers_mission ON workers(mission_id);
 
 -- Swarm: Tickets (atomic work units)
 CREATE TABLE IF NOT EXISTS tickets (
-    id          TEXT PRIMARY KEY,
-    mission_id  TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
-    title       TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    domain      TEXT NOT NULL DEFAULT 'general',
-    priority    INTEGER NOT NULL DEFAULT 100,
-    status      TEXT NOT NULL DEFAULT 'pending',
-    worker_id   TEXT REFERENCES workers(id),
-    depends_on  TEXT NOT NULL DEFAULT '[]',
-    result      TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    id              TEXT PRIMARY KEY,
+    mission_id      TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    title           TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    domain          TEXT NOT NULL DEFAULT 'general',
+    priority        INTEGER NOT NULL DEFAULT 100,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    worker_id       TEXT REFERENCES workers(id),
+    depends_on      TEXT NOT NULL DEFAULT '[]',
+    result          TEXT NOT NULL DEFAULT '',
+    revision_count  INTEGER NOT NULL DEFAULT 0,
+    rejection_count INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tickets_mission ON tickets(mission_id);
@@ -222,6 +224,32 @@ CREATE TABLE IF NOT EXISTS forge_entries (
     conflict_files TEXT NOT NULL DEFAULT '[]',
     merged_at      TEXT,
     created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- Swarm: Evidence (structured audit trail per ticket)
+CREATE TABLE IF NOT EXISTS swarm_evidence (
+    id          TEXT PRIMARY KEY,
+    ticket_id   TEXT NOT NULL,
+    mission_id  TEXT NOT NULL,
+    type        TEXT NOT NULL,
+    content     TEXT NOT NULL DEFAULT '',
+    agent       TEXT NOT NULL DEFAULT '',
+    verdict     TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_swarm_evidence_ticket ON swarm_evidence(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_swarm_evidence_mission ON swarm_evidence(mission_id);
+
+-- Swarm: Guardrails (worker safety tracking)
+CREATE TABLE IF NOT EXISTS swarm_guardrails (
+    worker_id        TEXT PRIMARY KEY,
+    mission_id       TEXT NOT NULL,
+    tool_calls       INTEGER NOT NULL DEFAULT 0,
+    last_tool        TEXT NOT NULL DEFAULT '',
+    repetition_count INTEGER NOT NULL DEFAULT 0,
+    started_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 -- Guardian: proactive codebase health alerts

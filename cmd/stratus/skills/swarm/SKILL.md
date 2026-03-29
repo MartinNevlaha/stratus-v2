@@ -197,8 +197,13 @@ Worker: <worker-id> | Worktree: <worktree-path> | Branch: <branch-name> | Missio
 3. Before each ticket: swarm_ticket_update(ticket_id="<id>", status="in_progress")
 4. After each ticket: swarm_ticket_update(ticket_id="<id>", status="done", result="<summary>") then swarm_send_signal(from_worker="<worker-id>", type="TICKET_DONE", payload='{"ticket_id":"<id>"}')
 5. On failure: swarm_ticket_update(ticket_id="<id>", status="failed", result="<reason>") then swarm_send_signal(from_worker="<worker-id>", type="TICKET_FAILED", payload='{"ticket_id":"<id>","reason":"<reason>"}')
-6. Commit regularly — small, atomic commits on your branch
-7. When ALL tickets done: swarm_submit_merge(worker_id="<worker-id>")
+6. Record evidence after each significant action:
+   - swarm_record_evidence(ticket_id="<id>", type="diff", content="<files changed summary>") after changes
+   - swarm_record_evidence(ticket_id="<id>", type="test_result", content="<output>", verdict="pass|fail") after tests
+   - swarm_record_evidence(ticket_id="<id>", type="build", content="<output>", verdict="pass|fail") after builds
+7. Commit regularly — small, atomic commits on your branch
+8. When ALL tickets done: swarm_submit_merge(worker_id="<worker-id>")
+9. Tickets have max 5 revisions — if you keep failing, report failure rather than looping
 
 ## Signals
 Poll: swarm_signals(worker_id="<worker-id>") — check before dependent tickets and after completions.
@@ -238,7 +243,12 @@ curl -sS -X PUT $BASE/api/swarm/missions/<mission-id>/status \
   -d '{"status": "verifying"}'
 ```
 
-Delegate to `delivery-code-reviewer` — spawn in background. They should review the changes across all worker branches.
+Fetch evidence collected by workers:
+```bash
+curl -sS $BASE/api/swarm/missions/<mission-id>/evidence
+```
+
+Delegate to `delivery-code-reviewer` — spawn in background. Pass the evidence as context. They should review the changes across all worker branches using the structured evidence trail.
 
 If `[must_fix]` issues are found → transition back to implement, create fix-up tickets, re-dispatch.
 On pass → transition to learn.

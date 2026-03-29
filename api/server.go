@@ -262,6 +262,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/swarm/missions/{id}/checkpoint", s.handleSaveCheckpoint)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/checkpoint/latest", s.handleGetLatestCheckpoint)
 	mux.HandleFunc("PUT /api/swarm/missions/{id}/strategy-outcome", s.handleUpdateStrategyOutcome)
+	mux.HandleFunc("POST /api/swarm/tickets/{id}/evidence", s.handleRecordEvidence)
+	mux.HandleFunc("GET /api/swarm/tickets/{id}/evidence", s.handleListTicketEvidence)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/evidence", s.handleListMissionEvidence)
+	mux.HandleFunc("POST /api/swarm/guardrails/track", s.handleTrackToolCall)
+	mux.HandleFunc("GET /api/swarm/workers/{id}/guardrails", s.handleGetGuardrail)
+	mux.HandleFunc("POST /api/swarm/missions/{id}/drift", s.handleCheckDrift)
 
 	// Insight
 	mux.HandleFunc("GET /api/insight/config", s.handleGetInsightConfig)

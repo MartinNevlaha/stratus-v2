@@ -468,6 +468,61 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			return client.post(fmt.Sprintf("/api/swarm/missions/%s/checkpoint", missionID), body)
 		},
 	})
+
+	// --- Evidence tracking ---
+
+	s.Register(Tool{
+		Name:        "swarm_record_evidence",
+		Description: "Record structured evidence for a ticket. Use after completing meaningful actions (tests, builds, reviews) to create an audit trail that reviewers can inspect.",
+		InputSchema: obj(
+			req("ticket_id", "string", "Ticket ID this evidence belongs to"),
+			req("type", "string", "Evidence type: diff | test_result | review | build | note | gate"),
+			req("content", "string", "Evidence content (diff output, test results, review comments, etc.)"),
+			opt("agent", "string", "Agent that produced this evidence"),
+			opt("verdict", "string", "Verdict: pass | fail | info"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			ticketID, _ := args["ticket_id"].(string)
+			if ticketID == "" {
+				return nil, fmt.Errorf("ticket_id is required")
+			}
+			return client.post(fmt.Sprintf("/api/swarm/tickets/%s/evidence", ticketID), args)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "swarm_get_evidence",
+		Description: "List all evidence recorded for a ticket. Use during review to see what the worker produced.",
+		InputSchema: obj(
+			req("ticket_id", "string", "Ticket ID"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			ticketID, _ := args["ticket_id"].(string)
+			if ticketID == "" {
+				return nil, fmt.Errorf("ticket_id is required")
+			}
+			return client.get(fmt.Sprintf("/api/swarm/tickets/%s/evidence", ticketID), nil)
+		},
+	})
+
+	// --- Guardrails ---
+
+	s.Register(Tool{
+		Name:        "swarm_track_tool_call",
+		Description: "Track a tool call for guardrail safety metrics. Returns allow/block action based on loop detection and tool call ceiling.",
+		InputSchema: obj(
+			req("worker_id", "string", "Worker ID"),
+			req("tool_name", "string", "Name of the tool being called"),
+			opt("mission_id", "string", "Mission ID (auto-detected from worker if omitted)"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			workerID, _ := args["worker_id"].(string)
+			if workerID == "" {
+				return nil, fmt.Errorf("worker_id is required")
+			}
+			return client.post("/api/swarm/guardrails/track", args)
+		},
+	})
 }
 
 // apiClient is a minimal HTTP client for calling the Stratus API.

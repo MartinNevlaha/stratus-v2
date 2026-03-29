@@ -63,6 +63,42 @@ func checkStaleWorkflows(coord *orchestration.Coordinator, cfg config.GuardianCo
 	return alerts
 }
 
+// checkStaleWorkers flags swarm workers that have stopped heartbeating.
+func checkStaleWorkers(database *db.DB, cfg config.GuardianConfig) []alertInput {
+	threshold := 5 * time.Minute
+	if cfg.StaleWorkflowHours > 0 {
+		// Use a fraction of the stale workflow threshold for workers (workers should heartbeat more frequently)
+		threshold = time.Duration(cfg.StaleWorkflowHours) * time.Hour / 12
+		if threshold < 5*time.Minute {
+			threshold = 5 * time.Minute
+		}
+	}
+
+	staleWorkers, err := database.ListStaleWorkers(threshold)
+	if err != nil || len(staleWorkers) == 0 {
+		return nil
+	}
+
+	var alerts []alertInput
+	for _, w := range staleWorkers {
+		// Mark as stale in DB
+		_ = database.UpdateWorkerStatus(w.ID, "stale")
+		alerts = append(alerts, alertInput{
+			Type:     "stale_worker",
+			Severity: "warning",
+			Message:  fmt.Sprintf("Swarm worker %s (%s) has not heartbeated for >%v — marked stale", w.ID, w.AgentType, threshold),
+			Metadata: map[string]any{
+				"dedup_key":      "stale_worker_" + w.ID,
+				"worker_id":      w.ID,
+				"mission_id":     w.MissionID,
+				"agent_type":     w.AgentType,
+				"last_heartbeat": w.LastHeartbeat,
+			},
+		})
+	}
+	return alerts
+}
+
 // checkMemoryHealth warns when the events table grows too large.
 func checkMemoryHealth(database *db.DB, cfg config.GuardianConfig) []alertInput {
 	count, err := database.CountEvents()

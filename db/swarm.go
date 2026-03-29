@@ -64,18 +64,43 @@ type SwarmWorker struct {
 
 // SwarmTicket represents an atomic work unit within a mission.
 type SwarmTicket struct {
-	ID          string  `json:"id"`
-	MissionID   string  `json:"mission_id"`
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Domain      string  `json:"domain"`
-	Priority    int     `json:"priority"`
-	Status      string  `json:"status"`
-	WorkerID    *string `json:"worker_id,omitempty"`
-	DependsOn   string  `json:"depends_on"`
-	Result      string  `json:"result"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID             string  `json:"id"`
+	MissionID      string  `json:"mission_id"`
+	Title          string  `json:"title"`
+	Description    string  `json:"description"`
+	Domain         string  `json:"domain"`
+	Priority       int     `json:"priority"`
+	Status         string  `json:"status"`
+	WorkerID       *string `json:"worker_id,omitempty"`
+	DependsOn      string  `json:"depends_on"`
+	Result         string  `json:"result"`
+	RevisionCount  int     `json:"revision_count"`
+	RejectionCount int     `json:"rejection_count"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+}
+
+// SwarmEvidence represents a structured audit record for a ticket.
+type SwarmEvidence struct {
+	ID        string `json:"id"`
+	TicketID  string `json:"ticket_id"`
+	MissionID string `json:"mission_id"`
+	Type      string `json:"type"`
+	Content   string `json:"content"`
+	Agent     string `json:"agent"`
+	Verdict   string `json:"verdict"`
+	CreatedAt string `json:"created_at"`
+}
+
+// SwarmGuardrail tracks tool call safety metrics for a worker.
+type SwarmGuardrail struct {
+	WorkerID        string `json:"worker_id"`
+	MissionID       string `json:"mission_id"`
+	ToolCalls       int    `json:"tool_calls"`
+	LastTool        string `json:"last_tool"`
+	RepetitionCount int    `json:"repetition_count"`
+	StartedAt       string `json:"started_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // SwarmSignal represents an inter-agent message.
@@ -340,10 +365,10 @@ func (d *DB) GetTicket(id string) (*SwarmTicket, error) {
 	var workerID sql.NullString
 	err := d.sql.QueryRow(`
 		SELECT id, mission_id, title, description, domain, priority,
-		       status, worker_id, depends_on, result, created_at, updated_at
+		       status, worker_id, depends_on, result, revision_count, rejection_count, created_at, updated_at
 		FROM tickets WHERE id = ?`, id).
 		Scan(&t.ID, &t.MissionID, &t.Title, &t.Description, &t.Domain, &t.Priority,
-			&t.Status, &workerID, &t.DependsOn, &t.Result, &t.CreatedAt, &t.UpdatedAt)
+			&t.Status, &workerID, &t.DependsOn, &t.Result, &t.RevisionCount, &t.RejectionCount, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("ticket not found: %s", id)
 	}
@@ -359,7 +384,7 @@ func (d *DB) GetTicket(id string) (*SwarmTicket, error) {
 func (d *DB) ListTickets(missionID string) ([]SwarmTicket, error) {
 	rows, err := d.sql.Query(`
 		SELECT id, mission_id, title, description, domain, priority,
-		       status, worker_id, depends_on, result, created_at, updated_at
+		       status, worker_id, depends_on, result, revision_count, rejection_count, created_at, updated_at
 		FROM tickets WHERE mission_id = ? ORDER BY priority ASC, created_at ASC`, missionID)
 	if err != nil {
 		return nil, fmt.Errorf("list tickets: %w", err)
@@ -383,10 +408,44 @@ func (d *DB) AssignTicket(ticketID, workerID string) error {
 	return nil
 }
 
-func (d *DB) UpdateTicketStatus(id, status, result string) error {
+// UpdateTicketStatus updates a ticket's status and optional result.
+// It enforces bounded retry discipline:
+//   - revision_count increments on each transition back to in_progress
+//   - rejection_count increments when done→in_progress (QA rejection)
+//   - Returns error if revision_count >= maxRevisions or rejection_count >= maxRejections
+func (d *DB) UpdateTicketStatus(id, status, result string, maxRevisions, maxRejections int) error {
+	// Get current ticket state for counter logic
+	var currentStatus string
+	var revCount, rejCount int
+	err := d.sql.QueryRow(`SELECT status, revision_count, rejection_count FROM tickets WHERE id = ?`, id).
+		Scan(&currentStatus, &revCount, &rejCount)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("ticket not found: %s", id)
+	}
+	if err != nil {
+		return fmt.Errorf("read ticket: %w", err)
+	}
+
+	// Increment revision count when moving back to in_progress
+	if status == "in_progress" && (currentStatus == "done" || currentStatus == "failed" || currentStatus == "assigned") {
+		revCount++
+	}
+	// Increment rejection count when done→in_progress (QA rejection loop)
+	if status == "in_progress" && currentStatus == "done" {
+		rejCount++
+	}
+
+	// Enforce limits
+	if maxRevisions > 0 && revCount > maxRevisions {
+		return fmt.Errorf("ticket %s exceeded max revisions (%d/%d) — escalate to user", id, revCount, maxRevisions)
+	}
+	if maxRejections > 0 && rejCount > maxRejections {
+		return fmt.Errorf("ticket %s exceeded max QA rejections (%d/%d) — escalate to user or consult critic", id, rejCount, maxRejections)
+	}
+
 	res, err := d.sql.Exec(`
-		UPDATE tickets SET status = ?, result = ?, updated_at = ? WHERE id = ?`,
-		status, result, now(), id,
+		UPDATE tickets SET status = ?, result = ?, revision_count = ?, rejection_count = ?, updated_at = ? WHERE id = ?`,
+		status, result, revCount, rejCount, now(), id,
 	)
 	if err != nil {
 		return fmt.Errorf("update ticket status: %w", err)
@@ -442,7 +501,7 @@ func scanTickets(rows *sql.Rows) ([]SwarmTicket, error) {
 		var t SwarmTicket
 		var workerID sql.NullString
 		if err := rows.Scan(&t.ID, &t.MissionID, &t.Title, &t.Description, &t.Domain, &t.Priority,
-			&t.Status, &workerID, &t.DependsOn, &t.Result, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.Status, &workerID, &t.DependsOn, &t.Result, &t.RevisionCount, &t.RejectionCount, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if workerID.Valid {
@@ -878,6 +937,155 @@ func (d *DB) UpdateMissionStrategyOutcome(id, outcome string) error {
 
 func now() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+// --- Swarm Evidence ---
+
+// CreateEvidence inserts a new evidence record.
+func (d *DB) CreateEvidence(id, ticketID, missionID, evidenceType, content, agent, verdict string) error {
+	_, err := d.sql.Exec(`
+		INSERT INTO swarm_evidence (id, ticket_id, mission_id, type, content, agent, verdict)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, ticketID, missionID, evidenceType, content, agent, verdict,
+	)
+	if err != nil {
+		return fmt.Errorf("insert evidence: %w", err)
+	}
+	return nil
+}
+
+// ListEvidenceByTicket returns all evidence for a ticket.
+func (d *DB) ListEvidenceByTicket(ticketID string) ([]SwarmEvidence, error) {
+	rows, err := d.sql.Query(`
+		SELECT id, ticket_id, mission_id, type, content, agent, verdict, created_at
+		FROM swarm_evidence WHERE ticket_id = ? ORDER BY created_at ASC`, ticketID)
+	if err != nil {
+		return nil, fmt.Errorf("list evidence: %w", err)
+	}
+	defer rows.Close()
+	var evidence []SwarmEvidence
+	for rows.Next() {
+		var e SwarmEvidence
+		if err := rows.Scan(&e.ID, &e.TicketID, &e.MissionID, &e.Type, &e.Content, &e.Agent, &e.Verdict, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		evidence = append(evidence, e)
+	}
+	return evidence, rows.Err()
+}
+
+// ListEvidenceByMission returns all evidence for a mission.
+func (d *DB) ListEvidenceByMission(missionID string) ([]SwarmEvidence, error) {
+	rows, err := d.sql.Query(`
+		SELECT id, ticket_id, mission_id, type, content, agent, verdict, created_at
+		FROM swarm_evidence WHERE mission_id = ? ORDER BY created_at ASC`, missionID)
+	if err != nil {
+		return nil, fmt.Errorf("list mission evidence: %w", err)
+	}
+	defer rows.Close()
+	var evidence []SwarmEvidence
+	for rows.Next() {
+		var e SwarmEvidence
+		if err := rows.Scan(&e.ID, &e.TicketID, &e.MissionID, &e.Type, &e.Content, &e.Agent, &e.Verdict, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		evidence = append(evidence, e)
+	}
+	return evidence, rows.Err()
+}
+
+// --- Swarm Guardrails ---
+
+// UpsertGuardrail creates or updates guardrail tracking for a worker.
+func (d *DB) UpsertGuardrail(workerID, missionID, toolName string) (*SwarmGuardrail, error) {
+	var g SwarmGuardrail
+	err := d.sql.QueryRow(`SELECT worker_id, mission_id, tool_calls, last_tool, repetition_count, started_at, updated_at FROM swarm_guardrails WHERE worker_id = ?`, workerID).
+		Scan(&g.WorkerID, &g.MissionID, &g.ToolCalls, &g.LastTool, &g.RepetitionCount, &g.StartedAt, &g.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		// First tool call for this worker
+		_, err = d.sql.Exec(`INSERT INTO swarm_guardrails (worker_id, mission_id, tool_calls, last_tool, repetition_count) VALUES (?, ?, 1, ?, 1)`,
+			workerID, missionID, toolName)
+		if err != nil {
+			return nil, fmt.Errorf("insert guardrail: %w", err)
+		}
+		return &SwarmGuardrail{WorkerID: workerID, MissionID: missionID, ToolCalls: 1, LastTool: toolName, RepetitionCount: 1}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get guardrail: %w", err)
+	}
+
+	g.ToolCalls++
+	if toolName == g.LastTool {
+		g.RepetitionCount++
+	} else {
+		g.RepetitionCount = 1
+		g.LastTool = toolName
+	}
+
+	_, err = d.sql.Exec(`UPDATE swarm_guardrails SET tool_calls = ?, last_tool = ?, repetition_count = ?, updated_at = ? WHERE worker_id = ?`,
+		g.ToolCalls, g.LastTool, g.RepetitionCount, now(), workerID)
+	if err != nil {
+		return nil, fmt.Errorf("update guardrail: %w", err)
+	}
+	return &g, nil
+}
+
+// GetGuardrail returns guardrail state for a worker.
+func (d *DB) GetGuardrail(workerID string) (*SwarmGuardrail, error) {
+	var g SwarmGuardrail
+	err := d.sql.QueryRow(`SELECT worker_id, mission_id, tool_calls, last_tool, repetition_count, started_at, updated_at FROM swarm_guardrails WHERE worker_id = ?`, workerID).
+		Scan(&g.WorkerID, &g.MissionID, &g.ToolCalls, &g.LastTool, &g.RepetitionCount, &g.StartedAt, &g.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get guardrail: %w", err)
+	}
+	return &g, nil
+}
+
+// ListActiveGuardrails returns all guardrail records for a mission.
+func (d *DB) ListActiveGuardrails(missionID string) ([]SwarmGuardrail, error) {
+	rows, err := d.sql.Query(`SELECT worker_id, mission_id, tool_calls, last_tool, repetition_count, started_at, updated_at FROM swarm_guardrails WHERE mission_id = ?`, missionID)
+	if err != nil {
+		return nil, fmt.Errorf("list guardrails: %w", err)
+	}
+	defer rows.Close()
+	var result []SwarmGuardrail
+	for rows.Next() {
+		var g SwarmGuardrail
+		if err := rows.Scan(&g.WorkerID, &g.MissionID, &g.ToolCalls, &g.LastTool, &g.RepetitionCount, &g.StartedAt, &g.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, g)
+	}
+	return result, rows.Err()
+}
+
+// ListStaleWorkers returns active workers whose last heartbeat is older than threshold.
+func (d *DB) ListStaleWorkers(threshold time.Duration) ([]SwarmWorker, error) {
+	cutoff := time.Now().UTC().Add(-threshold).Format("2006-01-02T15:04:05.000Z")
+	rows, err := d.sql.Query(`
+		SELECT id, mission_id, agent_type, worktree_path, branch_name, status, session_id, last_heartbeat, created_at, updated_at
+		FROM workers WHERE status = 'active' AND last_heartbeat < ?`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list stale workers: %w", err)
+	}
+	defer rows.Close()
+	var workers []SwarmWorker
+	for rows.Next() {
+		var w SwarmWorker
+		var sessionID sql.NullString
+		if err := rows.Scan(&w.ID, &w.MissionID, &w.AgentType, &w.WorktreePath, &w.BranchName, &w.Status, &sessionID, &w.LastHeartbeat, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if sessionID.Valid {
+			w.SessionID = &sessionID.String
+		}
+		workers = append(workers, w)
+	}
+	return workers, rows.Err()
 }
 
 // GetRecentDailyMetrics returns aggregated daily metrics for the last n days.
