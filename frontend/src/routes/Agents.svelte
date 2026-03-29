@@ -465,7 +465,7 @@
             {#if skill.argument_hint}
               <div class="card-hint">Argument: <code>{skill.argument_hint}</code></div>
             {/if}
-            {#if skill.resource_dirs.length > 0}
+            {#if skill.resource_dirs?.length > 0}
               <div class="card-resources">
                 {#each skill.resource_dirs as dir}
                   <span class="resource-tag">{dir}/</span>

@@ -357,6 +357,7 @@ func ParseSkillFile(dirPath string) (*SkillDef, error) {
 		}
 	}
 
+	skill.ResourceDirs = []string{}
 	entries, err := os.ReadDir(dirPath)
 	if err == nil {
 		for _, entry := range entries {
