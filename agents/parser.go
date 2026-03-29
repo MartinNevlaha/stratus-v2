@@ -2,6 +2,7 @@ package agents
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,6 +187,51 @@ func extractFrontmatter(content string) (frontmatter string, body string, err er
 	}
 
 	return strings.Join(fmLines, "\n"), strings.TrimSpace(strings.Join(bodyLines, "\n")), nil
+}
+
+// openCodeConfig represents the relevant parts of opencode.json
+type openCodeConfig struct {
+	Agent map[string]openCodeAgentEntry `json:"agent"`
+}
+
+type openCodeAgentEntry struct {
+	Model       string `json:"model"`
+	Description string `json:"description"`
+	Mode        string `json:"mode"`
+}
+
+// ReadOpenCodeConfig reads opencode.json and returns a map of agent name -> model string.
+func ReadOpenCodeConfig(projectRoot string) map[string]string {
+	path := filepath.Join(projectRoot, "opencode.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var cfg openCodeConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+
+	models := make(map[string]string, len(cfg.Agent))
+	for name, entry := range cfg.Agent {
+		if entry.Model != "" {
+			models[name] = entry.Model
+		}
+	}
+	return models
+}
+
+// EnrichOpenCodeAgents merges model info from opencode.json into parsed agent defs.
+func EnrichOpenCodeAgents(agents []*AgentDef, models map[string]string) {
+	if models == nil {
+		return
+	}
+	for _, a := range agents {
+		if m, ok := models[a.Name]; ok && a.Model == "" {
+			a.Model = m
+		}
+	}
 }
 
 func ListAgentFiles(dir string) ([]*AgentDef, error) {

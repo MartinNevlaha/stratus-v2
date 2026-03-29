@@ -21,6 +21,9 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	ccAgents, _ := agents.ListAgentFiles(ccDir)
 	ocAgents, _ := agents.ListAgentFiles(ocDir)
 
+	models := agents.ReadOpenCodeConfig(s.projectRoot)
+	agents.EnrichOpenCodeAgents(ocAgents, models)
+
 	json200(w, agentsResponse{
 		ClaudeCode: ccAgents,
 		OpenCode:   ocAgents,
@@ -49,6 +52,12 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 
 	ocPath := s.projectRoot + "/.opencode/agents/" + name + ".md"
 	if a, err := agents.ParseAgentFile(ocPath); err == nil {
+		models := agents.ReadOpenCodeConfig(s.projectRoot)
+		if models != nil {
+			if m, ok := models[name]; ok && a.Model == "" {
+				a.Model = m
+			}
+		}
 		detail.OpenCode = a
 	}
 
