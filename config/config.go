@@ -18,7 +18,7 @@ type SyncState struct {
 type LLMConfig struct {
 	Provider    string  `json:"provider"`
 	Model       string  `json:"model"`
-	APIKey      string  `json:"-"`
+	APIKey      string  `json:"api_key,omitempty"`
 	BaseURL     string  `json:"base_url,omitempty"`
 	Timeout     int     `json:"timeout,omitempty"`
 	MaxTokens   int     `json:"max_tokens,omitempty"`

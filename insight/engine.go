@@ -109,6 +109,7 @@ func (e *Engine) initLLMClient() {
 	if llmCfg.Provider == "" {
 		llmCfg = llm.DefaultConfig()
 	}
+	llmCfg = llmCfg.WithEnv()
 	client, err := llm.NewClient(llmCfg)
 	if err != nil {
 		slog.Warn("insight: failed to initialize LLM client", "error", err)
