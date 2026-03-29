@@ -9,10 +9,9 @@
 
   let allWorkflows = $state<WorkflowState[]>([])
   let missions = $state<SwarmMission[]>([])
-  let expandedMission = $state<string | null>(null)
-  let missionDetail = $state<SwarmMissionDetail | null>(null)
-  let missionLoading = $state(false)
-  let missionView = $state<'list' | 'graph'>('list')
+  let swarmDetails = $state<Record<string, SwarmMissionDetail | null>>({})
+  let swarmLoading = $state<Record<string, boolean>>({})
+  let swarmViews = $state<Record<string, 'list' | 'graph'>>({})
   let confirmDelete = $state<string | null>(null)
   let copiedId = $state<string | null>(null)
   let expandedTasks = $state<Set<string>>(new Set())
@@ -75,7 +74,8 @@
     return wf.type
   }
 
-  let activeMissions = $derived(missions.filter(m => m.status !== 'complete' && m.status !== 'failed' && m.status !== 'aborted'))
+  // Map workflow_id → active mission (for swarm workflows)
+  let swarmMissionByWfId = $derived(new Map(missions.filter(m => m.status !== 'complete' && m.status !== 'failed' && m.status !== 'aborted').map(m => [m.workflow_id, m])))
 
   let recentEvents = $derived(appState.dashboard?.recent_events ?? [])
   let vexorOk = $derived(appState.dashboard?.vexor_available ?? false)
@@ -148,36 +148,6 @@
     setTimeout(() => { if (copiedId === key) copiedId = null }, 2000)
   }
 
-  let _missionLoadId = 0
-  async function toggleMission(id: string) {
-    if (expandedMission === id) {
-      expandedMission = null
-      missionDetail = null
-      missionLoading = false
-      return
-    }
-    expandedMission = id
-    missionDetail = null
-    missionView = 'list'
-    missionLoading = true
-    const loadId = ++_missionLoadId
-    try {
-      const detail = await getMission(id)
-      // Guard against race: only apply if this is still the latest request
-      if (loadId === _missionLoadId) {
-        missionDetail = detail
-      }
-    } catch {
-      if (loadId === _missionLoadId) {
-        missionDetail = null
-      }
-    } finally {
-      if (loadId === _missionLoadId) {
-        missionLoading = false
-      }
-    }
-  }
-
   function workerStatusColor(status: string): string {
     switch (status) {
       case 'active': return '#3fb950'
@@ -208,12 +178,21 @@
     return `${Math.floor(diff / 3600)}h ago`
   }
 
-  function workerTicketCounts(workerId: string): string {
-    if (!missionDetail) return ''
-    const assigned = missionDetail.tickets.filter(t => t.worker_id === workerId)
+  function workerTicketCounts(detail: SwarmMissionDetail, workerId: string): string {
+    const assigned = detail.tickets.filter(t => t.worker_id === workerId)
     if (assigned.length === 0) return ''
     const done = assigned.filter(t => t.status === 'done').length
     return `${done}/${assigned.length}`
+  }
+
+  async function loadSwarmDetail(wfId: string) {
+    const mission = swarmMissionByWfId.get(wfId)
+    if (!mission) { swarmDetails[wfId] = null; return }
+    swarmLoading[wfId] = true
+    try {
+      swarmDetails[wfId] = await getMission(mission.id)
+    } catch { swarmDetails[wfId] = null }
+    finally { swarmLoading[wfId] = false }
   }
 
   onMount(() => {
@@ -233,29 +212,38 @@
     loadGuardianAlerts()
   })
 
-  // Swarm real-time refresh — re-fetch on every WS event
+  // Auto-load swarm detail when mission map or active workflows change
   $effect(() => {
-    const _ = appState.swarmUpdateCounter
-    if (_ === 0) return // skip initial
-    listMissions().then(m => {
-      missions = m
-      const active = m.filter(mi => mi.status !== 'complete' && mi.status !== 'failed' && mi.status !== 'aborted')
-      if (active.length === 1 && !expandedMission) {
-        toggleMission(active[0].id)
-      }
-    }).catch(() => {})
-    loadPastItems()
-    if (expandedMission) {
-      getMission(expandedMission).then(d => missionDetail = d).catch(() => {})
+    const swarmWfs = activeWfs.filter(wf => displayType(wf) === 'swarm')
+    const _map = swarmMissionByWfId // track as dependency
+    for (const wf of swarmWfs) {
+      loadSwarmDetail(wf.id)
     }
   })
 
-  // Tick heartbeat display every 5s so relative times update
+  // Swarm real-time refresh on WS events
+  $effect(() => {
+    const _ = appState.swarmUpdateCounter
+    if (_ === 0) return
+    listMissions().then(m => { missions = m }).catch(() => {})
+    loadPastItems()
+  })
+
+  // Tick heartbeat display + poll swarm details every 5s
   let _heartbeatTick = $state(0)
-  let _heartbeatInterval: ReturnType<typeof setInterval> | undefined
+  let _pollInterval: ReturnType<typeof setInterval> | undefined
   onMount(() => {
-    _heartbeatInterval = setInterval(() => _heartbeatTick++, 5000)
-    return () => clearInterval(_heartbeatInterval)
+    _pollInterval = setInterval(() => {
+      _heartbeatTick++
+      const swarmWfs = activeWfs.filter(wf => displayType(wf) === 'swarm')
+      if (swarmWfs.length > 0) {
+        listMissions().then(m => { missions = m }).catch(() => {})
+        for (const wf of swarmWfs) {
+          loadSwarmDetail(wf.id)
+        }
+      }
+    }, 5000)
+    return () => clearInterval(_pollInterval)
   })
 </script>
 
@@ -348,110 +336,9 @@
     {/if}
   </div>
 
-  <!-- Active Missions -->
-  {#if activeMissions.length > 0}
-    <div class="section-title">Active Missions</div>
-    {#each activeMissions as mission}
-      <div class="mission-card" class:expanded={expandedMission === mission.id}>
-        <button
-          class="mission-header"
-          onclick={() => toggleMission(mission.id)}
-          aria-expanded={expandedMission === mission.id}
-          aria-controls="mission-detail-{mission.id}"
-        >
-          <span class="mission-status-dot" style="background: {workerStatusColor(mission.status === 'active' ? 'active' : 'pending')}"></span>
-          <span class="mission-title">{mission.title}</span>
-          <span class="mission-phase">{mission.status}</span>
-          <span class="expand-icon">{expandedMission === mission.id ? '\u25BC' : '\u25B6'}</span>
-        </button>
-
-        {#if expandedMission === mission.id && missionLoading}
-          <div class="mission-detail">
-            <div class="detail-loading">Loading…</div>
-          </div>
-        {:else if expandedMission === mission.id && missionDetail}
-          <div class="mission-detail">
-            {#if missionDetail.tickets.length > 0}
-              <div class="mission-view-toggle">
-                <button class="view-btn" class:active={missionView === 'list'} onclick={() => missionView = 'list'}>List</button>
-                <button class="view-btn" class:active={missionView === 'graph'} onclick={() => missionView = 'graph'}>Graph</button>
-              </div>
-            {/if}
-            {#if missionView === 'graph' && missionDetail.tickets.length > 0}
-              <SwarmGraph detail={missionDetail} />
-            {:else}
-            {#if missionDetail.workers.length > 0}
-              <div class="detail-section">
-                <div class="detail-label">Workers</div>
-                <div class="workers-grid">
-                  {#each missionDetail.workers as worker}
-                    <div class="worker-node" class:failed={worker.status === 'failed' || worker.status === 'killed'} class:stale={worker.status === 'stale'}>
-                      <span class="worker-dot" class:active={worker.status === 'active'} style="background: {workerStatusColor(worker.status)}"></span>
-                      <span class="worker-type">{worker.agent_type.replace('delivery-', '')}</span>
-                      <span class="worker-status">{worker.status}</span>
-                      {#if workerTicketCounts(worker.id)}
-                        <span class="worker-tickets">{workerTicketCounts(worker.id)}</span>
-                      {/if}
-                      {#if worker.status === 'active'}
-                        <span class="worker-heartbeat">{(() => { const _ = _heartbeatTick; const hb = appState.lastHeartbeats[worker.id]; return hb ? relativeTime(new Date(hb).toISOString()) : relativeTime(worker.last_heartbeat) })()}</span>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-
-            {#if missionDetail.tickets.length > 0}
-              <div class="detail-section">
-                <div class="detail-label">
-                  Tickets ({missionDetail.tickets.filter(t => t.status === 'done').length}/{missionDetail.tickets.length})
-                  <div class="progress-bar">
-                    <div
-                      class="ticket-progress-fill"
-                      class:active={missionDetail.tickets.some(t => t.status === 'in_progress' || t.status === 'assigned')}
-                      style="width: {missionDetail.tickets.length > 0 ? (missionDetail.tickets.filter(t => t.status === 'done').length / missionDetail.tickets.length) * 100 : 0}%"
-                    ></div>
-                  </div>
-                </div>
-                {#each missionDetail.tickets as ticket}
-                  <div class="ticket" class:done={ticket.status === 'done'} class:active={ticket.status === 'in_progress'} class:failed={ticket.status === 'failed'}>
-                    <span class="ticket-icon" class:spinning={ticket.status === 'in_progress'}>{ticketIcon(ticket.status)}</span>
-                    <span class="ticket-title">{ticket.title}</span>
-                    {#if ticket.worker_id}
-                      {@const worker = missionDetail.workers.find(w => w.id === ticket.worker_id)}
-                      {#if worker}
-                        <span class="ticket-worker-chip">{worker.agent_type.replace('delivery-', '')}</span>
-                      {/if}
-                    {/if}
-                    <span class="ticket-domain">{ticket.domain}</span>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-
-            {#if missionDetail.forge.length > 0}
-              <div class="detail-section">
-                <div class="detail-label">Forge (merge queue)</div>
-                {#each missionDetail.forge as entry}
-                  <div class="forge-entry" class:merged={entry.status === 'merged'} class:conflict={entry.status === 'conflict'}>
-                    {#if entry.status === 'merged'}
-                      <span class="forge-check">&#10003;</span>
-                    {/if}
-                    <span class="forge-branch">{entry.branch_name}</span>
-                    <span class="forge-status">{entry.status}</span>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            {/if}
-          </div>
-        {/if}
-      </div>
-    {/each}
-  {/if}
 
   <!-- Active workflows -->
-  {#if activeWfs.length === 0 && activeMissions.length === 0}
+  {#if activeWfs.length === 0}
     <div class="empty">No active workflows. Use <code>/spec</code>, <code>/bug</code>, or <code>/swarm</code> to start one.</div>
   {:else}
     {#each activeWfs as wf}
@@ -563,6 +450,88 @@
           </div>
         {:else if wf.phase === 'complete' && wf.base_commit}
           <div class="cs-pending">Analyzing changes…</div>
+        {/if}
+
+        <!-- Swarm mission detail (inline for [SWARM] workflows) -->
+        {#if displayType(wf) === 'swarm'}
+          {@const detail = swarmDetails[wf.id]}
+          {@const loading = swarmLoading[wf.id]}
+          <div class="swarm-inline">
+            {#if loading && !detail}
+              <div class="detail-loading">Loading mission…</div>
+            {:else if detail}
+              {#if detail.tickets.length > 0}
+                <div class="mission-view-toggle">
+                  <button class="view-btn" class:active={(swarmViews[wf.id] ?? 'list') === 'list'} onclick={() => swarmViews[wf.id] = 'list'}>List</button>
+                  <button class="view-btn" class:active={(swarmViews[wf.id] ?? 'list') === 'graph'} onclick={() => swarmViews[wf.id] = 'graph'}>Graph</button>
+                </div>
+              {/if}
+              {#if (swarmViews[wf.id] ?? 'list') === 'graph' && detail.tickets.length > 0}
+                <SwarmGraph detail={detail} />
+              {:else}
+                {#if detail.workers.length > 0}
+                  <div class="detail-section">
+                    <div class="detail-label">Workers</div>
+                    <div class="workers-grid">
+                      {#each detail.workers as worker}
+                        <div class="worker-node" class:failed={worker.status === 'failed' || worker.status === 'killed'} class:stale={worker.status === 'stale'}>
+                          <span class="worker-dot" class:active={worker.status === 'active'} style="background: {workerStatusColor(worker.status)}"></span>
+                          <span class="worker-type">{worker.agent_type.replace('delivery-', '')}</span>
+                          <span class="worker-status">{worker.status}</span>
+                          {#if workerTicketCounts(detail, worker.id)}
+                            <span class="worker-tickets">{workerTicketCounts(detail, worker.id)}</span>
+                          {/if}
+                          {#if worker.status === 'active'}
+                            <span class="worker-heartbeat">{(() => { const _ = _heartbeatTick; const hb = appState.lastHeartbeats[worker.id]; return hb ? relativeTime(new Date(hb).toISOString()) : relativeTime(worker.last_heartbeat) })()}</span>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+                {#if detail.tickets.length > 0}
+                  <div class="detail-section">
+                    <div class="detail-label">
+                      Tickets ({detail.tickets.filter(t => t.status === 'done').length}/{detail.tickets.length})
+                      <div class="progress-bar">
+                        <div class="ticket-progress-fill"
+                          class:active={detail.tickets.some(t => t.status === 'in_progress' || t.status === 'assigned')}
+                          style="width: {detail.tickets.length > 0 ? (detail.tickets.filter(t => t.status === 'done').length / detail.tickets.length) * 100 : 0}%"
+                        ></div>
+                      </div>
+                    </div>
+                    {#each detail.tickets as ticket}
+                      <div class="ticket" class:done={ticket.status === 'done'} class:active={ticket.status === 'in_progress'} class:failed={ticket.status === 'failed'}>
+                        <span class="ticket-icon" class:spinning={ticket.status === 'in_progress'}>{ticketIcon(ticket.status)}</span>
+                        <span class="ticket-title">{ticket.title}</span>
+                        {#if ticket.worker_id}
+                          {@const worker = detail.workers.find(w => w.id === ticket.worker_id)}
+                          {#if worker}
+                            <span class="ticket-worker-chip">{worker.agent_type.replace('delivery-', '')}</span>
+                          {/if}
+                        {/if}
+                        <span class="ticket-domain">{ticket.domain}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+                {#if detail.forge.length > 0}
+                  <div class="detail-section">
+                    <div class="detail-label">Forge (merge queue)</div>
+                    {#each detail.forge as entry}
+                      <div class="forge-entry" class:merged={entry.status === 'merged'} class:conflict={entry.status === 'conflict'}>
+                        {#if entry.status === 'merged'}<span class="forge-check">&#10003;</span>{/if}
+                        <span class="forge-branch">{entry.branch_name}</span>
+                        <span class="forge-status">{entry.status}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+            {:else}
+              <div class="swarm-waiting">Awaiting dispatch…</div>
+            {/if}
+          </div>
         {/if}
 
         <!-- Resume buttons -->
@@ -810,19 +779,22 @@
   .event-ts { font-size: 11px; color: #8b949e; }
 
   /* Mission cards */
+  .swarm-inline {
+    padding: 0 0 4px 0;
+    border-top: 1px solid #21262d;
+    margin-top: 8px;
+  }
+  .swarm-waiting {
+    font-size: 12px; color: #484f58; padding: 10px 0 4px;
+    font-style: italic;
+  }
+
   .mission-card {
     background: #161b22; border: 1px solid #30363d; border-radius: 8px;
     overflow: hidden;
   }
   .mission-card.past { opacity: 0.6; }
   .mission-card.past:hover { opacity: 1; }
-
-  .mission-header {
-    display: flex; align-items: center; gap: 8px; padding: 12px 16px;
-    background: transparent; border: none; color: #c9d1d9; cursor: pointer;
-    font-size: 14px; width: 100%; text-align: left; transition: background 0.1s;
-  }
-  .mission-header:hover { background: #1c2129; }
 
   .mission-header-static {
     display: flex; align-items: center; gap: 8px; padding: 12px 16px;
@@ -839,16 +811,9 @@
   .view-btn:hover { color: #c9d1d9; border-color: #484f58; }
   .view-btn.active { background: #1f6feb22; border-color: #1f6feb; color: #58a6ff; }
 
-  .mission-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .mission-title { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mission-phase { font-size: 12px; color: #8b949e; }
   .mission-phase.failed { color: #f85149; }
-  .expand-icon { font-size: 10px; color: #8b949e; }
-
-  .mission-detail {
-    padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px;
-    border-top: 1px solid #21262d;
-  }
 
   .detail-section { display: flex; flex-direction: column; gap: 6px; }
   .detail-label { font-size: 12px; font-weight: 600; color: #8b949e; display: flex; align-items: center; gap: 8px; margin-top: 8px; }

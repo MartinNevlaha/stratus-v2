@@ -6,22 +6,49 @@
   let proposals = $state<Proposal[]>([])
   let candidates = $state<Candidate[]>([])
   let tab = $state<'proposals' | 'candidates'>('proposals')
-  let loading = $state(true)
+  let loadingProposals = $state(true)
+  let loadingCandidates = $state(false)
+  let candidatesLoaded = $state(false)
   let decideError = $state<string | null>(null)
   let decideWarn = $state<string | null>(null)
 
   onMount(async () => {
-    await refresh()
+    await loadProposals()
   })
 
-  async function refresh() {
-    loading = true
+  async function loadProposals() {
+    loadingProposals = true
     try {
-      const [p, c] = await Promise.all([listProposals('pending'), listCandidates()])
+      const p = await listProposals('pending')
       proposals = p.proposals
-      candidates = c.candidates
     } finally {
-      loading = false
+      loadingProposals = false
+    }
+  }
+
+  async function loadCandidates() {
+    loadingCandidates = true
+    try {
+      const c = await listCandidates('pending')
+      candidates = c.candidates
+      candidatesLoaded = true
+    } finally {
+      loadingCandidates = false
+    }
+  }
+
+  async function switchTab(t: 'proposals' | 'candidates') {
+    tab = t
+    if (t === 'candidates' && !candidatesLoaded) {
+      await loadCandidates()
+    }
+  }
+
+  async function refresh() {
+    if (tab === 'proposals') {
+      await loadProposals()
+    } else {
+      await loadCandidates()
     }
   }
 
@@ -50,7 +77,8 @@
         proposed_content: '',
         confidence: c.confidence,
       })
-      await refresh()
+      candidatesLoaded = false
+      await Promise.all([loadProposals(), loadCandidates()])
       tab = 'proposals'
     } catch (e) {
       decideError = e instanceof Error ? e.message : 'Failed to promote candidate'
@@ -63,11 +91,11 @@
 
 <div class="learning">
   <div class="tabs">
-    <button class:active={tab === 'proposals'} onclick={() => (tab = 'proposals')}>
+    <button class:active={tab === 'proposals'} onclick={() => switchTab('proposals')}>
       Proposals ({proposals.length})
     </button>
-    <button class:active={tab === 'candidates'} onclick={() => (tab = 'candidates')}>
-      Candidates ({candidates.length})
+    <button class:active={tab === 'candidates'} onclick={() => switchTab('candidates')}>
+      Candidates ({candidatesLoaded ? candidates.length : '…'})
     </button>
     <button class="refresh" onclick={refresh}>↺</button>
   </div>
@@ -79,7 +107,9 @@
     <div class="warn">{decideWarn}</div>
   {/if}
 
-  {#if loading}
+  {#if tab === 'proposals' && loadingProposals}
+    <div class="empty">Loading…</div>
+  {:else if tab === 'candidates' && loadingCandidates}
     <div class="empty">Loading…</div>
   {:else if tab === 'proposals'}
     {#if proposals.length === 0}
