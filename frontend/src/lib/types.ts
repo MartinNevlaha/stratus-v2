@@ -237,6 +237,31 @@ export interface Anomaly {
   description: string
 }
 
+export interface MetricsSummary {
+  total_workflows: number
+  completed_workflows: number
+  success_rate: number
+  avg_workflow_duration_ms: number
+  total_tasks: number
+  completed_tasks: number
+}
+
+export interface DailyMetric {
+  date: string
+  total: number
+  completed: number
+  failed: number
+  avg_duration_ms: number
+}
+
+export interface AgentMetric {
+  agent_id: string
+  total_tasks: number
+  completed_tasks: number
+  avg_duration_ms: number
+  success_rate: number
+}
+
 export interface LiveMetricsUpdate {
   summary: MetricsSummary
   daily: DailyMetric[]
@@ -273,6 +298,18 @@ export interface AgentDetail {
 
 export interface SkillsResponse {
   skills: SkillDef[]
+}
+
+export interface DailyMetricsResponse {
+  metrics: DailyMetric[]
+}
+
+export interface AgentMetricsResponse {
+  metrics: AgentMetric[]
+}
+
+export interface ProjectMetricsResponse {
+  metrics: ProjectMetric[]
 }
 
 export interface RuleDef {

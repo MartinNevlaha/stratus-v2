@@ -20,6 +20,10 @@ import type {
   AnalysisResult,
   GuardianAlert,
   GuardianConfig,
+  MetricsSummary,
+  DailyMetricsResponse,
+  AgentMetricsResponse,
+  ProjectMetricsResponse,
 } from './types'
 
 const BASE = '/api'
@@ -203,6 +207,12 @@ export const deleteSkill = (name: string) => del<{ status: string; name: string 
 
 export const triggerAggregation = () =>
   post<{ status: string }>('/metrics/aggregate', {})
+
+export const getMetricsSummary = (days = 30) =>
+  get<{ summary: MetricsSummary }>('/metrics/summary', { days: String(days) })
+
+export const getWorkflowMetrics = (days = 30) =>
+  get<{ metrics: MetricsSummary }>('/metrics/workflows', { days: String(days) })
 
 export const getDailyMetrics = (limit = 30) =>
   get<DailyMetricsResponse>('/metrics/daily', { limit: String(limit) })

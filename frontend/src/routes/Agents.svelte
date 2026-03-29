@@ -57,6 +57,7 @@
   let ruleSearch = $state('')
 
   let selectedSkillsForAssignment = $state<string[]>([])
+  let agentFilter = $state<'all' | 'claude_code' | 'opencode'>('all')
 
   let allAgentNames = $derived.by(() => {
     if (!agents) return []
@@ -64,6 +65,12 @@
     agents.claude_code?.forEach(a => names.add(a.name))
     agents.opencode?.forEach(a => names.add(a.name))
     return Array.from(names).sort()
+  })
+
+  let filteredAgentNames = $derived.by(() => {
+    if (agentFilter === 'all') return allAgentNames
+    if (agentFilter === 'claude_code') return allAgentNames.filter(n => !!getAgentDef(n, 'claude_code'))
+    return allAgentNames.filter(n => !!getAgentDef(n, 'opencode'))
   })
 
   let filteredSkills = $derived.by(() => {
@@ -353,6 +360,19 @@
           Rules ({rules.length})
         </button>
       </div>
+      {#if activeView === 'agents'}
+        <div class="format-filter">
+          <button class:active={agentFilter === 'all'} onclick={() => (agentFilter = 'all')}>
+            All ({allAgentNames.length})
+          </button>
+          <button class:active={agentFilter === 'claude_code'} onclick={() => (agentFilter = 'claude_code')}>
+            <span class="badge cc">CC</span> Claude Code
+          </button>
+          <button class:active={agentFilter === 'opencode'} onclick={() => (agentFilter = 'opencode')}>
+            <span class="badge oc">OC</span> OpenCode
+          </button>
+        </div>
+      {/if}
       <div class="actions">
         {#if activeView === 'agents'}
           <button class="btn-primary" onclick={() => (showCreateAgent = true)}>+ New Agent</button>
@@ -367,7 +387,7 @@
     <!-- AGENTS VIEW -->
     <div hidden={activeView !== 'agents'}>
       <div class="agents-grid">
-        {#each allAgentNames as name (name)}
+        {#each filteredAgentNames as name (name)}
           {@const ccAgent = getAgentDef(name, 'claude_code')}
           {@const ocAgent = getAgentDef(name, 'opencode')}
           {@const primary = ccAgent ?? ocAgent}
@@ -789,6 +809,32 @@
     color: #c9d1d9;
   }
   .view-toggle button:hover:not(.active) { color: #c9d1d9; }
+
+  .format-filter {
+    display: flex;
+    gap: 2px;
+    background: #161b22;
+    border-radius: 8px;
+    padding: 3px;
+  }
+  .format-filter button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s;
+  }
+  .format-filter button.active {
+    background: #21262d;
+    color: #c9d1d9;
+  }
+  .format-filter button:hover:not(.active) { color: #c9d1d9; }
 
   .btn-primary {
     padding: 6px 14px;
