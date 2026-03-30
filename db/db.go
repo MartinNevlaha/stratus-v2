@@ -43,6 +43,13 @@ func (d *DB) Close() error { return d.sql.Close() }
 func (d *DB) SQL() *sql.DB { return d.sql }
 
 func (d *DB) migrate() error {
+	// Pre-migration: fix daily_metrics schema if the table exists but lacks the
+	// workflow_type column. This must run BEFORE d.sql.Exec(schema) because the
+	// schema creates an index on daily_metrics(workflow_type); that index creation
+	// fails if the column is absent in an existing table.
+	if err := d.migrateDailyMetrics(); err != nil {
+		return fmt.Errorf("migrate daily_metrics: %w", err)
+	}
 	if _, err := d.sql.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
@@ -56,17 +63,21 @@ func (d *DB) migrate() error {
 			}
 		}
 	}
-	// Migrate daily_metrics: old schema had UNIQUE(metric_date) only.
-	// New schema has UNIQUE(metric_date, workflow_type). Recreate if needed.
-	if err := d.migrateDailyMetrics(); err != nil {
-		return fmt.Errorf("migrate daily_metrics: %w", err)
-	}
 	return nil
 }
 
 // migrateDailyMetrics checks whether daily_metrics has the workflow_type column.
 // If not, it recreates the table with the new composite unique constraint.
+// On fresh installs where the table does not yet exist this is a no-op; the
+// schema CREATE TABLE statement will build it correctly.
 func (d *DB) migrateDailyMetrics() error {
+	var count int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='daily_metrics'`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil // table not yet created; schema will handle it
+	}
 	var hasColumn bool
 	rows, err := d.sql.Query(`PRAGMA table_info(daily_metrics)`)
 	if err != nil {
