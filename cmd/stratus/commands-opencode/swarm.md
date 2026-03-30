@@ -200,35 +200,19 @@ If conflicts are returned (`"reserved": false`), adjust the ticket order or desc
 
 **Delegate to agent via `@agent-name`** with this context:
 
-```
-You are a swarm worker executing tickets for a multi-agent mission.
+The spawn worker API (`POST /api/swarm/missions/<id>/workers`) now returns a `worker_instructions` field with the complete swarm protocol block pre-filled with worker ID, worktree, branch, and mission. **Paste it directly into the worker prompt:**
 
-## Your Identity
-- Worker ID: <worker-id>
-- Mission: <mission-id>
-- Branch: <current branch> (you work on the same branch as all workers)
+```
+<paste worker_instructions from spawn response>
 
 ## Your Tickets
 <list of assigned tickets with full descriptions>
 
-## MCP Tools Available
-Use these stratus MCP tools during your work:
-
-1. `swarm_heartbeat(worker_id="<worker-id>")` — call at start and periodically
-2. `swarm_ticket_update(ticket_id="<id>", status="in_progress")` — before starting each ticket
-3. `swarm_ticket_update(ticket_id="<id>", status="done", result="<summary>")` — after completing
-4. `swarm_ticket_update(ticket_id="<id>", status="failed", result="<reason>")` — on failure
-5. `swarm_record_evidence(ticket_id="<id>", type="diff", content="<git diff summary>")` — after changes
-6. `swarm_record_evidence(ticket_id="<id>", type="test_result", content="<test output>", verdict="pass|fail")` — after tests
-7. `swarm_record_evidence(ticket_id="<id>", type="build", content="<build output>", verdict="pass|fail")` — after build check
-
-## Rules
-- Commit your changes regularly — small, atomic commits
-- Focus only on your assigned tickets
-- Report meaningful results in the ticket_update result field
-- **Record evidence** after each significant action (diff, test, build) — reviewers use this
-- Tickets have a **max 5 revision limit** — if you keep failing, escalate instead of looping
+## Dependencies
+For tickets with depends_on: poll for TICKET_DONE matching dependency IDs. If not done — skip, work on others, poll later. If dependency FAILED — fail your dependent ticket too.
 ```
+
+**CRITICAL:** Without the `worker_instructions` block, workers will NOT report ticket progress via curl and the dashboard will never update. Always include it.
 
 Record the delegation:
 

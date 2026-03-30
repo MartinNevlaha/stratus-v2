@@ -182,36 +182,22 @@ This launches all workers in parallel AND keeps you (the lead) free to monitor p
 
 Each worker Task prompt MUST include:
 
-```
-You are a swarm worker in an isolated git worktree.
+1. The `worker_instructions` field from the spawn response (this contains the complete swarm protocol with pre-filled worker ID, worktree, branch, and mission)
+2. The list of assigned tickets with full descriptions
 
-## Identity
-Worker: <worker-id> | Worktree: <worktree-path> | Branch: <branch-name> | Mission: <mission-id>
+**The spawn response includes a ready-to-use `worker_instructions` field.** Just paste it directly into the worker prompt — do NOT construct the instruction block manually. Example worker prompt:
+
+```
+<paste worker_instructions from spawn response here>
 
 ## Tickets
 <list of assigned tickets with full descriptions>
 
-## Rules
-1. Work ONLY in <worktree-path> — do NOT modify files outside or switch branches
-2. swarm_heartbeat(worker_id="<worker-id>") at start
-3. Before each ticket: swarm_ticket_update(ticket_id="<id>", status="in_progress")
-4. After each ticket: swarm_ticket_update(ticket_id="<id>", status="done", result="<summary>") then swarm_send_signal(from_worker="<worker-id>", type="TICKET_DONE", payload='{"ticket_id":"<id>"}')
-5. On failure: swarm_ticket_update(ticket_id="<id>", status="failed", result="<reason>") then swarm_send_signal(from_worker="<worker-id>", type="TICKET_FAILED", payload='{"ticket_id":"<id>","reason":"<reason>"}')
-6. Record evidence after each significant action:
-   - swarm_record_evidence(ticket_id="<id>", type="diff", content="<files changed summary>") after changes
-   - swarm_record_evidence(ticket_id="<id>", type="test_result", content="<output>", verdict="pass|fail") after tests
-   - swarm_record_evidence(ticket_id="<id>", type="build", content="<output>", verdict="pass|fail") after builds
-7. Commit regularly — small, atomic commits on your branch
-8. When ALL tickets done: swarm_submit_merge(worker_id="<worker-id>")
-9. Tickets have max 5 revisions — if you keep failing, report failure rather than looping
-
-## Signals
-Poll: swarm_signals(worker_id="<worker-id>") — check before dependent tickets and after completions.
-Send: TICKET_DONE (required), TICKET_FAILED (required), HELP (payload: ticket_id + issue), STATUS (payload: message), CONFLICT (payload: files + description).
-
 ## Dependencies
 For tickets with depends_on: poll for TICKET_DONE matching dependency IDs. If not done — skip, work on others, poll later. If dependency FAILED — fail your dependent ticket too.
 ```
+
+**CRITICAL:** Without the `worker_instructions` block, workers will NOT report ticket progress via curl and the dashboard will never update. Always include it.
 
 ### 2d. Monitor progress — active polling loop
 
