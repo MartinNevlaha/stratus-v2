@@ -205,7 +205,7 @@ func (s *Server) handleSpawnWorker(w http.ResponseWriter, r *http.Request) {
 		"status":        worker.Status,
 		"created_at":    worker.CreatedAt,
 		"updated_at":    worker.UpdatedAt,
-		"worker_instructions": buildWorkerInstructions(worker, s.cfg.Port),
+		"worker_instructions": buildWorkerInstructions(worker),
 	}
 	json200(w, resp)
 }
@@ -855,50 +855,29 @@ func scanPlaceholders(diff string) []string {
 // buildWorkerInstructions generates the swarm instruction block that must be
 // included in every worker agent's prompt. Without these instructions, workers
 // will not call swarm_ticket_update and ticket status will never change.
-func buildWorkerInstructions(w *db.SwarmWorker, port int) string {
+func buildWorkerInstructions(w *db.SwarmWorker) string {
 	return fmt.Sprintf(`## Swarm Worker Protocol (MANDATORY)
 
 You are a swarm worker in an isolated git worktree.
 
 **Identity:** Worker %s | Worktree: %s | Branch: %s | Mission: %s
 
-BASE=http://localhost:%d
+**You MUST call these MCP tools to report progress — without them your work is invisible:**
 
-**You MUST run these curl commands via Bash to report progress — without them your work is invisible:**
-
-1. At start — heartbeat:
-   curl -sS -X PUT $BASE/api/swarm/workers/%s/status -H 'Content-Type: application/json' -d '{"status":"active"}' > /dev/null
-
-2. Before each ticket:
-   curl -sS -X PUT $BASE/api/swarm/tickets/<TICKET_ID>/status -H 'Content-Type: application/json' -d '{"status":"in_progress"}' > /dev/null
-
-3. After each ticket:
-   curl -sS -X PUT $BASE/api/swarm/tickets/<TICKET_ID>/status -H 'Content-Type: application/json' -d '{"status":"done","result":"<summary>"}' > /dev/null
-   Then signal:
-   curl -sS -X POST $BASE/api/swarm/missions/%s/signals -H 'Content-Type: application/json' -d '{"from_worker":"%s","type":"TICKET_DONE","payload":"{\"ticket_id\":\"<TICKET_ID>\"}"}' > /dev/null
-
-4. On failure:
-   curl -sS -X PUT $BASE/api/swarm/tickets/<TICKET_ID>/status -H 'Content-Type: application/json' -d '{"status":"failed","result":"<reason>"}' > /dev/null
-   Then signal:
-   curl -sS -X POST $BASE/api/swarm/missions/%s/signals -H 'Content-Type: application/json' -d '{"from_worker":"%s","type":"TICKET_FAILED","payload":"{\"ticket_id\":\"<TICKET_ID>\",\"reason\":\"<reason>\"}"}' > /dev/null
-
-5. Record evidence after changes:
-   curl -sS -X POST $BASE/api/swarm/tickets/<TICKET_ID>/evidence -H 'Content-Type: application/json' -d '{"type":"diff","content":"<files changed>","verdict":"info"}' > /dev/null
-
-6. When ALL tickets done — submit for merge:
-   curl -sS -X PUT $BASE/api/swarm/workers/%s/status -H 'Content-Type: application/json' -d '{"status":"merging"}' > /dev/null
+1. At start: swarm_heartbeat(worker_id="%s")
+2. Before each ticket: swarm_ticket_update(ticket_id="<TICKET_ID>", status="in_progress")
+3. After each ticket: swarm_ticket_update(ticket_id="<TICKET_ID>", status="done", result="<summary>")
+   Then: swarm_send_signal(from_worker="%s", type="TICKET_DONE", payload='{"ticket_id":"<TICKET_ID>"}')
+4. On failure: swarm_ticket_update(ticket_id="<TICKET_ID>", status="failed", result="<reason>")
+   Then: swarm_send_signal(from_worker="%s", type="TICKET_FAILED", payload='{"ticket_id":"<TICKET_ID>","reason":"<reason>"}')
+5. Record evidence after changes: swarm_record_evidence(ticket_id="<TICKET_ID>", type="diff", content="<files changed>")
+6. When ALL tickets done: swarm_submit_merge(worker_id="%s")
 
 **Rules:**
 - Work ONLY in %s — do NOT modify files outside or switch branches
 - Commit regularly — small, atomic commits on your branch
-- Poll signals periodically: curl -sS "$BASE/api/swarm/missions/%s/signals?worker_id=%s"
+- Poll signals periodically: swarm_signals(worker_id="%s")
 - Tickets have max 5 revisions — report failure rather than looping`,
 		w.ID, w.WorktreePath, w.BranchName, w.MissionID,
-		port,
-		w.ID,
-		w.MissionID, w.ID,
-		w.MissionID, w.ID,
-		w.ID,
-		w.WorktreePath,
-		w.MissionID, w.ID)
+		w.ID, w.ID, w.ID, w.ID, w.WorktreePath, w.ID)
 }

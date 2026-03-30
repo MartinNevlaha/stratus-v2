@@ -212,7 +212,7 @@ The spawn worker API (`POST /api/swarm/missions/<id>/workers`) now returns a `wo
 For tickets with depends_on: poll for TICKET_DONE matching dependency IDs. If not done — skip, work on others, poll later. If dependency FAILED — fail your dependent ticket too.
 ```
 
-**CRITICAL:** Without the `worker_instructions` block, workers will NOT report ticket progress via curl and the dashboard will never update. Always include it.
+**CRITICAL:** Without the `worker_instructions` block, workers will NOT call `swarm_ticket_update` and ticket progress will be invisible on the dashboard. Always include it.
 
 Record the delegation:
 
