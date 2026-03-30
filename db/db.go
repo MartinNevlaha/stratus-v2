@@ -120,8 +120,8 @@ func (d *DB) migrateDailyMetrics() error {
 			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
 			UNIQUE(metric_date, workflow_type)
 		)`,
-		`INSERT OR IGNORE INTO daily_metrics_new (metric_date, workflow_type, total_workflows, completed_workflows, avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate, computed_at, created_at)
-			SELECT metric_date, 'all', total_workflows, completed_workflows, avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate, computed_at, created_at FROM daily_metrics`,
+		`INSERT OR IGNORE INTO daily_metrics_new (metric_date, workflow_type, total_workflows, completed_workflows, avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate, computed_at)
+			SELECT metric_date, 'all', total_workflows, completed_workflows, avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate, computed_at FROM daily_metrics`,
 		`DROP TABLE daily_metrics`,
 		`ALTER TABLE daily_metrics_new RENAME TO daily_metrics`,
 		`CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date)`,
