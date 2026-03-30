@@ -39,48 +39,93 @@
     try { return JSON.parse(s) } catch { return [] }
   }
 
+  interface Edge {
+    fromId: string
+    toId: string
+    type: 'dependency' | 'backbone'
+  }
+
   function computeLayout(tickets: SwarmTicket[]) {
     if (tickets.length === 0) {
-      return { positions: new Map<string, { x: number; y: number }>(), depMap: new Map<string, string[]>(), svgW: 200, svgH: 80 }
+      return { positions: new Map<string, { x: number; y: number }>(), depMap: new Map<string, string[]>(), edges: [] as Edge[], svgW: 200, svgH: 80 }
     }
 
     const depMap = new Map<string, string[]>()
     for (const t of tickets) depMap.set(t.id, safeArr(t.depends_on))
 
-    const levelMap = new Map<string, number>()
-    function getLevel(id: string, stack: Set<string>): number {
-      if (levelMap.has(id)) return levelMap.get(id)!
-      if (stack.has(id)) return 0
-      const s2 = new Set(stack); s2.add(id)
-      const deps = depMap.get(id) || []
-      const lvl = deps.length === 0 ? 0 : Math.max(...deps.map(d => getLevel(d, s2))) + 1
-      levelMap.set(id, lvl)
-      return lvl
-    }
-    for (const t of tickets) getLevel(t.id, new Set())
-
-    const byLevel = new Map<number, SwarmTicket[]>()
-    for (const t of tickets) {
-      const lvl = levelMap.get(t.id) ?? 0
-      if (!byLevel.has(lvl)) byLevel.set(lvl, [])
-      byLevel.get(lvl)!.push(t)
-    }
-    for (const group of byLevel.values()) {
-      group.sort((a, b) => a.domain.localeCompare(b.domain) || a.priority - b.priority)
-    }
+    const hasDeps = tickets.some(t => safeArr(t.depends_on).length > 0)
 
     const positions = new Map<string, { x: number; y: number }>()
-    for (const [lvl, group] of byLevel) {
-      const x = PAD + lvl * (NODE_W + H_GAP)
-      group.forEach((t, i) => positions.set(t.id, { x, y: PAD + i * (NODE_H + V_GAP) }))
+    const edges: Edge[] = []
+
+    if (hasDeps) {
+      // Original topological layout
+      const levelMap = new Map<string, number>()
+      function getLevel(id: string, stack: Set<string>): number {
+        if (levelMap.has(id)) return levelMap.get(id)!
+        if (stack.has(id)) return 0
+        const s2 = new Set(stack); s2.add(id)
+        const deps = depMap.get(id) || []
+        const lvl = deps.length === 0 ? 0 : Math.max(...deps.map(d => getLevel(d, s2))) + 1
+        levelMap.set(id, lvl)
+        return lvl
+      }
+      for (const t of tickets) getLevel(t.id, new Set())
+
+      const byLevel = new Map<number, SwarmTicket[]>()
+      for (const t of tickets) {
+        const lvl = levelMap.get(t.id) ?? 0
+        if (!byLevel.has(lvl)) byLevel.set(lvl, [])
+        byLevel.get(lvl)!.push(t)
+      }
+      for (const group of byLevel.values()) {
+        group.sort((a, b) => a.domain.localeCompare(b.domain) || a.priority - b.priority)
+      }
+
+      for (const [lvl, group] of byLevel) {
+        const x = PAD + lvl * (NODE_W + H_GAP)
+        group.forEach((t, i) => positions.set(t.id, { x, y: PAD + i * (NODE_H + V_GAP) }))
+      }
+
+      // Dependency edges
+      for (const t of tickets) {
+        for (const depId of safeArr(t.depends_on)) {
+          if (positions.has(depId)) edges.push({ fromId: depId, toId: t.id, type: 'dependency' })
+        }
+      }
+    } else {
+      // No dependencies — group by domain into columns
+      const byDomain = new Map<string, SwarmTicket[]>()
+      for (const t of tickets) {
+        if (!byDomain.has(t.domain)) byDomain.set(t.domain, [])
+        byDomain.get(t.domain)!.push(t)
+      }
+      const domainKeys = Array.from(byDomain.keys()).sort()
+
+      for (let col = 0; col < domainKeys.length; col++) {
+        const group = byDomain.get(domainKeys[col])!
+        group.sort((a, b) => a.priority - b.priority)
+        const x = PAD + col * (NODE_W + H_GAP)
+        group.forEach((t, i) => {
+          positions.set(t.id, { x, y: PAD + i * (NODE_H + V_GAP) })
+        })
+        // Backbone edges within domain column
+        for (let i = 1; i < group.length; i++) {
+          edges.push({ fromId: group[i - 1].id, toId: group[i].id, type: 'backbone' })
+        }
+      }
     }
 
-    const maxLvl = Math.max(...levelMap.values(), 0)
-    const maxInLvl = Math.max(...Array.from(byLevel.values()).map(g => g.length), 1)
-    const svgW = PAD * 2 + (maxLvl + 1) * (NODE_W + H_GAP) - H_GAP
-    const svgH = PAD * 2 + maxInLvl * (NODE_H + V_GAP) - V_GAP
+    // Compute SVG dimensions
+    let maxX = 0, maxY = 0
+    for (const p of positions.values()) {
+      if (p.x + NODE_W > maxX) maxX = p.x + NODE_W
+      if (p.y + NODE_H > maxY) maxY = p.y + NODE_H
+    }
+    const svgW = maxX + PAD
+    const svgH = maxY + PAD
 
-    return { positions, depMap, svgW, svgH }
+    return { positions, depMap, edges, svgW, svgH }
   }
 
   function domainProgress(tickets: SwarmTicket[]) {
@@ -106,6 +151,11 @@
   function edgePath(x1: number, y1: number, x2: number, y2: number): string {
     const cx = (x1 + x2) / 2
     return `M ${x1} ${y1} C ${cx} ${y1} ${cx} ${y2} ${x2} ${y2}`
+  }
+
+  function verticalEdgePath(x1: number, y1: number, x2: number, y2: number): string {
+    const cy = (y1 + y2) / 2
+    return `M ${x1} ${y1} C ${x1} ${cy} ${x2} ${cy} ${x2} ${y2}`
   }
 
   function truncate(s: string, n: number): string {
@@ -160,26 +210,85 @@
         <marker id="arr-orange" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
           <path d="M0,0 L0,7 L7,3.5 z" fill="#d29922" />
         </marker>
+        <marker id="arr-purple" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L0,7 L7,3.5 z" fill="#a371f7" />
+        </marker>
+        <filter id="edge-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
 
       <!-- Edges -->
-      {#each detail.tickets as ticket}
-        {#each safeArr(ticket.depends_on) as depId}
-          {@const src = layout.positions.get(depId)}
-          {@const dst = layout.positions.get(ticket.id)}
-          {#if src && dst}
-            {@const dep = detail.tickets.find(t => t.id === depId)}
-            {@const satisfied = dep?.status === 'done'}
+      {#each layout.edges as edge, eIdx}
+        {@const src = layout.positions.get(edge.fromId)}
+        {@const dst = layout.positions.get(edge.toId)}
+        {#if src && dst}
+          {@const fromTicket = detail.tickets.find(t => t.id === edge.fromId)}
+          {@const toTicket = detail.tickets.find(t => t.id === edge.toId)}
+          {@const isVertical = Math.abs(src.x - dst.x) < NODE_W}
+          {@const pathD = isVertical
+            ? verticalEdgePath(src.x + NODE_W / 2, src.y + NODE_H, dst.x + NODE_W / 2, dst.y)
+            : edgePath(src.x + NODE_W, src.y + NODE_H / 2, dst.x - 2, dst.y + NODE_H / 2)}
+          {@const hasActive = fromTicket?.status === 'in_progress' || toTicket?.status === 'in_progress'}
+          {@const bothDone = fromTicket?.status === 'done' && toTicket?.status === 'done'}
+          {@const depSatisfied = edge.type === 'dependency' && fromTicket?.status === 'done'}
+          {#if hasActive}
+            <!-- Bloom glow layer -->
             <path
-              d={edgePath(src.x + NODE_W, src.y + NODE_H / 2, dst.x - 2, dst.y + NODE_H / 2)}
-              stroke={satisfied ? '#3fb950' : '#d29922'}
+              d={pathD}
+              stroke="#a371f7"
+              stroke-width="6"
+              fill="none"
+              opacity="0.15"
+              filter="url(#edge-glow)"
+            />
+            <!-- Main active edge -->
+            <path
+              d={pathD}
+              stroke="#a371f7"
               stroke-width="1.5"
               fill="none"
-              opacity="0.65"
-              marker-end={satisfied ? 'url(#arr-green)' : 'url(#arr-orange)'}
+              opacity="0.7"
+            />
+            <!-- Traveling pulse (glow) -->
+            <circle r="6" fill="#a371f7" opacity="0.2">
+              <animateMotion dur="2.5s" repeatCount="indefinite" begin="{(eIdx * 0.5) % 2.5}s" path={pathD} />
+            </circle>
+            <!-- Traveling pulse (core) -->
+            <circle r="3" fill="#a371f7" opacity="0.85">
+              <animateMotion dur="2.5s" repeatCount="indefinite" begin="{(eIdx * 0.5) % 2.5}s" path={pathD} />
+            </circle>
+          {:else if bothDone}
+            <path
+              d={pathD}
+              stroke="#3fb950"
+              stroke-width="1.5"
+              fill="none"
+              opacity="0.5"
+            />
+          {:else if depSatisfied}
+            <path
+              d={pathD}
+              stroke="#3fb950"
+              stroke-width="1.5"
+              fill="none"
+              opacity="0.5"
+              marker-end="url(#arr-green)"
+            />
+          {:else}
+            <path
+              d={pathD}
+              stroke="#484f58"
+              stroke-width="1"
+              fill="none"
+              opacity="0.35"
             />
           {/if}
-        {/each}
+        {/if}
       {/each}
 
       <!-- Nodes -->
@@ -199,7 +308,7 @@
             onmouseleave={onNodeLeave}
           >
             {#if isActive}
-              <rect width={NODE_W} height={NODE_H} rx="7" fill="none" stroke={stroke} stroke-width="4" opacity="0.2" />
+              <rect class="node-heartbeat" width={NODE_W} height={NODE_H} rx="7" fill="none" stroke={stroke} stroke-width="4" />
             {/if}
             <rect width={NODE_W} height={NODE_H} rx="7" fill={fill} stroke={stroke} stroke-width={isActive ? 2 : 1} />
             <text x="10" y="19" font-size="12" fill="#c9d1d9" font-family="ui-monospace,monospace">{truncate(ticket.title, 19)}</text>
@@ -314,6 +423,20 @@
   }
   .svg-scroll svg {
     display: block;
+  }
+
+  /* Node heartbeat breathing glow */
+  .node-heartbeat {
+    opacity: 0.15;
+    animation: heartbeat 2s ease-in-out infinite;
+    will-change: opacity;
+  }
+  @keyframes heartbeat {
+    0%, 100% { opacity: 0.1; stroke-width: 3; }
+    50%      { opacity: 0.35; stroke-width: 5; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .node-heartbeat { animation: none; opacity: 0.2; }
   }
 
   /* File reservations */

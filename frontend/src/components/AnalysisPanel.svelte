@@ -7,6 +7,7 @@
   let loading = $state(false)
   let error = $state<string | null>(null)
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let llmCopied = $state(false)
 
   function onInput() {
     if (debounceTimer) clearTimeout(debounceTimer)
@@ -115,6 +116,19 @@
           Copy /{result.recommended_type}{result.recommended_complexity === 'complex' ? '-complex' : ''} command
         </button>
       </div>
+
+      <!-- LLM Analysis -->
+      {#if result.llm_analysis}
+        <div class="llm-analysis">
+          <div class="llm-header">
+            <span class="llm-title">AI Analysis</span>
+            <button class="copy-llm-btn" onclick={() => { navigator.clipboard.writeText(result?.llm_analysis ?? ''); llmCopied = true; setTimeout(() => { llmCopied = false }, 2000) }}>
+              {llmCopied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <div class="llm-content">{result.llm_analysis}</div>
+        </div>
+      {/if}
 
       <!-- Similar past workflows -->
       {#if result.similar_past_workflows.length > 0}
@@ -316,6 +330,45 @@
   .copy-btn:hover {
     background: #30363d;
     border-color: #58a6ff;
+  }
+
+  .llm-analysis {
+    border-top: 1px solid #21262d;
+    padding-top: 8px;
+  }
+
+  .llm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+
+  .llm-title {
+    font-size: 11px;
+    color: #a371f7;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+  }
+
+  .copy-llm-btn {
+    font-size: 10px;
+    padding: 2px 8px;
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #8b949e;
+    cursor: pointer;
+  }
+
+  .copy-llm-btn:hover { background: #2a3040; color: #c9d1d9; }
+
+  .llm-content {
+    font-size: 12px;
+    color: #c9d1d9;
+    line-height: 1.5;
+    white-space: pre-wrap;
   }
 
   .similar {

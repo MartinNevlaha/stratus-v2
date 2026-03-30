@@ -2,12 +2,14 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 )
 
@@ -51,6 +53,7 @@ type AnalysisResult struct {
 	EstimatedDurationMin  int                             `json:"estimated_duration_min"`
 	SuggestedDomains      []string                        `json:"suggested_domains"`
 	SimilarPastWorkflows  []orchestration.SimilarWorkflow `json:"similar_past_workflows"`
+	LLMAnalysis           string                          `json:"llm_analysis,omitempty"`
 }
 
 // normalizeWords lowercases the description and strips punctuation from each token
@@ -217,6 +220,72 @@ func (s *Server) handleAnalyzeWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := calculateRisk(req, history)
+
+	// Enrich with LLM analysis if configured
+	gcfg := s.cfg.Guardian
+	llm := guardian.NewLLMClient(gcfg.LLMEndpoint, gcfg.LLMAPIKey, gcfg.LLMModel, gcfg.LLMTemperature, gcfg.LLMMaxTokens)
+	if llm.Configured() {
+		// Gather context from Vexor (code embeddings) and governance docs
+		var contextParts []string
+
+		if s.vexor != nil {
+			if results, err := s.vexor.Search(req.Description, 5, "auto"); err == nil && len(results) > 0 {
+				var sb strings.Builder
+				sb.WriteString("Relevant code files (from semantic search):\n")
+				for _, r := range results {
+					sb.WriteString(fmt.Sprintf("- %s (lines %d-%d, score %.2f): %s\n", r.FilePath, r.LineStart, r.LineEnd, r.Score, r.Heading))
+					if r.Excerpt != "" {
+						excerpt := r.Excerpt
+						if len(excerpt) > 300 {
+							excerpt = excerpt[:300] + "..."
+						}
+						sb.WriteString("  ```\n  " + excerpt + "\n  ```\n")
+					}
+				}
+				contextParts = append(contextParts, sb.String())
+			}
+		}
+
+		if govDocs, err := s.db.SearchDocs(req.Description, "", "", 5); err == nil && len(govDocs) > 0 {
+			var sb strings.Builder
+			sb.WriteString("Relevant governance rules and docs:\n")
+			for _, d := range govDocs {
+				sb.WriteString(fmt.Sprintf("- [%s] %s", d.DocType, d.Title))
+				if d.Content != "" {
+					content := d.Content
+					if len(content) > 300 {
+						content = content[:300] + "..."
+					}
+					sb.WriteString(": " + content)
+				}
+				sb.WriteString("\n")
+			}
+			contextParts = append(contextParts, sb.String())
+		}
+
+		contextBlock := ""
+		if len(contextParts) > 0 {
+			contextBlock = "\n\nCodebase context:\n" + strings.Join(contextParts, "\n")
+		}
+
+		systemPrompt := "You are a senior software architect performing risk analysis for code changes. " +
+			"You have access to the actual codebase context and governance rules. " +
+			"Be concise and practical. Respond in 3-5 bullet points."
+		userPrompt := fmt.Sprintf(
+			"Analyze the risk of this task:\n\nDescription: %s\n\nHeuristic risk score: %.2f (%s)\nDetected domains: %s\nRisk factors: %s%s\n\n"+
+				"Based on the codebase context and governance rules, provide insights: what files will likely be affected, "+
+				"what could go wrong, which governance rules apply, and any recommendations.",
+			req.Description,
+			result.RiskScore, result.RiskLevel,
+			strings.Join(result.SuggestedDomains, ", "),
+			strings.Join(result.RiskFactors, "; "),
+			contextBlock,
+		)
+		if answer, err := llm.Complete(r.Context(), systemPrompt, userPrompt); err == nil {
+			result.LLMAnalysis = answer
+		}
+	}
+
 	json200(w, result)
 }
 

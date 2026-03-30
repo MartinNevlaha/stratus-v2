@@ -350,7 +350,8 @@ CREATE INDEX IF NOT EXISTS idx_insight_events_source ON insight_events(source);
 -- Daily aggregated metrics
 CREATE TABLE IF NOT EXISTS daily_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    metric_date TEXT NOT NULL UNIQUE,
+    metric_date TEXT NOT NULL,
+    workflow_type TEXT NOT NULL DEFAULT 'all',
     total_workflows INTEGER DEFAULT 0,
     completed_workflows INTEGER DEFAULT 0,
     avg_workflow_duration_ms INTEGER DEFAULT 0,
@@ -358,10 +359,12 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     completed_tasks INTEGER DEFAULT 0,
     success_rate REAL DEFAULT 0,
     computed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(metric_date, workflow_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date);
+CREATE INDEX IF NOT EXISTS idx_daily_metrics_type ON daily_metrics(workflow_type);
 
 -- Insight: Improvement proposals
 CREATE TABLE IF NOT EXISTS insight_proposals (

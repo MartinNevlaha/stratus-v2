@@ -56,6 +56,71 @@ func (d *DB) migrate() error {
 			}
 		}
 	}
+	// Migrate daily_metrics: old schema had UNIQUE(metric_date) only.
+	// New schema has UNIQUE(metric_date, workflow_type). Recreate if needed.
+	if err := d.migrateDailyMetrics(); err != nil {
+		return fmt.Errorf("migrate daily_metrics: %w", err)
+	}
+	return nil
+}
+
+// migrateDailyMetrics checks whether daily_metrics has the workflow_type column.
+// If not, it recreates the table with the new composite unique constraint.
+func (d *DB) migrateDailyMetrics() error {
+	var hasColumn bool
+	rows, err := d.sql.Query(`PRAGMA table_info(daily_metrics)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt *string
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "workflow_type" {
+			hasColumn = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	// Recreate table with composite unique key
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS daily_metrics_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			metric_date TEXT NOT NULL,
+			workflow_type TEXT NOT NULL DEFAULT 'all',
+			total_workflows INTEGER DEFAULT 0,
+			completed_workflows INTEGER DEFAULT 0,
+			avg_workflow_duration_ms INTEGER DEFAULT 0,
+			total_tasks INTEGER DEFAULT 0,
+			completed_tasks INTEGER DEFAULT 0,
+			success_rate REAL DEFAULT 0,
+			computed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+			UNIQUE(metric_date, workflow_type)
+		)`,
+		`INSERT OR IGNORE INTO daily_metrics_new (metric_date, workflow_type, total_workflows, completed_workflows, avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate, computed_at, created_at)
+			SELECT metric_date, 'all', total_workflows, completed_workflows, avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate, computed_at, created_at FROM daily_metrics`,
+		`DROP TABLE daily_metrics`,
+		`ALTER TABLE daily_metrics_new RENAME TO daily_metrics`,
+		`CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_daily_metrics_type ON daily_metrics(workflow_type)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := d.sql.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate daily_metrics: %w", err)
+		}
+	}
 	return nil
 }
 

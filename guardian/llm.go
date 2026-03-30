@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+// LLMClient is a minimal OpenAI-compatible chat completions client.
+type LLMClient = llmClient
+
+// NewLLMClient creates a new OpenAI-compatible LLM client.
+func NewLLMClient(endpoint, apiKey, model string, temperature float64, maxTokens int) *LLMClient {
+	return newLLMClient(endpoint, apiKey, model, temperature, maxTokens)
+}
+
 // llmClient is a minimal OpenAI-compatible chat completions client.
 type llmClient struct {
 	endpoint    string
@@ -33,6 +41,11 @@ func newLLMClient(endpoint, apiKey, model string, temperature float64, maxTokens
 
 func (c *llmClient) configured() bool {
 	return c.endpoint != "" && c.model != ""
+}
+
+// Configured returns whether the LLM endpoint and model are set.
+func (c *llmClient) Configured() bool {
+	return c.configured()
 }
 
 type chatMessage struct {

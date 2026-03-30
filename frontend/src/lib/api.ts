@@ -25,6 +25,13 @@ import type {
   DailyMetricsResponse,
   AgentMetricsResponse,
   ProjectMetricsResponse,
+  SwarmSignal,
+  SwarmEvidence,
+  AgentScorecard,
+  SolutionPattern,
+  ProblemStats,
+  KBRecommendation,
+  KBStats,
 } from './types'
 
 const BASE = '/api'
@@ -266,8 +273,12 @@ export const listGuardianAlerts = (type?: string) =>
   get<GuardianAlert[]>('/guardian/alerts' + (type ? `?type=${type}` : ''))
 export const dismissGuardianAlert = (id: number) =>
   put<{ ok: boolean }>(`/guardian/alerts/${id}/dismiss`, {})
+export const dismissAllGuardianAlerts = () =>
+  post<{ ok: boolean; dismissed: number }>('/guardian/alerts/dismiss-all', {})
 export const deleteGuardianAlert = (id: number) =>
   del<{ ok: boolean }>(`/guardian/alerts/${id}`)
+export const killSwarmWorker = (id: string) =>
+  put<unknown>(`/swarm/workers/${id}/status`, { status: 'killed' })
 export const getGuardianConfig = () => get<GuardianConfig>('/guardian/config')
 export const updateGuardianConfig = (cfg: GuardianConfig) =>
   put<GuardianConfig>('/guardian/config', cfg)
@@ -278,3 +289,29 @@ export const testGuardianLLM = (cfg: Partial<GuardianConfig>) =>
 export const getInsightConfig = () => get<InsightConfig>('/insight/config')
 export const updateInsightConfig = (cfg: InsightConfig) =>
   put<InsightConfig>('/insight/config', cfg)
+
+export const getMissionSignals = (missionId: string) =>
+  get<SwarmSignal[]>(`/swarm/missions/${missionId}/signals`)
+export const getTicketEvidence = (ticketId: string) =>
+  get<SwarmEvidence[]>(`/swarm/tickets/${ticketId}/evidence`)
+export const getAgentScorecards = (window = '7d') =>
+  get<{ scorecards: AgentScorecard[] }>(`/insight/scorecards/agents?window=${window}`)
+
+export const listKBSolutions = (params?: { problem_class?: string; repo_type?: string; min_success_rate?: number; limit?: number }) => {
+  const q = new URLSearchParams()
+  if (params?.problem_class) q.set('problem_class', params.problem_class)
+  if (params?.repo_type) q.set('repo_type', params.repo_type)
+  if (params?.min_success_rate != null) q.set('min_success_rate', String(params.min_success_rate))
+  if (params?.limit) q.set('limit', String(params.limit))
+  return get<SolutionPattern[]>(`/kb/solutions${q.toString() ? '?' + q : ''}`)
+}
+export const listKBProblems = (params?: { problem_class?: string; repo_type?: string; limit?: number }) => {
+  const q = new URLSearchParams()
+  if (params?.problem_class) q.set('problem_class', params.problem_class)
+  if (params?.repo_type) q.set('repo_type', params.repo_type)
+  if (params?.limit) q.set('limit', String(params.limit))
+  return get<ProblemStats[]>(`/kb/problems${q.toString() ? '?' + q : ''}`)
+}
+export const getKBRecommendation = (problemClass: string, repoType = '') =>
+  get<KBRecommendation>(`/kb/recommend?problem_class=${encodeURIComponent(problemClass)}&repo_type=${encodeURIComponent(repoType)}`)
+export const getKBStats = () => get<KBStats>('/kb/stats')

@@ -404,6 +404,19 @@ func (s *Server) handlePollSignals(w http.ResponseWriter, r *http.Request) {
 	json200(w, signals)
 }
 
+func (s *Server) handleListMissionSignals(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	signals, err := s.db.ListMissionSignals(missionID, 200)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if signals == nil {
+		signals = []db.SwarmSignal{}
+	}
+	json200(w, signals)
+}
+
 // --- Forge ---
 
 func (s *Server) handleSubmitToForge(w http.ResponseWriter, r *http.Request) {

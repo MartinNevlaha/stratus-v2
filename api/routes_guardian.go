@@ -39,6 +39,16 @@ func (s *Server) handleDismissGuardianAlert(w http.ResponseWriter, r *http.Reque
 	json200(w, map[string]bool{"ok": true})
 }
 
+// POST /api/guardian/alerts/dismiss-all
+func (s *Server) handleDismissAllGuardianAlerts(w http.ResponseWriter, r *http.Request) {
+	count, err := s.db.DismissAllGuardianAlerts()
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	json200(w, map[string]interface{}{"ok": true, "dismissed": count})
+}
+
 // DELETE /api/guardian/alerts/{id}
 func (s *Server) handleDeleteGuardianAlert(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(pathParam(r, "id"), 10, 64)

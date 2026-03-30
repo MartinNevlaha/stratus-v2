@@ -70,6 +70,17 @@ func (d *DB) DeleteGuardianAlert(id int64) error {
 	return err
 }
 
+// DismissAllGuardianAlerts marks all non-dismissed alerts as dismissed.
+func (d *DB) DismissAllGuardianAlerts() (int64, error) {
+	res, err := d.sql.Exec(`
+		UPDATE guardian_alerts SET dismissed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		WHERE dismissed_at IS NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // HasRecentAlert returns true if a non-dismissed alert of the given type with
 // the given dedup key exists within the last 24 hours.
 func (d *DB) HasRecentAlert(alertType, dedupKey string) (bool, error) {

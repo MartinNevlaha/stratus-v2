@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { appState, dismissUpdate } from '$lib/store'
-  import { listWorkflows, deleteWorkflow, listMissions, getMission, listPastItems, listGuardianAlerts, dismissGuardianAlert, deleteGuardianAlert, runGuardianScan } from '$lib/api'
+  import { listWorkflows, deleteWorkflow, listMissions, getMission, listPastItems, listGuardianAlerts, dismissGuardianAlert, dismissAllGuardianAlerts, deleteGuardianAlert, killSwarmWorker, runGuardianScan, startWorkflow, recordDelegation, listAgents } from '$lib/api'
   import PhaseTimeline from '../components/PhaseTimeline.svelte'
   import AnalysisPanel from '../components/AnalysisPanel.svelte'
   import SwarmGraph from '../components/SwarmGraph.svelte'
-  import type { WorkflowState, SwarmMission, SwarmMissionDetail, PastItem, GuardianAlert } from '$lib/types'
+  import SignalBus from '../components/SignalBus.svelte'
+  import EvidenceTrail from '../components/EvidenceTrail.svelte'
+  import type { WorkflowState, SwarmMission, SwarmMissionDetail, PastItem, GuardianAlert, AgentDef } from '$lib/types'
 
   let allWorkflows = $state<WorkflowState[]>([])
   let missions = $state<SwarmMission[]>([])
@@ -17,6 +19,7 @@
   let expandedTasks = $state<Set<string>>(new Set())
   let expandedPlans = $state<Set<string>>(new Set())
   let expandedDesigns = $state<Set<string>>(new Set())
+  let expandedTickets = $state<Set<string>>(new Set())
   let confirmTimer: ReturnType<typeof setTimeout> | null = null
 
   let activeWfs = $derived(allWorkflows.filter(w => !w.aborted && w.phase !== 'complete'))
@@ -29,6 +32,7 @@
   async function loadGuardianAlerts() {
     try {
       guardianAlerts = await listGuardianAlerts()
+      appState.guardianAlertCount = guardianAlerts.length
     } catch { /* ignore */ }
   }
 
@@ -36,6 +40,7 @@
     try {
       await dismissGuardianAlert(id)
       guardianAlerts = guardianAlerts.filter(a => a.id !== id)
+      appState.guardianAlertCount = Math.max(0, guardianAlerts.length)
     } catch { /* ignore */ }
   }
 
@@ -43,7 +48,67 @@
     try {
       await deleteGuardianAlert(id)
       guardianAlerts = guardianAlerts.filter(a => a.id !== id)
+      appState.guardianAlertCount = Math.max(0, guardianAlerts.length)
     } catch { /* ignore */ }
+  }
+
+  async function dismissAll() {
+    try {
+      await dismissAllGuardianAlerts()
+      guardianAlerts = []
+      appState.guardianAlertCount = 0
+    } catch { /* ignore */ }
+  }
+
+  async function killWorker(workerId: string, alertId: number) {
+    try {
+      await killSwarmWorker(workerId)
+      await dismissGuardianAlert(alertId)
+      guardianAlerts = guardianAlerts.filter(a => a.id !== alertId)
+      appState.guardianAlertCount = Math.max(0, guardianAlerts.length)
+    } catch { /* ignore */ }
+  }
+
+  function viewFile(filePath: string) {
+    navigator.clipboard.writeText(filePath)
+    copiedFilePath = filePath
+    setTimeout(() => { copiedFilePath = null }, 2000)
+  }
+
+  let copiedFilePath = $state<string | null>(null)
+  let delegateAlertId = $state<number | null>(null)
+  let availableAgents = $state<AgentDef[]>([])
+  let delegating = $state(false)
+
+  async function openDelegateMenu(alertId: number) {
+    if (delegateAlertId === alertId) {
+      delegateAlertId = null
+      return
+    }
+    delegateAlertId = alertId
+    if (availableAgents.length === 0) {
+      try {
+        const resp = await listAgents()
+        availableAgents = resp.claude_code ?? []
+      } catch { /* ignore */ }
+    }
+  }
+
+  async function sendToAgent(alert: GuardianAlert, agentName: string) {
+    delegating = true
+    try {
+      const wfId = `guardian-${alert.id}-${Date.now()}`
+      const wfType = alert.type === 'stale_worker' ? 'bug' : 'bug'
+      const title = `[Guardian] ${alert.message}`
+      await startWorkflow(wfId, wfType as 'bug', title)
+      await recordDelegation(wfId, agentName)
+      await dismissGuardianAlert(alert.id)
+      guardianAlerts = guardianAlerts.filter(a => a.id !== alert.id)
+      appState.guardianAlertCount = Math.max(0, guardianAlerts.length)
+      delegateAlertId = null
+      loadWorkflows()
+    } catch { /* ignore */ }
+    delegating = false
   }
 
   async function triggerScan() {
@@ -320,6 +385,11 @@
         {#if guardianAlerts.length === 0}
           <p class="no-alerts">No active alerts. Codebase looks healthy.</p>
         {:else}
+          <div class="guardian-toolbar">
+            <button class="dismiss-all-btn" onclick={() => dismissAll()} title="Dismiss all alerts">
+              Dismiss all
+            </button>
+          </div>
           {#each guardianAlerts as alert}
             <div class="alert-row" class:warning={alert.severity === 'warning'} class:critical={alert.severity === 'critical'}>
               <span class="alert-icon">{severityIcon(alert.severity)}</span>
@@ -331,13 +401,40 @@
                 </div>
               </div>
               <div class="alert-btns">
+                {#if alert.type === 'governance_violation' && alert.metadata?.file}
+                  <button class="alert-action" onclick={() => viewFile(String(alert.metadata.file))} title="Copy file path">
+                    {copiedFilePath === String(alert.metadata.file) ? 'Copied!' : 'View file'}
+                  </button>
+                {/if}
                 {#if alert.type === 'stale_workflow' && alert.metadata?.workflow_id}
                   <button class="alert-action" onclick={() => navigator.clipboard.writeText(`/resume ${alert.metadata.workflow_id}`)} title="Copy resume command">
                     Copy /resume
                   </button>
                 {/if}
+                {#if alert.type === 'stale_worker' && alert.metadata?.worker_id}
+                  <button class="alert-action alert-action-danger" onclick={() => killWorker(String(alert.metadata.worker_id), alert.id)} title="Kill stale worker">
+                    Kill worker
+                  </button>
+                {/if}
+                <button class="alert-action" onclick={() => openDelegateMenu(alert.id)} title="Send to agent">
+                  {delegateAlertId === alert.id ? 'Cancel' : 'Send to agent'}
+                </button>
                 <button class="alert-dismiss" onclick={() => dismissAlert(alert.id)} title="Dismiss">✕</button>
               </div>
+              {#if delegateAlertId === alert.id}
+                <div class="delegate-dropdown">
+                  {#if availableAgents.length === 0}
+                    <span class="delegate-empty">No agents configured</span>
+                  {:else}
+                    {#each availableAgents as agent}
+                      <button class="delegate-agent" disabled={delegating} onclick={() => sendToAgent(alert, agent.name)}>
+                        <span class="agent-name">{agent.name}</span>
+                        <span class="agent-desc">{agent.description}</span>
+                      </button>
+                    {/each}
+                  {/if}
+                </div>
+              {/if}
             </div>
           {/each}
         {/if}
@@ -510,7 +607,12 @@
                       </div>
                     </div>
                     {#each detail.tickets as ticket}
-                      <div class="ticket" class:done={ticket.status === 'done'} class:active={ticket.status === 'in_progress'} class:failed={ticket.status === 'failed'}>
+                      <div class="ticket" class:done={ticket.status === 'done'} class:active={ticket.status === 'in_progress'} class:failed={ticket.status === 'failed'}
+                        role="button" tabindex="0"
+                        onclick={() => { const s = new Set(expandedTickets); s.has(ticket.id) ? s.delete(ticket.id) : s.add(ticket.id); expandedTickets = s }}
+                        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { const s = new Set(expandedTickets); s.has(ticket.id) ? s.delete(ticket.id) : s.add(ticket.id); expandedTickets = s } }}
+                        style="cursor: pointer"
+                      >
                         <span class="ticket-icon" class:spinning={ticket.status === 'in_progress'}>{ticketIcon(ticket.status)}</span>
                         <span class="ticket-title">{ticket.title}</span>
                         {#if ticket.worker_id}
@@ -520,10 +622,15 @@
                           {/if}
                         {/if}
                         <span class="ticket-domain">{ticket.domain}</span>
+                        <span class="ticket-expand">{expandedTickets.has(ticket.id) ? '▲' : '▼'}</span>
                       </div>
+                      {#if expandedTickets.has(ticket.id)}
+                        <EvidenceTrail ticketId={ticket.id} />
+                      {/if}
                     {/each}
                   </div>
                 {/if}
+                <SignalBus missionId={detail.mission.id} />
                 {#if detail.forge.length > 0}
                   <div class="detail-section">
                     <div class="detail-label">Forge (merge queue)</div>
@@ -845,6 +952,7 @@
   .ticket-icon { width: 16px; text-align: center; flex-shrink: 0; }
   .ticket-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ticket-domain { font-size: 11px; background: #21262d; padding: 1px 6px; border-radius: 4px; }
+  .ticket-expand { font-size: 9px; color: #484f58; flex-shrink: 0; margin-left: 4px; }
 
   .ticket-progress-fill { height: 100%; background: #a371f7; border-radius: 2px; transition: width 0.3s; }
 
@@ -1065,4 +1173,80 @@
   }
 
   .alert-dismiss:hover { color: #f85149; }
+
+  .guardian-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 4px 8px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .dismiss-all-btn {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .dismiss-all-btn:hover { background: #2a3040; color: #c9d1d9; }
+
+  .alert-action-danger {
+    color: #f85149 !important;
+    border-color: #f8514933 !important;
+  }
+
+  .alert-action-danger:hover { background: #3d1c1e !important; }
+
+  .delegate-dropdown {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+  }
+
+  .delegate-agent {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    background: none;
+    border: 1px solid transparent;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: left;
+    color: #c9d1d9;
+  }
+
+  .delegate-agent:hover {
+    background: #21262d;
+    border-color: #30363d;
+  }
+
+  .delegate-agent:disabled { opacity: 0.5; cursor: wait; }
+
+  .agent-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #58a6ff;
+  }
+
+  .agent-desc {
+    font-size: 10px;
+    color: #6e7681;
+    line-height: 1.3;
+  }
+
+  .delegate-empty {
+    font-size: 11px;
+    color: #6e7681;
+    padding: 4px;
+  }
 </style>

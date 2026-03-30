@@ -2,8 +2,10 @@
   import { retrieve, triggerReIndex } from '$lib/api'
   import { appState } from '$lib/store'
   import SttButton from '../components/SttButton.svelte'
+  import KnowledgeBase from '../components/KnowledgeBase.svelte'
   import type { SearchResult } from '$lib/types'
 
+  let activeTab = $state<'search' | 'kb'>('search')
   let query = $state('')
   let corpus = $state<'' | 'code' | 'governance'>('')
   let results = $state<SearchResult[]>([])
@@ -43,6 +45,16 @@
 </script>
 
 <div class="retrieval">
+  <div class="rt-tabs">
+    <button class="rt-tab" class:active={activeTab === 'search'} onclick={() => (activeTab = 'search')}>Search</button>
+    <button class="rt-tab" class:active={activeTab === 'kb'} onclick={() => (activeTab = 'kb')}>Knowledge Base</button>
+  </div>
+
+  {#if activeTab === 'kb'}
+    <KnowledgeBase />
+  {/if}
+
+  <div hidden={activeTab !== 'search'}>
   <div class="search-bar">
     <input
       type="text"
@@ -95,10 +107,31 @@
       </div>
     {/each}
   </div>
+  </div><!-- end hidden search -->
 </div>
 
 <style>
   .retrieval { display: flex; flex-direction: column; gap: 16px; }
+
+  .rt-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .rt-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: #8b949e;
+    cursor: pointer;
+    margin-bottom: -1px;
+  }
+
+  .rt-tab.active { color: #c9d1d9; border-bottom-color: #58a6ff; }
+  .rt-tab:hover { color: #c9d1d9; }
 
   .search-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   input { flex: 1; min-width: 200px; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 14px; }

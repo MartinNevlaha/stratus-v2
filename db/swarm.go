@@ -622,6 +622,23 @@ func scanSignals(rows *sql.Rows) ([]SwarmSignal, error) {
 	return signals, rows.Err()
 }
 
+// ListMissionSignals returns signals for a mission, newest first.
+func (d *DB) ListMissionSignals(missionID string, limit int) ([]SwarmSignal, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := d.sql.Query(`
+		SELECT id, mission_id, from_worker, to_worker, type, payload, read, created_at
+		FROM signals WHERE mission_id = ? ORDER BY created_at DESC LIMIT ?`,
+		missionID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list mission signals: %w", err)
+	}
+	defer rows.Close()
+	return scanSignals(rows)
+}
+
 // --- Forge entries ---
 
 func (d *DB) CreateForgeEntry(id, missionID, workerID, branchName string) error {
@@ -1089,27 +1106,36 @@ func (d *DB) ListStaleWorkers(threshold time.Duration) ([]SwarmWorker, error) {
 }
 
 // GetRecentDailyMetrics returns aggregated daily metrics for the last n days.
+// Returns only the "all" (summary) rows by default.
 func (d *DB) GetRecentDailyMetrics(days int) ([]map[string]any, error) {
+	return d.GetRecentDailyMetricsByType(days, "all")
+}
+
+// GetRecentDailyMetricsByType returns daily metrics filtered by workflow type.
+// Use "all" for summary, or "spec", "spec-complex", "bug", "e2e" for per-type.
+func (d *DB) GetRecentDailyMetricsByType(days int, workflowType string) ([]map[string]any, error) {
 	rows, err := d.sql.Query(`
-		SELECT metric_date, total_workflows, completed_workflows,
+		SELECT metric_date, workflow_type, total_workflows, completed_workflows,
 		       avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate
 		FROM daily_metrics
+		WHERE workflow_type = ?
 		ORDER BY metric_date DESC
-		LIMIT ?`, days)
+		LIMIT ?`, workflowType, days)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var result []map[string]any
 	for rows.Next() {
-		var date string
+		var date, wfType string
 		var totalWF, completedWF, avgDur, totalTasks, completedTasks int
 		var successRate float64
-		if err := rows.Scan(&date, &totalWF, &completedWF, &avgDur, &totalTasks, &completedTasks, &successRate); err != nil {
+		if err := rows.Scan(&date, &wfType, &totalWF, &completedWF, &avgDur, &totalTasks, &completedTasks, &successRate); err != nil {
 			return nil, err
 		}
 		result = append(result, map[string]any{
 			"date":                       date,
+			"workflow_type":              wfType,
 			"total_workflows":            totalWF,
 			"completed_workflows":        completedWF,
 			"avg_workflow_duration_ms":   avgDur,
@@ -1119,4 +1145,75 @@ func (d *DB) GetRecentDailyMetrics(days int) ([]map[string]any, error) {
 		})
 	}
 	return result, rows.Err()
+}
+
+// CollectDailyMetrics aggregates workflow and ticket data into daily_metrics for the last n days.
+// It generates per-workflow-type rows (spec, spec-complex, bug, e2e) plus an "all" summary row.
+func (d *DB) CollectDailyMetrics(days int) error {
+	_, err := d.sql.Exec(`
+		INSERT INTO daily_metrics (metric_date, workflow_type, total_workflows, completed_workflows, avg_workflow_duration_ms, total_tasks, completed_tasks, success_rate, computed_at)
+		WITH dates AS (
+			SELECT date('now', '-' || n || ' days') AS d
+			FROM (
+				WITH RECURSIVE cnt(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM cnt WHERE n < ?)
+				SELECT n FROM cnt
+			)
+		),
+		wf_typed AS (
+			SELECT
+				date(w.created_at) AS d,
+				CASE WHEN w.complexity = 'complex' THEN w.type || '-complex' ELSE w.type END AS wtype,
+				COUNT(*) AS total,
+				SUM(CASE WHEN w.phase = 'complete' THEN 1 ELSE 0 END) AS completed,
+				AVG(CASE WHEN w.phase = 'complete'
+					THEN (julianday(w.updated_at) - julianday(w.created_at)) * 86400000
+					ELSE NULL END) AS avg_dur
+			FROM workflows w
+			WHERE date(w.created_at) >= date('now', '-' || ? || ' days')
+			GROUP BY date(w.created_at), wtype
+		),
+		wf_all AS (
+			SELECT d, 'all' AS wtype, SUM(total) AS total, SUM(completed) AS completed,
+				AVG(avg_dur) AS avg_dur
+			FROM wf_typed GROUP BY d
+		),
+		wf AS (
+			SELECT * FROM wf_typed
+			UNION ALL
+			SELECT * FROM wf_all
+		),
+		tk AS (
+			SELECT
+				date(t.created_at) AS d,
+				COUNT(*) AS total,
+				SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS completed
+			FROM tickets t
+			WHERE date(t.created_at) >= date('now', '-' || ? || ' days')
+			GROUP BY date(t.created_at)
+		)
+		SELECT
+			dates.d,
+			wf.wtype,
+			COALESCE(wf.total, 0),
+			COALESCE(wf.completed, 0),
+			COALESCE(CAST(wf.avg_dur AS INTEGER), 0),
+			CASE WHEN wf.wtype = 'all' THEN COALESCE(tk.total, 0) ELSE 0 END,
+			CASE WHEN wf.wtype = 'all' THEN COALESCE(tk.completed, 0) ELSE 0 END,
+			CASE WHEN COALESCE(wf.total, 0) > 0
+				THEN CAST(COALESCE(wf.completed, 0) AS REAL) / wf.total
+				ELSE 0 END,
+			strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		FROM dates
+		JOIN wf ON wf.d = dates.d
+		LEFT JOIN tk ON tk.d = dates.d AND wf.wtype = 'all'
+		ON CONFLICT(metric_date, workflow_type) DO UPDATE SET
+			total_workflows = excluded.total_workflows,
+			completed_workflows = excluded.completed_workflows,
+			avg_workflow_duration_ms = excluded.avg_workflow_duration_ms,
+			total_tasks = excluded.total_tasks,
+			completed_tasks = excluded.completed_tasks,
+			success_rate = excluded.success_rate,
+			computed_at = excluded.computed_at
+	`, days-1, days, days)
+	return err
 }

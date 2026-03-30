@@ -26,6 +26,13 @@
     if (idx === cur) return 'current'
     return 'pending'
   }
+
+  function lineStatus(i: number): 'done' | 'active' | 'pending' {
+    const cur = phases.indexOf(currentPhase)
+    if (i < cur - 1) return 'done'
+    if (i === cur - 1) return 'active'
+    return 'pending'
+  }
 </script>
 
 <div class="timeline">
@@ -36,7 +43,8 @@
       <span class="label">{phase}</span>
     </div>
     {#if i < phases.length - 1}
-      <div class="line" class:done={status === 'done'}></div>
+      {@const ls = lineStatus(i)}
+      <div class="line" class:done={ls === 'done'} class:active={ls === 'active'}></div>
     {/if}
   {/each}
 </div>
@@ -67,7 +75,11 @@
   }
 
   .done .dot { background: #3fb950; border-color: #3fb950; }
-  .current .dot { background: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 8px #58a6ff80; }
+  .current .dot {
+    background: #58a6ff;
+    border-color: #58a6ff;
+    animation: dot-pulse 2s ease-in-out infinite;
+  }
 
   .label {
     font-size: 11px;
@@ -87,4 +99,36 @@
   }
 
   .line.done { background: #3fb950; }
+
+  .line.active {
+    background: linear-gradient(90deg, #3fb950, #58a6ff);
+    position: relative;
+    overflow: hidden;
+  }
+  .line.active::after {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: -40%;
+    width: 40%;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, #58a6ff, #79c0ff, #58a6ff, transparent);
+    animation: line-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes dot-pulse {
+    0%, 100% { box-shadow: 0 0 6px #58a6ff60; }
+    50%      { box-shadow: 0 0 16px #58a6ffa0, 0 0 30px #58a6ff40; }
+  }
+
+  @keyframes line-pulse {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .current .dot { animation: none; box-shadow: 0 0 8px #58a6ff80; }
+    .line.active::after { animation: none; opacity: 0; }
+  }
 </style>

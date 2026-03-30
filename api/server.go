@@ -251,6 +251,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/swarm/missions/{id}/dispatch", s.handleSwarmDispatch)
 	mux.HandleFunc("POST /api/swarm/signals", s.handleSendSignal)
 	mux.HandleFunc("GET /api/swarm/workers/{id}/signals", s.handlePollSignals)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/signals", s.handleListMissionSignals)
 	mux.HandleFunc("POST /api/swarm/missions/{id}/forge", s.handleSubmitToForge)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/forge", s.handleListForgeEntries)
 	mux.HandleFunc("PUT /api/swarm/forge/{id}/status", s.handleUpdateForgeEntry)
@@ -355,6 +356,7 @@ func (s *Server) Handler() http.Handler {
 	// Guardian
 	mux.HandleFunc("GET /api/guardian/alerts", s.handleListGuardianAlerts)
 	mux.HandleFunc("PUT /api/guardian/alerts/{id}/dismiss", s.handleDismissGuardianAlert)
+	mux.HandleFunc("POST /api/guardian/alerts/dismiss-all", s.handleDismissAllGuardianAlerts)
 	mux.HandleFunc("DELETE /api/guardian/alerts/{id}", s.handleDeleteGuardianAlert)
 	mux.HandleFunc("GET /api/guardian/config", s.handleGetGuardianConfig)
 	mux.HandleFunc("PUT /api/guardian/config", s.handleUpdateGuardianConfig)
@@ -368,6 +370,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics/daily", s.handleMetricsDaily)
 	mux.HandleFunc("GET /api/metrics/agents", s.handleMetricsAgents)
 	mux.HandleFunc("GET /api/metrics/projects", s.handleMetricsProjects)
+
+	// Knowledge Base
+	mux.HandleFunc("GET /api/kb/solutions", s.handleListKBSolutions)
+	mux.HandleFunc("GET /api/kb/problems", s.handleListKBProblems)
+	mux.HandleFunc("GET /api/kb/recommend", s.handleKBRecommend)
+	mux.HandleFunc("GET /api/kb/stats", s.handleKBStats)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

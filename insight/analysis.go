@@ -20,6 +20,11 @@ func (e *Engine) RunAnalysis() error {
 	var patterns []*db.InsightPattern
 	var proposals []db.Proposal
 
+	// Collect fresh metrics from workflows/tickets into daily_metrics table
+	if err := e.database.CollectDailyMetrics(7); err != nil {
+		log.Printf("insight: failed to collect daily metrics: %v", err)
+	}
+
 	// Get recent daily metrics (7 days)
 	dailyMetrics, err := e.database.GetRecentDailyMetrics(7)
 	if err != nil {
@@ -33,6 +38,40 @@ func (e *Engine) RunAnalysis() error {
 
 	findings["metrics_analyzed"] = len(dailyMetrics)
 	findings["analysis_date"] = time.Now().Format(time.RFC3339)
+
+	// Collect per-workflow-type breakdown
+	typeBreakdown := map[string]any{}
+	for _, wfType := range []string{"spec", "spec-complex", "bug", "e2e"} {
+		typeMetrics, err := e.database.GetRecentDailyMetricsByType(7, wfType)
+		if err != nil {
+			log.Printf("insight: failed to get metrics for type %s: %v", wfType, err)
+			continue
+		}
+		if len(typeMetrics) > 0 {
+			var total, completed int
+			for _, m := range typeMetrics {
+				if tw, ok := m["total_workflows"].(int); ok {
+					total += tw
+				}
+				if cw, ok := m["completed_workflows"].(int); ok {
+					completed += cw
+				}
+			}
+			rate := 0.0
+			if total > 0 {
+				rate = float64(completed) / float64(total)
+			}
+			typeBreakdown[wfType] = map[string]any{
+				"total_workflows":     total,
+				"completed_workflows": completed,
+				"success_rate":        rate,
+				"days_with_data":      len(typeMetrics),
+			}
+		}
+	}
+	if len(typeBreakdown) > 0 {
+		findings["workflow_type_breakdown"] = typeBreakdown
+	}
 
 	// Pattern 1: Analyze success rates
 	var successRates []float64

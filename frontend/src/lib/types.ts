@@ -353,6 +353,7 @@ export interface AnalysisResult {
   estimated_duration_min: number
   suggested_domains: string[]
   similar_past_workflows: SimilarWorkflow[]
+  llm_analysis?: string
 }
 
 export interface GuardianAlert {
@@ -395,4 +396,70 @@ export interface InsightConfig {
   max_proposals: number
   min_confidence: number
   llm: InsightLLMConfig
+}
+
+export interface SwarmEvidence {
+  id: string
+  ticket_id: string
+  mission_id: string
+  type: string
+  content: string
+  agent: string
+  verdict: string
+  created_at: string
+}
+
+export interface AgentScorecard {
+  id: string
+  agent_name: string
+  window: string
+  window_start: string
+  window_end: string
+  total_runs: number
+  success_rate: number
+  failure_rate: number
+  review_pass_rate: number
+  rework_rate: number
+  avg_cycle_time_ms: number
+  regression_rate: number
+  confidence_score: number
+  trend: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SolutionPattern {
+  id: string
+  problem_class: string
+  solution_pattern: string
+  repo_type: string
+  success_rate: number
+  occurrence_count: number
+  example_artifacts: string[]
+  confidence: number
+  first_seen: string
+  last_seen: string
+}
+
+export interface ProblemStats {
+  id: string
+  problem_class: string
+  repo_type: string
+  best_agent: string
+  best_workflow: string
+  success_rate: number
+  occurrence_count: number
+  avg_cycle_time: number
+  agents_success: Record<string, number>
+}
+
+export interface KBRecommendation {
+  solution: SolutionPattern | null
+  best_agent: string
+  agent_success_rate: number
+}
+
+export interface KBStats {
+  solution_patterns: number
+  problem_classes: number
 }
