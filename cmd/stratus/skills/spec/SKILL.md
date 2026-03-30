@@ -33,7 +33,7 @@ id: "<kebab-slug>"          # lowercase, hyphenated, max 50 chars
 type: "spec"
 title: "<title from $ARGUMENTS>"
 session_id: "${CLAUDE_SESSION_ID}"
-complexity: "simple" | "complex"   # complex for multi-service, auth, database, cross-cutting
+complexity: "simple"   # /spec is always simple; use /spec-complex for complex workflows
 ```
 
 **DO NOT PROCEED until `mcp__stratus__register_workflow` succeeds and returns a workflow ID.**

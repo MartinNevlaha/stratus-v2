@@ -8,7 +8,7 @@
   let { type, complexity = 'simple', currentPhase }: Props = $props()
 
   const specSimplePhases  = ['plan', 'implement', 'verify', 'learn', 'complete']
-  const specComplexPhases = ['discovery', 'design', 'plan', 'implement', 'verify', 'learn', 'complete']
+  const specComplexPhases = ['plan', 'discovery', 'design', 'governance', 'accept', 'implement', 'verify', 'learn', 'complete']
   const bugPhases         = ['analyze', 'fix', 'review', 'complete']
   const e2ePhases         = ['setup', 'plan', 'generate', 'heal', 'complete']
 
