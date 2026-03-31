@@ -10,7 +10,7 @@ argument-hint: "<feature description>"
 Current session: ${CLAUDE_SESSION_ID}
 
 ```bash
-BASE=http://localhost:{{STRATUS_PORT}}
+BASE=http://localhost:$(stratus port)
 ```
 
 > **Swarm** runs delivery agents in isolated git worktrees — each worker has its own

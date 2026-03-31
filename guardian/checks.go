@@ -99,6 +99,81 @@ func checkStaleWorkers(database *db.DB, cfg config.GuardianConfig) []alertInput 
 	return alerts
 }
 
+// checkStaleVerifying alerts when a mission has been stuck in 'verifying' longer
+// than cfg.ReviewerTimeoutMinutes (default 30). This catches reviewer agents that
+// silently hang without producing an evidence verdict.
+func checkStaleVerifying(database *db.DB, cfg config.GuardianConfig) []alertInput {
+	minutes := cfg.ReviewerTimeoutMinutes
+	if minutes <= 0 {
+		minutes = 30
+	}
+	threshold := time.Duration(minutes) * time.Minute
+
+	missions, err := database.ListStaleVerifyingMissions(threshold)
+	if err != nil || len(missions) == 0 {
+		return nil
+	}
+
+	var alerts []alertInput
+	for _, m := range missions {
+		alerts = append(alerts, alertInput{
+			Type:     "reviewer_timeout",
+			Severity: "warning",
+			Message:  fmt.Sprintf("Mission \"%s\" has been in 'verifying' for >%dmin — reviewer may be stuck", m.Title, minutes),
+			Metadata: map[string]any{
+				"dedup_key":       "reviewer_timeout_" + m.ID,
+				"mission_id":      m.ID,
+				"verifying_since": m.VerifyingSince,
+			},
+		})
+	}
+	return alerts
+}
+
+// checkOverdueTickets alerts when a ticket has been in_progress longer than
+// cfg.TicketTimeoutMinutes (default 30) and marks it failed to unblock the worker.
+func checkOverdueTickets(database *db.DB, cfg config.GuardianConfig) []alertInput {
+	minutes := cfg.TicketTimeoutMinutes
+	if minutes <= 0 {
+		minutes = 30
+	}
+	threshold := time.Duration(minutes) * time.Minute
+
+	tickets, err := database.ListOverdueTickets(threshold)
+	if err != nil || len(tickets) == 0 {
+		return nil
+	}
+
+	var alerts []alertInput
+	for _, t := range tickets {
+		reason := fmt.Sprintf("timeout: ticket in_progress for >%dmin", minutes)
+		_ = database.UpdateTicketStatus(t.ID, "failed", reason, 5, 3)
+
+		// Send TICKET_TIMEOUT signal to the assigned worker if known.
+		if t.WorkerID != nil && *t.WorkerID != "" {
+			_ = database.CreateSignal(
+				fmt.Sprintf("guardian-%s", t.ID[:8]),
+				t.MissionID, "guardian", *t.WorkerID,
+				"TICKET_TIMEOUT",
+				fmt.Sprintf(`{"ticket_id":%q,"reason":%q}`, t.ID, reason),
+			)
+		}
+
+		alerts = append(alerts, alertInput{
+			Type:     "ticket_timeout",
+			Severity: "warning",
+			Message:  fmt.Sprintf("Ticket \"%s\" timed out after >%dmin in_progress — marked failed", t.Title, minutes),
+			Metadata: map[string]any{
+				"dedup_key":  "ticket_timeout_" + t.ID,
+				"ticket_id":  t.ID,
+				"mission_id": t.MissionID,
+				"worker_id":  t.WorkerID,
+			},
+		})
+	}
+	return alerts
+}
+
 // checkMemoryHealth warns when the events table grows too large.
 func checkMemoryHealth(database *db.DB, cfg config.GuardianConfig) []alertInput {
 	count, err := database.CountEvents()

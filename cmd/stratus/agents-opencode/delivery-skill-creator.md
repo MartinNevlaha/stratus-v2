@@ -20,7 +20,7 @@ You are a **skill creation and optimization agent**. You create, evaluate, bench
 Before starting ANY work, verify there is an active workflow:
 
 ```bash
-curl -sS http://localhost:{{STRATUS_PORT}}/api/dashboard/state | jq '.workflows[0]'
+curl -sS http://localhost:$(stratus port)/api/dashboard/state | jq '.workflows[0]'
 ```
 
 If no active workflow exists (null response), **STOP** and tell the user:

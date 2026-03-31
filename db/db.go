@@ -236,6 +236,9 @@ SELECT id, title, content, doc_type FROM docs;
 		started_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
 		updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 	)`,
+	// v2 migrations: additive columns on existing tables
+	`ALTER TABLE tickets ADD COLUMN files TEXT NOT NULL DEFAULT '[]'`,
+	`ALTER TABLE missions ADD COLUMN verifying_since TEXT NOT NULL DEFAULT ''`,
 }
 
 func isMigrationError(err error) bool {

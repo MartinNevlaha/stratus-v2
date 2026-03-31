@@ -16,7 +16,7 @@ You are a **diagnostic delivery agent** that traces root causes of bugs. You are
 Check for active workflow context before starting:
 
 ```bash
-curl -sS http://localhost:{{STRATUS_PORT}}/api/dashboard/state | jq '.workflows[0]'
+curl -sS http://localhost:$(stratus port)/api/dashboard/state | jq '.workflows[0]'
 ```
 
 Use the workflow context (phase, tasks, delegated agents) to inform your analysis.

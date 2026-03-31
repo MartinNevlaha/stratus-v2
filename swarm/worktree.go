@@ -91,6 +91,47 @@ func (wm *WorktreeManager) WorktreeDir() string {
 	return wm.worktreeDir
 }
 
+// CreatePreviewMerge creates a temporary worktree on a new branch and
+// sequentially merges all provided worker branches into it.
+// Returns the worktree path and the list of branches that failed to merge.
+// The preview branch is named swarm/<missionID>/preview.
+func (wm *WorktreeManager) CreatePreviewMerge(missionID, baseBranch string, workerBranches []string) (path string, failedMerges []string, err error) {
+	previewBranch := fmt.Sprintf("swarm/%s/preview", missionID)
+	dirName := sanitizeBranchForDir(previewBranch)
+	wtPath := filepath.Join(wm.worktreeDir, dirName)
+
+	if err := os.MkdirAll(wm.worktreeDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("create worktree dir: %w", err)
+	}
+
+	// Remove any stale preview worktree from a prior run.
+	if info, statErr := os.Stat(wtPath); statErr == nil && info.IsDir() {
+		_ = exec.Command("git", "worktree", "remove", "--force", wtPath).Run()
+		_ = exec.Command("git", "branch", "-D", previewBranch).Run()
+	}
+
+	// Create the preview worktree from the base branch.
+	cmd := exec.Command("git", "worktree", "add", "-b", previewBranch, wtPath, baseBranch)
+	cmd.Dir = wm.projectRoot
+	if out, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
+		return "", nil, fmt.Errorf("create preview worktree: %s: %w", strings.TrimSpace(string(out)), cmdErr)
+	}
+
+	// Merge each worker branch.
+	for _, branch := range workerBranches {
+		mergeCmd := exec.Command("git", "merge", "--no-ff", branch, "-m", "preview: merge "+branch)
+		mergeCmd.Dir = wtPath
+		if out, mergeErr := mergeCmd.CombinedOutput(); mergeErr != nil {
+			// Abort conflicting merge and record the failure.
+			_ = exec.Command("git", "merge", "--abort").Run()
+			failedMerges = append(failedMerges, branch)
+			_ = strings.TrimSpace(string(out)) // suppress unused variable lint
+		}
+	}
+
+	return wtPath, failedMerges, nil
+}
+
 // sanitizeBranchForDir converts a branch name to a safe directory name.
 func sanitizeBranchForDir(branch string) string {
 	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "..", "-")

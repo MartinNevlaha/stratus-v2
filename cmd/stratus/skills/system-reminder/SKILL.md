@@ -12,7 +12,7 @@ Before applying read-only constraints, ALWAYS check your current operational mod
 
 ```bash
 # Get current workflow phase
-curl -sS http://localhost:{{STRATUS_PORT}}/api/dashboard/state | jq '.workflows[0].phase'
+curl -sS http://localhost:$(stratus port)/api/dashboard/state | jq '.workflows[0].phase'
 ```
 
 - **plan**, **discovery**, **design**, **governance**, **accept**, **verify** phases → READ-ONLY MODE ACTIVE

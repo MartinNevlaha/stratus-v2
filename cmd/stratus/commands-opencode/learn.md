@@ -9,7 +9,7 @@ Analyze the codebase for repeating patterns and anti-patterns, create learning c
 ## API Base
 
 ```bash
-BASE=http://127.0.0.1:{{STRATUS_PORT}}
+BASE=http://127.0.0.1:$(stratus port)
 ```
 
 ---

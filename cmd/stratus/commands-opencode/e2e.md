@@ -8,10 +8,10 @@ You are the **coordinator** for an autonomous E2E testing workflow using Playwri
 
 ## API Base
 
-All calls use the stratus server (default port 41777).
+All calls use the stratus server (port resolved via `stratus port`).
 
 ```bash
-BASE=http://127.0.0.1:{{STRATUS_PORT}}
+BASE=http://127.0.0.1:$(stratus port)
 ```
 
 ---

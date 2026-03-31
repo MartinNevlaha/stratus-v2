@@ -7,7 +7,7 @@ description: "Generate a semantic change summary for a completed workflow. Analy
 Generates a semantic change summary for a completed workflow and stores it via the Stratus API.
 
 ```bash
-BASE=http://localhost:{{STRATUS_PORT}}
+BASE=http://localhost:$(stratus port)
 ```
 
 ## Step 1 — Identify the workflow

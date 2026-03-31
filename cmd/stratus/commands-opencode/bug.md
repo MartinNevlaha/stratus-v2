@@ -9,7 +9,7 @@ You are the **coordinator** for a structured bug-fixing workflow. You orchestrat
 ## API Base
 
 ```bash
-BASE=http://127.0.0.1:{{STRATUS_PORT}}
+BASE=http://127.0.0.1:$(stratus port)
 ```
 
 ---

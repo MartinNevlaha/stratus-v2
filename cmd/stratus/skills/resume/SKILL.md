@@ -10,7 +10,7 @@ argument-hint: "[workflow-id]"
 Current session ID: ${CLAUDE_SESSION_ID}
 
 ```bash
-BASE=http://localhost:{{STRATUS_PORT}}
+BASE=http://localhost:$(stratus port)
 ```
 
 ## Step 1 — Identify the workflow

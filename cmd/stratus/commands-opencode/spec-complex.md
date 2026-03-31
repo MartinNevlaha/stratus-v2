@@ -23,7 +23,7 @@ For simple, well-understood tasks use `/spec`.
 ## API Base
 
 ```bash
-BASE=http://127.0.0.1:{{STRATUS_PORT}}
+BASE=http://127.0.0.1:$(stratus port)
 ```
 
 ---

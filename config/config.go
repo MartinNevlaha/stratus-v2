@@ -38,17 +38,19 @@ type InsightConfig struct {
 
 // GuardianConfig configures the Ambient Codebase Guardian.
 type GuardianConfig struct {
-	Enabled            bool    `json:"enabled"`
-	IntervalMinutes    int     `json:"interval_minutes"`
-	CoverageDriftPct   float64 `json:"coverage_drift_pct"`
-	StaleWorkflowHours int     `json:"stale_workflow_hours"`
-	MemoryThreshold    int     `json:"memory_threshold"`
-	TechDebtThreshold  int     `json:"tech_debt_threshold"`
-	LLMEndpoint        string  `json:"llm_endpoint"`
-	LLMAPIKey          string  `json:"llm_api_key"`
-	LLMModel           string  `json:"llm_model"`
-	LLMTemperature     float64 `json:"llm_temperature"`
-	LLMMaxTokens       int     `json:"llm_max_tokens"`
+	Enabled                bool    `json:"enabled"`
+	IntervalMinutes        int     `json:"interval_minutes"`
+	CoverageDriftPct       float64 `json:"coverage_drift_pct"`
+	StaleWorkflowHours     int     `json:"stale_workflow_hours"`
+	MemoryThreshold        int     `json:"memory_threshold"`
+	TechDebtThreshold      int     `json:"tech_debt_threshold"`
+	ReviewerTimeoutMinutes int     `json:"reviewer_timeout_minutes"`
+	TicketTimeoutMinutes   int     `json:"ticket_timeout_minutes"`
+	LLMEndpoint            string  `json:"llm_endpoint"`
+	LLMAPIKey              string  `json:"llm_api_key"`
+	LLMModel               string  `json:"llm_model"`
+	LLMTemperature         float64 `json:"llm_temperature"`
+	LLMMaxTokens           int     `json:"llm_max_tokens"`
 }
 
 // Config holds the stratus configuration.
@@ -92,14 +94,16 @@ func Default() Config {
 			Model:    "Systran/faster-whisper-large-v3",
 		},
 		Guardian: GuardianConfig{
-			Enabled:            true,
-			IntervalMinutes:    15,
-			CoverageDriftPct:   5.0,
-			StaleWorkflowHours: 2,
-			MemoryThreshold:    5000,
-			TechDebtThreshold:  50,
-			LLMTemperature:     0.3,
-			LLMMaxTokens:       1024,
+			Enabled:                true,
+			IntervalMinutes:        15,
+			CoverageDriftPct:       5.0,
+			StaleWorkflowHours:     2,
+			MemoryThreshold:        5000,
+			TechDebtThreshold:      50,
+			ReviewerTimeoutMinutes: 30,
+			TicketTimeoutMinutes:   30,
+			LLMTemperature:         0.3,
+			LLMMaxTokens:           1024,
 		},
 		MetricsBroadcastInterval: 30,
 		Insight: InsightConfig{

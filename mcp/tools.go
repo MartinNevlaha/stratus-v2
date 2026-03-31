@@ -523,6 +523,21 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			return client.post("/api/swarm/guardrails/track", args)
 		},
 	})
+
+	s.Register(Tool{
+		Name:        "swarm_execute_forge",
+		Description: "Execute the forge merge queue for a mission. Sequentially merges all pending worker branches into the integration worktree, handling stash/unstash automatically. Returns merge results and any missing commits.",
+		InputSchema: obj(
+			req("mission_id", "string", "Mission ID"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			missionID, _ := args["mission_id"].(string)
+			if missionID == "" {
+				return nil, fmt.Errorf("mission_id is required")
+			}
+			return client.post("/api/swarm/missions/"+missionID+"/forge/execute", map[string]any{})
+		},
+	})
 }
 
 // apiClient is a minimal HTTP client for calling the Stratus API.

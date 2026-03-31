@@ -9,7 +9,7 @@ function getBase(): string {
     const cfg = JSON.parse(readFileSync(".stratus.json", "utf-8"))
     if (cfg.port) return `http://localhost:${cfg.port}`
   } catch {}
-  return "http://localhost:{{STRATUS_PORT}}"
+  return "http://localhost:41777"
 }
 
 const BASE = getBase()

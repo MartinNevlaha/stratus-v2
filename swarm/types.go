@@ -47,6 +47,7 @@ const (
 	SignalPlanDrift      = "PLAN_DRIFT"
 	SignalGuardrailWarn  = "GUARDRAIL_WARN"
 	SignalGuardrailBlock = "GUARDRAIL_BLOCK"
+	SignalTicketTimeout  = "TICKET_TIMEOUT"
 )
 
 // Forge entry status lifecycle: pending → merging → merged | conflict | failed

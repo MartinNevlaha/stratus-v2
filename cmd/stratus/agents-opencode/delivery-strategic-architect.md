@@ -16,7 +16,7 @@ You are a **strategic architecture delivery agent** responsible for high-level d
 Check for active workflow context before starting:
 
 ```bash
-curl -sS http://localhost:{{STRATUS_PORT}}/api/dashboard/state | jq '.workflows[0]'
+curl -sS http://localhost:$(stratus port)/api/dashboard/state | jq '.workflows[0]'
 ```
 
 Use the workflow context (phase, tasks, delegated agents) to inform your analysis.

@@ -18,6 +18,7 @@ type SwarmMission struct {
 	MergeBranch     string `json:"merge_branch"`
 	Strategy        string `json:"strategy"`
 	StrategyOutcome string `json:"strategy_outcome"`
+	VerifyingSince  string `json:"verifying_since,omitempty"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -73,6 +74,7 @@ type SwarmTicket struct {
 	Status         string  `json:"status"`
 	WorkerID       *string `json:"worker_id,omitempty"`
 	DependsOn      string  `json:"depends_on"`
+	Files          string  `json:"files"`
 	Result         string  `json:"result"`
 	RevisionCount  int     `json:"revision_count"`
 	RejectionCount int     `json:"rejection_count"`
@@ -144,9 +146,9 @@ func (d *DB) CreateMission(id, workflowID, title, baseBranch, mergeBranch, strat
 func (d *DB) GetMission(id string) (*SwarmMission, error) {
 	var m SwarmMission
 	err := d.sql.QueryRow(`
-		SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, created_at, updated_at
+		SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, verifying_since, created_at, updated_at
 		FROM missions WHERE id = ?`, id).
-		Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.CreatedAt, &m.UpdatedAt)
+		Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.VerifyingSince, &m.CreatedAt, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("mission not found: %s", id)
 	}
@@ -157,10 +159,19 @@ func (d *DB) GetMission(id string) (*SwarmMission, error) {
 }
 
 func (d *DB) UpdateMissionStatus(id, status string) error {
-	res, err := d.sql.Exec(`
-		UPDATE missions SET status = ?, updated_at = ? WHERE id = ?`,
-		status, now(), id,
-	)
+	var res sql.Result
+	var err error
+	if status == "verifying" {
+		res, err = d.sql.Exec(`
+			UPDATE missions SET status = ?, verifying_since = ?, updated_at = ? WHERE id = ?`,
+			status, now(), now(), id,
+		)
+	} else {
+		res, err = d.sql.Exec(`
+			UPDATE missions SET status = ?, updated_at = ? WHERE id = ?`,
+			status, now(), id,
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("update mission status: %w", err)
 	}
@@ -173,7 +184,7 @@ func (d *DB) UpdateMissionStatus(id, status string) error {
 
 func (d *DB) ListMissions() ([]SwarmMission, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, created_at, updated_at
+		SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, verifying_since, created_at, updated_at
 		FROM missions ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list missions: %w", err)
@@ -182,7 +193,7 @@ func (d *DB) ListMissions() ([]SwarmMission, error) {
 	var missions []SwarmMission
 	for rows.Next() {
 		var m SwarmMission
-		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.VerifyingSince, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		missions = append(missions, m)
@@ -197,7 +208,7 @@ func (d *DB) CountPastMissions() (int, error) {
 }
 
 func (d *DB) ListPastMissions(offset, limit int) ([]SwarmMission, error) {
-	rows, err := d.sql.Query(`SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, created_at, updated_at FROM missions WHERE status IN ('complete', 'failed', 'aborted') ORDER BY updated_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := d.sql.Query(`SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, verifying_since, created_at, updated_at FROM missions WHERE status IN ('complete', 'failed', 'aborted') ORDER BY updated_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list past missions: %w", err)
 	}
@@ -205,7 +216,7 @@ func (d *DB) ListPastMissions(offset, limit int) ([]SwarmMission, error) {
 	var missions []SwarmMission
 	for rows.Next() {
 		var m SwarmMission
-		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.VerifyingSince, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		missions = append(missions, m)
@@ -345,14 +356,17 @@ func scanWorkers(rows *sql.Rows) ([]SwarmWorker, error) {
 
 // --- Tickets ---
 
-func (d *DB) CreateTicket(id, missionID, title, description, domain string, priority int, dependsOn string) error {
+func (d *DB) CreateTicket(id, missionID, title, description, domain string, priority int, dependsOn, files string) error {
 	if dependsOn == "" {
 		dependsOn = "[]"
 	}
+	if files == "" {
+		files = "[]"
+	}
 	_, err := d.sql.Exec(`
-		INSERT INTO tickets (id, mission_id, title, description, domain, priority, depends_on)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, missionID, title, description, domain, priority, dependsOn,
+		INSERT INTO tickets (id, mission_id, title, description, domain, priority, depends_on, files)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, missionID, title, description, domain, priority, dependsOn, files,
 	)
 	if err != nil {
 		return fmt.Errorf("insert ticket: %w", err)
@@ -365,10 +379,10 @@ func (d *DB) GetTicket(id string) (*SwarmTicket, error) {
 	var workerID sql.NullString
 	err := d.sql.QueryRow(`
 		SELECT id, mission_id, title, description, domain, priority,
-		       status, worker_id, depends_on, result, revision_count, rejection_count, created_at, updated_at
+		       status, worker_id, depends_on, files, result, revision_count, rejection_count, created_at, updated_at
 		FROM tickets WHERE id = ?`, id).
 		Scan(&t.ID, &t.MissionID, &t.Title, &t.Description, &t.Domain, &t.Priority,
-			&t.Status, &workerID, &t.DependsOn, &t.Result, &t.RevisionCount, &t.RejectionCount, &t.CreatedAt, &t.UpdatedAt)
+			&t.Status, &workerID, &t.DependsOn, &t.Files, &t.Result, &t.RevisionCount, &t.RejectionCount, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("ticket not found: %s", id)
 	}
@@ -384,7 +398,7 @@ func (d *DB) GetTicket(id string) (*SwarmTicket, error) {
 func (d *DB) ListTickets(missionID string) ([]SwarmTicket, error) {
 	rows, err := d.sql.Query(`
 		SELECT id, mission_id, title, description, domain, priority,
-		       status, worker_id, depends_on, result, revision_count, rejection_count, created_at, updated_at
+		       status, worker_id, depends_on, files, result, revision_count, rejection_count, created_at, updated_at
 		FROM tickets WHERE mission_id = ? ORDER BY priority ASC, created_at ASC`, missionID)
 	if err != nil {
 		return nil, fmt.Errorf("list tickets: %w", err)
@@ -457,6 +471,43 @@ func (d *DB) UpdateTicketStatus(id, status, result string, maxRevisions, maxReje
 	return nil
 }
 
+// ListOverdueTickets returns in_progress tickets whose status hasn't changed for
+// longer than threshold. Uses updated_at as the last-activity timestamp.
+func (d *DB) ListOverdueTickets(threshold time.Duration) ([]SwarmTicket, error) {
+	cutoff := time.Now().UTC().Add(-threshold).Format("2006-01-02T15:04:05.000Z")
+	rows, err := d.sql.Query(`
+		SELECT id, mission_id, title, description, domain, priority,
+		       status, worker_id, depends_on, files, result, revision_count, rejection_count, created_at, updated_at
+		FROM tickets WHERE status = 'in_progress' AND updated_at < ?`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list overdue tickets: %w", err)
+	}
+	defer rows.Close()
+	return scanTickets(rows)
+}
+
+// ListStaleVerifyingMissions returns missions stuck in the 'verifying' phase
+// for longer than threshold.
+func (d *DB) ListStaleVerifyingMissions(threshold time.Duration) ([]SwarmMission, error) {
+	cutoff := time.Now().UTC().Add(-threshold).Format("2006-01-02T15:04:05.000Z")
+	rows, err := d.sql.Query(`
+		SELECT id, workflow_id, title, status, base_branch, merge_branch, strategy, strategy_outcome, verifying_since, created_at, updated_at
+		FROM missions WHERE status = 'verifying' AND verifying_since != '' AND verifying_since < ?`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list stale verifying missions: %w", err)
+	}
+	defer rows.Close()
+	var missions []SwarmMission
+	for rows.Next() {
+		var m SwarmMission
+		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Title, &m.Status, &m.BaseBranch, &m.MergeBranch, &m.Strategy, &m.StrategyOutcome, &m.VerifyingSince, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		missions = append(missions, m)
+	}
+	return missions, rows.Err()
+}
+
 // GetDispatchableTickets returns pending tickets whose dependencies are all done.
 func (d *DB) GetDispatchableTickets(missionID string) ([]SwarmTicket, error) {
 	// Get all tickets for the mission, then filter in Go for dependency resolution.
@@ -501,7 +552,7 @@ func scanTickets(rows *sql.Rows) ([]SwarmTicket, error) {
 		var t SwarmTicket
 		var workerID sql.NullString
 		if err := rows.Scan(&t.ID, &t.MissionID, &t.Title, &t.Description, &t.Domain, &t.Priority,
-			&t.Status, &workerID, &t.DependsOn, &t.Result, &t.RevisionCount, &t.RejectionCount, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.Status, &workerID, &t.DependsOn, &t.Files, &t.Result, &t.RevisionCount, &t.RejectionCount, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if workerID.Valid {

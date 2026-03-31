@@ -98,6 +98,12 @@ func (g *Guardian) runChecks(ctx context.Context) {
 	// 1b. Stale swarm workers
 	candidates = append(candidates, checkStaleWorkers(g.db, cfg)...)
 
+	// 1c. Reviewer timeout (mission stuck in verifying)
+	candidates = append(candidates, checkStaleVerifying(g.db, cfg)...)
+
+	// 1d. Overdue tickets (in_progress too long)
+	candidates = append(candidates, checkOverdueTickets(g.db, cfg)...)
+
 	// 2. Memory health
 	candidates = append(candidates, checkMemoryHealth(g.db, cfg)...)
 

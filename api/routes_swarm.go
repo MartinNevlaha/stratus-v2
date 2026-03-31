@@ -265,6 +265,7 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		Domain      string   `json:"domain"`
 		Priority    int      `json:"priority"`
 		DependsOn   []string `json:"depends_on"`
+		Files       []string `json:"files"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
@@ -282,7 +283,12 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(body.DependsOn)
 		deps = string(b)
 	}
-	ticket, err := s.swarm.CreateTicket(missionID, body.Title, body.Description, body.Domain, body.Priority, deps)
+	files := "[]"
+	if len(body.Files) > 0 {
+		b, _ := json.Marshal(body.Files)
+		files = string(b)
+	}
+	ticket, err := s.swarm.CreateTicket(missionID, body.Title, body.Description, body.Domain, body.Priority, deps, files)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -300,6 +306,7 @@ func (s *Server) handleBatchCreateTickets(w http.ResponseWriter, r *http.Request
 			Domain      string   `json:"domain"`
 			Priority    int      `json:"priority"`
 			DependsOn   []string `json:"depends_on"`
+			Files       []string `json:"files"`
 		} `json:"tickets"`
 	}
 	if err := decodeBody(r, &body); err != nil {
@@ -318,7 +325,12 @@ func (s *Server) handleBatchCreateTickets(w http.ResponseWriter, r *http.Request
 			b, _ := json.Marshal(t.DependsOn)
 			deps = string(b)
 		}
-		ticket, err := s.swarm.CreateTicket(missionID, t.Title, t.Description, domain, t.Priority, deps)
+		files := "[]"
+		if len(t.Files) > 0 {
+			b, _ := json.Marshal(t.Files)
+			files = string(b)
+		}
+		ticket, err := s.swarm.CreateTicket(missionID, t.Title, t.Description, domain, t.Priority, deps, files)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -480,6 +492,38 @@ func (s *Server) handleUpdateForgeEntry(w http.ResponseWriter, r *http.Request) 
 	}
 	s.hub.BroadcastJSON("forge_update", map[string]string{"id": entryID, "status": body.Status})
 	json200(w, map[string]string{"id": entryID, "status": body.Status})
+}
+
+// handleCreatePreviewWorktree creates a temporary worktree with all worker branches
+// pre-merged so that a reviewer agent can see the consolidated diff.
+func (s *Server) handleCreatePreviewWorktree(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	path, failedMerges, err := s.swarm.CreatePreviewWorktree(missionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	json200(w, map[string]any{
+		"worktree_path": path,
+		"failed_merges": failedMerges,
+	})
+}
+
+// handleExecuteForge sequentially merges all pending forge entries for a mission
+// into its integration worktree, then verifies commits are present.
+func (s *Server) handleExecuteForge(w http.ResponseWriter, r *http.Request) {
+	missionID := r.PathValue("id")
+	results, missingCommits, err := s.swarm.ExecuteForge(missionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := map[string]any{
+		"results":         results,
+		"missing_commits": missingCommits,
+	}
+	s.hub.BroadcastJSON("forge_executed", map[string]any{"mission_id": missionID, "results": results})
+	json200(w, resp)
 }
 
 // handleGetWorker returns a single worker by ID.
@@ -877,7 +921,8 @@ You are a swarm worker in an isolated git worktree.
 - Work ONLY in %s — do NOT modify files outside or switch branches
 - Commit regularly — small, atomic commits on your branch
 - Poll signals periodically: swarm_signals(worker_id="%s")
-- Tickets have max 5 revisions — report failure rather than looping`,
+- Tickets have max 5 revisions — report failure rather than looping
+- Before calling functions from other modules, verify the function signature and parameter names match what actually exists`,
 		w.ID, w.WorktreePath, w.BranchName, w.MissionID,
 		w.ID, w.ID, w.ID, w.ID, w.WorktreePath, w.ID)
 }
