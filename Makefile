@@ -22,7 +22,7 @@ dev:
 clean:
 	rm -f $(BINARY)
 
-## release: bump version, build frontend, commit static assets, tag and push
+## release: bump version, build frontend, commit static assets, tag, push, and create GitHub Release
 ##   usage: make release VERSION=x.y.z
 release:
 	@test -n "$(VERSION)" || (echo "ERROR: VERSION is required. Usage: make release VERSION=x.y.z"; exit 1)
@@ -40,4 +40,6 @@ release:
 	git tag v$(VERSION)
 	@echo "==> Pushing"
 	git push && git push origin v$(VERSION)
+	@echo "==> Creating GitHub Release"
+	gh release create v$(VERSION) --title "v$(VERSION)" --generate-notes
 	@echo "Released v$(VERSION)"
