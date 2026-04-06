@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Eval Review: __SKILL_NAME_PLACEHOLDER__</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 20px; background: #1a1a1a; color: #e0e0e0; }
+h1 { color: #58a6ff; }
+.eval-item { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.query { font-size: 14px; margin-bottom: 8px; }
+.toggle { margin-left: 12px; }
+textarea { width: 100%; min-height: 60px; padding: 8px; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; margin-top: 8px; }
+button { padding: 8px 16px; background: #238636; color: white; border: none; border-radius: 6px; cursor: pointer; }
+button:hover { background: #2ea043; }
+.add-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; }
+</style>
+</head>
+<body>
+<h1>Eval Review: __SKILL_NAME_PLACEHOLDER__</h1>
+<p>Skill description: <code>__SKILL_DESCRIPTION_PLACEHOLDER__</code></p>
+<div id="evals"></div>
+<br>
+<button class="add-btn" onclick="addEval()">+ Add Eval</button>
+<br><br>
+<button onclick="exportEvalSet()">Export Eval Set</button>
+
+<script>
+const __EVAL_DATA_PLACEHOLDER__
+let evals = JSON.parse(JSON.stringify(data));
+
+function render() {
+    const container = document.getElementById('evals');
+    container.innerHTML = '';
+    evals.forEach((item, idx) => {
+        const div = document.createElement('div');
+        div.className = 'eval-item';
+        div.innerHTML = `
+            <div class="eval-item">
+                <label>
+                    <input type="checkbox" class="toggle" ${item.should_trigger ? 'checked' : ''} onchange="toggleEval(${idx})">
+                    Should trigger
+                </label>
+                <input type="text" class="query" value="${item.query.replace(/"/g, '&quot;')}" onchange="updateQuery(${idx}, this.value)" style="width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;">
+                <br>
+                <button style="background:#da3633;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;margin-top:8px;" onclick="removeEval(${idx})">Remove</button>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function toggleEval(idx) { evals[idx].should_trigger = !evals[idx].should_trigger; }
+function updateQuery(idx, val) { evals[idx].query = val; }
+function removeEval(idx) { evals.splice(idx, 1); render(); }
+
+function addEval() {
+    evals.push({ query: "", should_trigger: true });
+    render();
+}
+
+function exportEvalSet() {
+    const data = JSON.stringify(evals, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'eval_set.json';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+render();
+</script>
+</body>
+</html>

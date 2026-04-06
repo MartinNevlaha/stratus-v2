@@ -53,6 +53,29 @@ type GuardianConfig struct {
 	LLMMaxTokens           int     `json:"llm_max_tokens"`
 }
 
+// WikiConfig configures the Wiki ingestion and Vault sync subsystem.
+type WikiConfig struct {
+	Enabled            bool    `json:"enabled"`
+	IngestOnEvent      bool    `json:"ingest_on_event"`
+	MaxPagesPerIngest  int     `json:"max_pages_per_ingest"`
+	StalenessThreshold float64 `json:"staleness_threshold"`
+	MaxPageSizeTokens  int     `json:"max_page_size_tokens"`
+	VaultPath          string  `json:"vault_path"`
+	VaultSyncOnSave    bool    `json:"vault_sync_on_save"`
+}
+
+// EvolutionConfig configures the autonomous rule evolution subsystem.
+type EvolutionConfig struct {
+	Enabled             bool     `json:"enabled"`
+	TimeoutMs           int64    `json:"timeout_ms"`
+	MaxHypothesesPerRun int      `json:"max_hypotheses_per_run"`
+	AutoApplyThreshold  float64  `json:"auto_apply_threshold"`
+	ProposalThreshold   float64  `json:"proposal_threshold"`
+	MinSampleSize       int      `json:"min_sample_size"`
+	DailyTokenBudget    int      `json:"daily_token_budget"`
+	Categories          []string `json:"categories"`
+}
+
 // Config holds the stratus configuration.
 type Config struct {
 	Port                     int            `json:"port"`
@@ -62,8 +85,10 @@ type Config struct {
 	STT                      STTConfig      `json:"stt"`
 	Guardian                 GuardianConfig `json:"guardian"`
 	SyncState                *SyncState     `json:"sync_state,omitempty"`
-	MetricsBroadcastInterval int            `json:"metrics_broadcast_interval"`
-	Insight                  InsightConfig  `json:"insight"`
+	MetricsBroadcastInterval int             `json:"metrics_broadcast_interval"`
+	Insight                  InsightConfig   `json:"insight"`
+	Wiki                     WikiConfig      `json:"wiki"`
+	Evolution                EvolutionConfig `json:"evolution"`
 }
 
 type VexorConfig struct {
@@ -118,6 +143,25 @@ func Default() Config {
 				MaxTokens:   16384,
 				Temperature: 0.7,
 			},
+		},
+		Wiki: WikiConfig{
+			Enabled:            false,
+			IngestOnEvent:      true,
+			MaxPagesPerIngest:  20,
+			StalenessThreshold: 0.7,
+			MaxPageSizeTokens:  4096,
+			VaultPath:          "",
+			VaultSyncOnSave:    true,
+		},
+		Evolution: EvolutionConfig{
+			Enabled:             false,
+			TimeoutMs:           120000,
+			MaxHypothesesPerRun: 10,
+			AutoApplyThreshold:  0.85,
+			ProposalThreshold:   0.65,
+			MinSampleSize:       10,
+			DailyTokenBudget:    100000,
+			Categories:          []string{},
 		},
 	}
 }

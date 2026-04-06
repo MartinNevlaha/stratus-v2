@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "stratus": {
+      "args": [
+        "mcp-serve"
+      ],
+      "command": "stratus",
+      "type": "stdio"
+    }
+  }
+}

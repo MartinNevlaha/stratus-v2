@@ -1,0 +1,92 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "STRATUS_EXECUTOR": "cc"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "stratus hook watcher",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "stratus hook executor_routing_guard",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit|Bash|NotebookEdit|MultiEdit|Task"
+      },
+      {
+        "hooks": [
+          {
+            "command": "stratus hook phase_guard",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit|Bash|NotebookEdit|MultiEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "stratus hook workflow_existence_guard",
+            "type": "command"
+          }
+        ],
+        "matcher": "Task"
+      },
+      {
+        "hooks": [
+          {
+            "command": "stratus hook delegation_guard",
+            "type": "command"
+          }
+        ],
+        "matcher": "Task"
+      },
+      {
+        "hooks": [
+          {
+            "command": "stratus hook bash_write_guard",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "command": "stratus hook task_completed",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "command": "stratus hook teammate_idle",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  },
+  "statusLine": {
+    "command": "bash -c 'input=$(cat); echo \"$input\" | stratus statusline'",
+    "type": "command"
+  }
+}
