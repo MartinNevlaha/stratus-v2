@@ -5,13 +5,13 @@
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'
   import Insight from './routes/Insight.svelte'
-  import Learning from './routes/Learning.svelte'
-  import Analytics from './routes/Analytics.svelte'
   import Agents from './routes/Agents.svelte'
   import Settings from './routes/Settings.svelte'
+  import Wiki from './routes/Wiki.svelte'
+  import Evolution from './routes/Evolution.svelte'
   import Terminal from './components/Terminal.svelte'
 
-  let activeTab = $state<'overview' | 'agents' | 'analytics' | 'memory' | 'retrieval' | 'learning' | 'insight' | 'settings' | 'terminal'>('overview')
+  let activeTab = $state<'overview' | 'agents' | 'memory' | 'retrieval' | 'insight' | 'wiki' | 'evolution' | 'settings' | 'terminal'>('overview')
   
   onMount(() => {
     initStore()
@@ -20,15 +20,14 @@
   const tabs = [
     { id: 'overview' as const, label: 'Overview' },
     { id: 'agents' as const, label: 'Agents' },
-    { id: 'analytics' as const, label: 'Analytics' },
     { id: 'insight' as const, label: 'Insight' },
+    { id: 'wiki' as const, label: 'Wiki' },
+    { id: 'evolution' as const, label: 'Evolution' },
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
-    { id: 'learning' as const, label: 'Learning' },
     { id: 'settings' as const, label: 'Settings' },
   ]
 
-  let pendingProposals = $derived(appState.dashboard?.pending_proposals?.length ?? 0)
   let guardianAlerts = $derived(appState.guardianAlertCount)
 
   // Resizable split pane
@@ -74,9 +73,6 @@
           onclick={() => (activeTab = t.id)}
         >
           {t.label}
-          {#if t.id === 'learning' && pendingProposals > 0}
-            <span class="badge">{pendingProposals}</span>
-          {/if}
           {#if t.id === 'settings' && guardianAlerts > 0}
             <span class="badge guardian-badge">{guardianAlerts}</span>
           {/if}
@@ -140,14 +136,14 @@
         <Memory />
       {:else if activeTab === 'agents'}
         <Agents />
-      {:else if activeTab === 'analytics'}
-        <Analytics />
       {:else if activeTab === 'insight'}
         <Insight />
+      {:else if activeTab === 'wiki'}
+        <Wiki />
+      {:else if activeTab === 'evolution'}
+        <Evolution />
       {:else if activeTab === 'retrieval'}
         <Retrieval />
-      {:else if activeTab === 'learning'}
-        <Learning />
       {:else if activeTab === 'settings'}
         <Settings />
       {/if}

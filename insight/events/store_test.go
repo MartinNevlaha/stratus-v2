@@ -65,7 +65,7 @@ func TestStoreGetRecentEvents(t *testing.T) {
 	events := []Event{
 		{ID: "1", Type: EventWorkflowStarted, Timestamp: now.Add(-2 * time.Hour), Source: "test", Payload: map[string]any{"i": 1}},
 		{ID: "2", Type: EventWorkflowCompleted, Timestamp: now.Add(-1 * time.Hour), Source: "test", Payload: map[string]any{"i": 2}},
-		{ID: "3", Type: EventProposalCreated, Timestamp: now, Source: "test", Payload: map[string]any{"i": 3}},
+		{ID: "3", Type: EventReviewStarted, Timestamp: now, Source: "test", Payload: map[string]any{"i": 3}},
 	}
 
 	for _, evt := range events {

@@ -6,14 +6,18 @@
 
 ---
 
-## Task List (21 tasks, 6 layers)
+## Task List (22 tasks, 7 layers)
+
+### Layer 0: Removal (Task 0)
+
+0. **Remove Learning + Analytics systems** — Delete `api/routes_learning.go`, `db/learning.go`, `frontend/src/routes/Learning.svelte`, `frontend/src/routes/Analytics.svelte`. Drop `candidates`+`proposals` tables from `db/schema.go`. Remove learning route registrations from `api/server.go`, pending_candidates/proposals from `api/routes_dashboard.go`, Learning/Analytics imports+tabs from `App.svelte`, related types from `types.ts`, API functions from `api.ts`, `analyticsUpdateCounter` from `store.svelte.ts`, proposal event types from `insight/events/types.go`.
 
 ### Layer 1: Database (Tasks 1-4)
 
-1. **Add Wiki + Evolution DDL to schema.go** — Append 6 new tables (wiki_pages, wiki_pages_fts + triggers, wiki_links, wiki_page_refs, evolution_runs, evolution_hypotheses) to `db/schema.go`
+1. **Add Wiki + Evolution DDL to schema.go** — Append 6 new tables (wiki_pages, wiki_pages_fts + triggers, wiki_links, wiki_page_refs, evolution_runs, evolution_hypotheses) to `db/schema.go` *(DONE)*
 2. **Wiki DB models + CRUD** — Create `db/wiki.go` + `db/wiki_test.go` with WikiPage, WikiLink, WikiPageRef structs and all CRUD/FTS5 search methods
 3. **Evolution DB models + CRUD** — Create `db/evolution.go` + `db/evolution_test.go` with EvolutionRun, EvolutionHypothesis structs and CRUD methods
-4. **Config structs** — Add WikiConfig (with vault_path, vault_sync_on_save) + EvolutionConfig to `config/config.go` with defaults (both disabled by default)
+4. **Config structs** — Add WikiConfig (with vault_path, vault_sync_on_save) + EvolutionConfig to `config/config.go` with defaults (both disabled by default) *(DONE)*
 
 ### Layer 2: Engines (Tasks 5-11)
 

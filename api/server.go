@@ -18,6 +18,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
+	wiki_engine "github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
@@ -46,6 +47,7 @@ type Server struct {
 	piEngine             *product_intelligence.Engine
 	guardianSvc          *guardian.Guardian
 	cfg                  *config.Config // pointer so guardian config updates are reflected
+	vaultSync            *wiki_engine.VaultSync
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -90,11 +92,22 @@ func NewServer(
 		insight:              insightEngine,
 		agentEvolutionEngine: agentEvolutionEng,
 		cfg:                  cfg,
+		vaultSync:            newVaultSyncForConfig(cfg, database),
 		dirtyFiles:           make(map[string]struct{}),
 		dirtyCh:              make(chan struct{}, 1),
 	}
 	go s.indexWorker()
 	return s
+}
+
+// newVaultSyncForConfig returns a VaultSync instance when VaultPath is configured,
+// or nil when it is not. It is a standalone helper so tests can call it directly.
+func newVaultSyncForConfig(cfg *config.Config, database *db.DB) *wiki_engine.VaultSync {
+	if cfg.Wiki.VaultPath == "" {
+		return nil
+	}
+	store := wiki_engine.NewDBWikiStore(database)
+	return wiki_engine.NewVaultSync(store, cfg.Wiki.VaultPath)
 }
 
 // SetGuardian attaches the guardian service so routes can trigger manual scans.
@@ -218,13 +231,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/workflows/{id}/summary", s.handleGetSummary)
 	mux.HandleFunc("GET /api/workflows/{id}/summary.md", s.handleGetSummaryMD)
 	mux.HandleFunc("PUT /api/workflows/{id}/summary", s.handleUpdateSummary)
-
-	// Learning
-	mux.HandleFunc("GET /api/learning/candidates", s.handleListCandidates)
-	mux.HandleFunc("POST /api/learning/candidates", s.handleSaveCandidate)
-	mux.HandleFunc("GET /api/learning/proposals", s.handleListProposals)
-	mux.HandleFunc("POST /api/learning/proposals", s.handleSaveProposal)
-	mux.HandleFunc("POST /api/learning/proposals/{id}/decide", s.handleDecideProposal)
 
 	// System
 	mux.HandleFunc("GET /api/system/version", s.handleVersion)
@@ -373,11 +379,32 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics/agents", s.handleMetricsAgents)
 	mux.HandleFunc("GET /api/metrics/projects", s.handleMetricsProjects)
 
+	// Wiki
+	mux.HandleFunc("GET /api/wiki/pages", s.handleListWikiPages)
+	mux.HandleFunc("GET /api/wiki/pages/{id}", s.handleGetWikiPage)
+	mux.HandleFunc("GET /api/wiki/search", s.handleSearchWikiPages)
+	mux.HandleFunc("POST /api/wiki/query", s.handleWikiQuery)
+	mux.HandleFunc("GET /api/wiki/graph", s.handleGetWikiGraph)
+	mux.HandleFunc("POST /api/wiki/vault/sync", s.handleVaultSync)
+	mux.HandleFunc("GET /api/wiki/vault/status", s.handleVaultStatus)
+
 	// Knowledge Base
 	mux.HandleFunc("GET /api/kb/solutions", s.handleListKBSolutions)
 	mux.HandleFunc("GET /api/kb/problems", s.handleListKBProblems)
 	mux.HandleFunc("GET /api/kb/recommend", s.handleKBRecommend)
 	mux.HandleFunc("GET /api/kb/stats", s.handleKBStats)
+
+	// Evolution
+	mux.HandleFunc("GET /api/evolution/runs", s.handleListEvolutionRuns)
+	mux.HandleFunc("GET /api/evolution/runs/{id}", s.handleGetEvolutionRun)
+	mux.HandleFunc("POST /api/evolution/trigger", s.handleTriggerEvolution)
+	mux.HandleFunc("GET /api/evolution/config", s.handleGetEvolutionConfig)
+	mux.HandleFunc("POST /api/evolution/config", s.handleUpdateEvolutionConfig)
+
+	// LLM status, usage, and connectivity test
+	mux.HandleFunc("GET /api/llm/status", s.handleGetLLMStatus)
+	mux.HandleFunc("GET /api/llm/usage", s.handleGetLLMUsage)
+	mux.HandleFunc("POST /api/llm/test", s.handleTestLLM)
 
 	// Terminal
 	mux.HandleFunc("POST /api/terminal/upload-image", s.handleTerminalUploadImage)

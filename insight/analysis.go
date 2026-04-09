@@ -18,7 +18,6 @@ func (e *Engine) RunAnalysis() error {
 	findings := map[string]any{}
 	recommendations := map[string]any{}
 	var patterns []*db.InsightPattern
-	var proposals []db.Proposal
 
 	// Collect fresh metrics from workflows/tickets into daily_metrics table
 	if err := e.database.CollectDailyMetrics(7); err != nil {
@@ -102,19 +101,6 @@ func (e *Engine) RunAnalysis() error {
 			}
 			patterns = append(patterns, pattern)
 
-			// Generate rule proposal
-			proposal := db.Proposal{
-				CandidateID:     "",
-				Type:            "rule",
-				Title:           "Improve workflow success rate",
-				Description:     fmt.Sprintf("Detected %.1f%% average success rate over %d days (threshold: 70%%)", avgSuccessRate*100, len(successRates)),
-				ProposedContent: generateRuleContent("Improve Workflow Success Rate", avgSuccessRate, "quality"),
-				Confidence:      0.80,
-				Status:          "pending",
-				CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-			}
-			proposals = append(proposals, proposal)
-
 			recommendations["improve_quality"] = map[string]any{
 				"priority": "high",
 				"action":   "investigate recent workflow failures",
@@ -164,18 +150,6 @@ func (e *Engine) RunAnalysis() error {
 				Examples:    []string{fmt.Sprintf("%d/%d completed", completedWorkflows, totalWorkflows)},
 			}
 			patterns = append(patterns, pattern)
-
-			proposal := db.Proposal{
-				CandidateID:     "",
-				Type:            "rule",
-				Title:           "Improve workflow completion",
-				Description:     fmt.Sprintf("Low completion rate: %.1f%% (%d/%d workflows)", completionRate*100, completedWorkflows, totalWorkflows),
-				ProposedContent: generateRuleContent("Improve Workflow Completion", completionRate, "workflow"),
-				Confidence:      0.75,
-				Status:          "pending",
-				CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-			}
-			proposals = append(proposals, proposal)
 		}
 
 		// Pattern: High completion rate
@@ -220,18 +194,6 @@ func (e *Engine) RunAnalysis() error {
 				Examples:    []string{fmt.Sprintf("%d/%d tasks completed", completedTasks, totalTasks)},
 			}
 			patterns = append(patterns, pattern)
-
-			proposal := db.Proposal{
-				CandidateID:     "",
-				Type:            "rule",
-				Title:           "Optimize task execution",
-				Description:     fmt.Sprintf("Task success rate is %.1f%%, below optimal threshold", taskSuccessRate*100),
-				ProposedContent: generateRuleContent("Optimize Task Execution", taskSuccessRate, "performance"),
-				Confidence:      0.70,
-				Status:          "pending",
-				CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-			}
-			proposals = append(proposals, proposal)
 		}
 	}
 
@@ -281,27 +243,15 @@ func (e *Engine) RunAnalysis() error {
 		}
 	}
 
-	// Save proposals (limit to MaxProposals)
-	if e.config.MaxProposals > 0 && len(proposals) > e.config.MaxProposals {
-		proposals = proposals[:e.config.MaxProposals]
-	}
-
-	for _, proposal := range proposals {
-		if _, err := e.database.SaveProposal(proposal); err != nil {
-			log.Printf("insight: failed to save proposal: %v", err)
-		}
-	}
-
 	// Save analysis
 	executionTime := time.Since(start).Milliseconds()
 	analysis := &db.InsightAnalysis{
-		AnalysisType:     "full",
-		Scope:            "project-wide",
-		Findings:         findings,
-		Recommendations:  recommendations,
-		PatternsFound:    len(patterns),
-		ProposalsCreated: len(proposals),
-		ExecutionTimeMs:  int(executionTime),
+		AnalysisType:    "full",
+		Scope:           "project-wide",
+		Findings:        findings,
+		Recommendations: recommendations,
+		PatternsFound:   len(patterns),
+		ExecutionTimeMs: int(executionTime),
 	}
 
 	if err := e.database.SaveInsightAnalysis(analysis); err != nil {
@@ -315,7 +265,6 @@ func (e *Engine) RunAnalysis() error {
 	}
 	if state != nil {
 		state.PatternsDetected += len(patterns)
-		state.ProposalsGenerated += len(proposals)
 		state.LastAnalysis = time.Now().UTC().Format(time.RFC3339Nano)
 		state.NextAnalysis = time.Now().Add(time.Duration(e.config.Interval) * time.Hour).UTC().Format(time.RFC3339Nano)
 
@@ -329,8 +278,8 @@ func (e *Engine) RunAnalysis() error {
 		}
 	}
 
-	log.Printf("insight: analysis complete: patterns=%d proposals=%d duration=%dms",
-		len(patterns), len(proposals), executionTime)
+	log.Printf("insight: analysis complete: patterns=%d duration=%dms",
+		len(patterns), executionTime)
 	return nil
 }
 

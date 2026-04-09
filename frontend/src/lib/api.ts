@@ -4,8 +4,6 @@ import type {
   SearchResult,
   WorkflowState,
   ChangeSummary,
-  Candidate,
-  Proposal,
   VersionInfo,
   SwarmMission,
   SwarmMissionDetail,
@@ -21,10 +19,6 @@ import type {
   GuardianAlert,
   GuardianConfig,
   InsightConfig,
-  MetricsSummary,
-  DailyMetricsResponse,
-  AgentMetricsResponse,
-  ProjectMetricsResponse,
   SwarmSignal,
   SwarmEvidence,
   AgentScorecard,
@@ -32,6 +26,16 @@ import type {
   ProblemStats,
   KBRecommendation,
   KBStats,
+  WikiPage,
+  WikiLink,
+  WikiPageRef,
+  WikiGraphData,
+  WikiQueryResult,
+  VaultStatus,
+  EvolutionRun,
+  EvolutionHypothesis,
+  WikiConfig,
+  EvolutionConfig,
 } from './types'
 
 const BASE = '/api'
@@ -142,26 +146,6 @@ export const startTask = (id: string, index: number) =>
 export const completeTask = (id: string, index: number) =>
   post<WorkflowState>(`/workflows/${id}/tasks/${index}/complete`)
 
-// Learning
-export const listCandidates = (status?: string) =>
-  get<{ candidates: Candidate[]; count: number }>('/learning/candidates', status ? { status } : {})
-
-export const listProposals = (status?: string) =>
-  get<{ proposals: Proposal[]; count: number }>('/learning/proposals', status ? { status } : {})
-
-export const decideProposal = (id: string, decision: string) =>
-  post<{ status: string; applied: boolean }>(`/learning/proposals/${id}/decide`, { decision })
-
-export const saveProposal = (proposal: {
-  candidate_id: string
-  type: string
-  title: string
-  description: string
-  proposed_content: string
-  proposed_path?: string
-  confidence: number
-}) => post<{ id: string }>('/learning/proposals', proposal)
-
 // Swarm
 export const listMissions = () => get<SwarmMission[]>('/swarm/missions')
 export const getMission = (id: string) => get<SwarmMissionDetail>(`/swarm/missions/${id}`)
@@ -212,30 +196,6 @@ export const createSkill = (data: { name: string; description: string; disable_m
 export const updateSkill = (name: string, data: { description: string; disable_model_invocation?: boolean; argument_hint?: string; body?: string }) =>
   put<{ status: string; name: string }>(`/skills/${name}`, data)
 export const deleteSkill = (name: string) => del<{ status: string; name: string }>(`/skills/${name}`)
-
-export const triggerAggregation = () =>
-  post<{ status: string }>('/metrics/aggregate', {})
-
-export const getMetricsSummary = (days = 30) =>
-  get<{ summary: MetricsSummary }>('/metrics/summary', { days: String(days) })
-
-export const getWorkflowMetrics = (days = 30) =>
-  get<{ metrics: MetricsSummary }>('/metrics/workflows', { days: String(days) })
-
-export const getDailyMetrics = (limit = 30) =>
-  get<DailyMetricsResponse>('/metrics/daily', { limit: String(limit) })
-
-export const getAgentMetrics = (agentId?: string, days = 30) =>
-  get<AgentMetricsResponse>('/metrics/agents', {
-    ...(agentId ? { agent_id: agentId } : {}),
-    days: String(days)
-  })
-
-export const getProjectMetrics = (project?: string, days = 30) =>
-  get<ProjectMetricsResponse>('/metrics/projects', {
-    ...(project ? { project } : {}),
-    days: String(days)
-  })
 
 // Insight
 export const getInsightStatus = () =>
@@ -315,3 +275,72 @@ export const listKBProblems = (params?: { problem_class?: string; repo_type?: st
 export const getKBRecommendation = (problemClass: string, repoType = '') =>
   get<KBRecommendation>(`/kb/recommend?problem_class=${encodeURIComponent(problemClass)}&repo_type=${encodeURIComponent(repoType)}`)
 export const getKBStats = () => get<KBStats>('/kb/stats')
+
+// --- Wiki ---
+
+export const listWikiPages = (params?: { type?: string; status?: string; tag?: string; limit?: number; offset?: number }) => {
+  const q = new URLSearchParams()
+  if (params?.type) q.set('type', params.type)
+  if (params?.status) q.set('status', params.status)
+  if (params?.tag) q.set('tag', params.tag)
+  if (params?.limit) q.set('limit', String(params.limit))
+  if (params?.offset) q.set('offset', String(params.offset))
+  return get<{ pages: WikiPage[]; count: number }>(`/wiki/pages${q.toString() ? '?' + q : ''}`)
+}
+
+export const getWikiPage = (id: string) =>
+  get<{ page: WikiPage; links_from: WikiLink[]; links_to: WikiLink[]; refs: WikiPageRef[] }>(`/wiki/pages/${id}`)
+
+export const searchWiki = (q: string, type?: string, limit?: number) => {
+  const params = new URLSearchParams({ q })
+  if (type) params.set('type', type)
+  if (limit) params.set('limit', String(limit))
+  return get<{ results: WikiPage[]; count: number; query: string }>(`/wiki/search?${params}`)
+}
+
+export const queryWiki = (query: string, persist = false, maxSources = 10) =>
+  post<WikiQueryResult>('/wiki/query', { query, persist, max_sources: maxSources })
+
+export const getWikiGraph = (type?: string, limit?: number) => {
+  const params = new URLSearchParams()
+  if (type) params.set('type', type)
+  if (limit) params.set('limit', String(limit))
+  return get<WikiGraphData>(`/wiki/graph${params.toString() ? '?' + params : ''}`)
+}
+
+// --- Vault Sync ---
+
+export const triggerVaultSync = () =>
+  post<{ status: string; message: string }>('/wiki/vault/sync', {})
+
+export const getVaultStatus = () =>
+  get<VaultStatus>('/wiki/vault/status')
+
+// --- Evolution ---
+
+export const listEvolutionRuns = (params?: { status?: string; limit?: number; offset?: number }) => {
+  const q = new URLSearchParams()
+  if (params?.status) q.set('status', params.status)
+  if (params?.limit) q.set('limit', String(params.limit))
+  if (params?.offset) q.set('offset', String(params.offset))
+  return get<{ runs: EvolutionRun[]; count: number }>(`/evolution/runs${q.toString() ? '?' + q : ''}`)
+}
+
+export const getEvolutionRun = (id: string) =>
+  get<{ run: EvolutionRun; hypotheses: EvolutionHypothesis[] }>(`/evolution/runs/${id}`)
+
+export const triggerEvolution = (timeoutMs?: number, categories?: string[]) =>
+  post<{ status: string; run_id: string; message: string }>('/evolution/trigger', {
+    ...(timeoutMs ? { timeout_ms: timeoutMs } : {}),
+    ...(categories?.length ? { categories } : {}),
+  })
+
+export const getEvolutionConfig = () => get<EvolutionConfig>('/evolution/config')
+
+export const updateEvolutionConfig = (cfg: EvolutionConfig) =>
+  post<EvolutionConfig>('/evolution/config', cfg)
+
+export const getWikiConfig = () => get<WikiConfig>('/wiki/config')
+
+export const updateWikiConfig = (cfg: WikiConfig) =>
+  post<WikiConfig>('/wiki/config', cfg)

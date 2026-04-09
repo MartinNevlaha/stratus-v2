@@ -610,9 +610,55 @@ type WikiConfig struct {
 
 ---
 
+## 11. Removal: Learning System + Analytics
+
+The Self-Evolving System **replaces** the existing Learning (candidates/proposals) and Analytics systems. The Insight Engine internals (patterns, scorecards, trajectories, agent evolution, workflow synthesis) are **kept** as data sources for Wiki/Evolution.
+
+### Files to Delete
+
+| File | What It Was |
+|------|-------------|
+| `api/routes_learning.go` | Learning API handlers (candidates, proposals) |
+| `db/learning.go` | Candidate/Proposal DB models and queries |
+| `frontend/src/routes/Learning.svelte` | Learning tab UI |
+| `frontend/src/routes/Analytics.svelte` | Analytics tab UI |
+
+### DB Tables to Drop (from schema.go)
+
+- `candidates` — replaced by wiki pages (entity/concept pages capture patterns)
+- `proposals` — replaced by evolution hypotheses (auto-apply or wiki findings)
+
+### Code Sections to Remove
+
+| File | What to Remove |
+|------|---------------|
+| `api/server.go` | Learning route registrations (5 routes) |
+| `api/routes_dashboard.go` | `pending_candidates`/`pending_proposals` queries and response fields |
+| `db/schema.go` | `candidates` and `proposals` table DDL |
+| `frontend/src/App.svelte` | Learning/Analytics imports, tab definitions, proposal badge logic |
+| `frontend/src/lib/store.svelte.ts` | `analyticsUpdateCounter`, `learning_update` from updateTypes |
+| `frontend/src/lib/types.ts` | `Candidate`, `Proposal` interfaces, `pending_proposals` from DashboardState |
+| `frontend/src/lib/api.ts` | `listCandidates()`, `listProposals()`, `decideProposal()`, `saveProposal()`, analytics metric functions |
+| `insight/events/types.go` | `EventProposalCreated`, `EventProposalAccepted`, `EventProposalRejected` |
+
+### Evolution Loop Change
+
+Previously: Evolution created Learning proposals for user-visible changes.
+Now: Evolution creates **wiki answer pages** tagged `generated_by: "evolution"` with `page_type: "concept"` for user-visible findings. No more proposal pipeline — wiki IS the proposal surface. Users review findings in the Wiki tab or Obsidian.
+
+For auto-applicable internal changes (routing scores, thresholds): unchanged — still auto-applied above confidence threshold.
+
+---
+
 ## Breaking Changes
 
-**None.** Entirely additive:
+**Removals (intentional):**
+- Learning API (`/api/learning/*`) removed — replaced by Wiki + Evolution
+- Analytics tab removed — replaced by Evolution tab
+- `candidates` and `proposals` DB tables dropped
+- Learning-related TypeScript types and API functions removed
+
+**Additive (no breaking):**
 - New tables only (IF NOT EXISTS)
 - New endpoints only
 - New MCP tools only

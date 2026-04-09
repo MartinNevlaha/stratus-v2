@@ -25,10 +25,11 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/hooks"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
-	"github.com/MartinNevlaha/stratus-v2/mcp"
 	"github.com/MartinNevlaha/stratus-v2/insight"
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
+	"github.com/MartinNevlaha/stratus-v2/mcp"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
@@ -151,11 +152,18 @@ func cmdServe() {
 	}
 	swarmStore := swarm.NewStore(database, cfg.ProjectRoot)
 
+	// Resolve LLM configs: top-level → subsystem-specific overrides
+	cfg.Insight.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.Insight.LLM)
+
 	// Initialize Insight engine
 	var insightEngine *insight.Engine
 	var insightCancel context.CancelFunc
 	if cfg.Insight.Enabled {
-		insightEngine = insight.NewEngine(database, cfg.Insight)
+		if cfg.Wiki.Enabled || cfg.Evolution.Enabled {
+			insightEngine = insight.NewEngineWithConfig(database, cfg.Insight, cfg.Wiki, cfg.Evolution)
+		} else {
+			insightEngine = insight.NewEngine(database, cfg.Insight)
+		}
 		if eventBus != nil {
 			insightEngine.SetEventBus(eventBus)
 		}
@@ -184,6 +192,29 @@ func cmdServe() {
 	guardianCtx, guardianCancel := context.WithCancel(context.Background())
 	g := guardian.New(database, coord, func() config.GuardianConfig { return config.Load().Guardian }, hub, cfg.ProjectRoot)
 	srv.SetGuardian(g)
+
+	// Wire shared LLM client into guardian if configured.
+	guardianLLMCfg := config.ResolveGuardianLLMConfig(cfg.LLM, cfg.Guardian)
+	if guardianLLMCfg.Provider != "" && guardianLLMCfg.Model != "" {
+		llmCfg := llm.Config{
+			Provider:    guardianLLMCfg.Provider,
+			Model:       guardianLLMCfg.Model,
+			APIKey:      guardianLLMCfg.APIKey,
+			BaseURL:     guardianLLMCfg.BaseURL,
+			Timeout:     guardianLLMCfg.Timeout,
+			MaxTokens:   guardianLLMCfg.MaxTokens,
+			Temperature: guardianLLMCfg.Temperature,
+			MaxRetries:  guardianLLMCfg.MaxRetries,
+		}
+		llmCfg = llmCfg.WithEnv()
+		if guardianClient, err := llm.NewClient(llmCfg); err == nil {
+			g.SetLLMClient(guardianClient)
+			log.Printf("guardian: using shared LLM client (provider=%s, model=%s)", llmCfg.Provider, llmCfg.Model)
+		} else {
+			log.Printf("guardian: failed to initialize LLM client: %v", err)
+		}
+	}
+
 	go g.Run(guardianCtx)
 
 	// Start STT container (best-effort).

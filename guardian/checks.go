@@ -299,7 +299,7 @@ func checkCoverageDrift(database *db.DB, projRoot string, cfg config.GuardianCon
 
 // checkGovernanceViolations checks recently modified files against governance rules.
 // Uses LLM when configured; falls back to FTS-only match.
-func checkGovernanceViolations(ctx context.Context, database *db.DB, llm *llmClient, projRoot string) []alertInput {
+func checkGovernanceViolations(ctx context.Context, database *db.DB, llm guardianLLM, projRoot string) []alertInput {
 	// Get recently changed files from git.
 	// Use git log instead of diff HEAD~1 to handle single-commit repos gracefully.
 	out, err := runCmd(projRoot, "git", "log", "--diff-filter=d", "--name-only", "-1", "--format=")

@@ -31,27 +31,22 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboardState(w http.ResponseWriter, r *http.Request) {
-	// Aggregate: active workflows, recent events, learning summary, retrieval status
+	// Aggregate: active workflows, recent events, retrieval status
 	workflows, _ := s.coordinator.ListActive()
 	if workflows == nil {
 		workflows = []*orchestration.WorkflowState{}
 	}
 
 	recentEvents, _ := s.db.SearchEvents(searchEventsDefaults())
-
-	candidates, _ := s.db.ListCandidates("pending", 5)
-	proposals, _ := s.db.ListProposals("pending", 5)
 	govStats, _ := s.db.GovernanceStats()
 
 	json200(w, map[string]any{
-		"workflows":        workflows,
-		"recent_events":    nilSlice(recentEvents),
-		"pending_candidates": nilSlice(candidates),
-		"pending_proposals":  nilSlice(proposals),
-		"governance":       govStats,
-		"vexor_available":  s.vexor.Available(),
-		"ws_clients":       s.hub.ClientCount(),
-		"ts":               time.Now().UTC().Format(time.RFC3339),
+		"workflows":       workflows,
+		"recent_events":   nilSlice(recentEvents),
+		"governance":      govStats,
+		"vexor_available": s.vexor.Available(),
+		"ws_clients":      s.hub.ClientCount(),
+		"ts":              time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

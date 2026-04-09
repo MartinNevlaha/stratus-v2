@@ -13,6 +13,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/artifacts"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/knowledge_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/patterns"
@@ -21,6 +22,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/routing"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/scorecards"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/trajectory_engine"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
@@ -29,6 +31,8 @@ import (
 type Engine struct {
 	database            *db.DB
 	config              config.InsightConfig
+	wikiCfg             config.WikiConfig
+	evoCfg              config.EvolutionConfig
 	scheduler           *Scheduler
 	eventBus            events.EventBus
 	eventStore          events.Store
@@ -45,6 +49,10 @@ type Engine struct {
 	trajectoryAnalyzer  *trajectory_engine.TrajectoryAnalyzer
 	workflowSynthesizer *workflow_synthesis.Synthesizer
 	productIntelligence *product_intelligence.Engine
+	wikiEngine          *wiki_engine.WikiEngine
+	evolutionLoop       *evolution_loop.EvolutionLoop
+	wikiSynth           *wiki_engine.Synthesizer
+	wikiLinker          *wiki_engine.Linker
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -71,6 +79,32 @@ func NewEngine(database *db.DB, cfg config.InsightConfig) *Engine {
 	e.initTrajectoryEngine()
 	e.initWorkflowSynthesizer()
 	e.initProductIntelligence()
+	return e
+}
+
+// NewEngineWithConfig creates an Engine with explicit WikiConfig and
+// EvolutionConfig, enabling the WikiEngine and EvolutionLoop subsystems.
+func NewEngineWithConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig) *Engine {
+	e := &Engine{
+		database: database,
+		config:   cfg,
+		wikiCfg:  wikiCfg,
+		evoCfg:   evoCfg,
+	}
+	e.initLLMClient()
+	e.scheduler = newScheduler(e)
+	e.initPatternEngine()
+	e.initProposalEngine()
+	e.initScorecardEngine()
+	e.initRoutingEngine()
+	e.initWorkflowAnalyzer()
+	e.initArtifactBuilder()
+	e.initKnowledgeEngine()
+	e.initTrajectoryEngine()
+	e.initWorkflowSynthesizer()
+	e.initProductIntelligence()
+	e.initWikiEngine()
+	e.initEvolutionLoop()
 	return e
 }
 
@@ -115,8 +149,11 @@ func (e *Engine) initLLMClient() {
 		slog.Warn("insight: failed to initialize LLM client", "error", err)
 		return
 	}
-	e.llmClient = client
-	slog.Info("insight: LLM client initialized", "provider", llmCfg.Provider, "model", llmCfg.Model)
+
+	// Wrap with budget tracking if DB is available.
+	budgeted := llm.NewBudgetedClient(client, e.database, e.evoCfg.DailyTokenBudget)
+	e.llmClient = budgeted
+	slog.Info("insight: LLM client initialized with budget tracking", "provider", llmCfg.Provider, "model", llmCfg.Model, "daily_budget", e.evoCfg.DailyTokenBudget)
 }
 
 func (e *Engine) initPatternEngine() {
@@ -183,6 +220,20 @@ func (e *Engine) initProductIntelligence() {
 	store := product_intelligence.NewDBStore(e.database)
 	cfg := product_intelligence.DefaultEngineConfig()
 	e.productIntelligence = product_intelligence.NewEngine(store, cfg, e.llmClient)
+}
+
+func (e *Engine) initWikiEngine() {
+	wikiStore := wiki_engine.NewDBWikiStore(e.database)
+	wikiCfg := e.wikiCfg
+	e.wikiEngine = wiki_engine.NewWikiEngine(wikiStore, e.llmClient, func() config.WikiConfig { return wikiCfg })
+	e.wikiSynth = wiki_engine.NewSynthesizer(wikiStore, e.llmClient)
+	e.wikiLinker = wiki_engine.NewLinker(wikiStore)
+}
+
+func (e *Engine) initEvolutionLoop() {
+	evoStore := evolution_loop.NewDBEvolutionStore(e.database)
+	evoCfg := e.evoCfg
+	e.evolutionLoop = evolution_loop.NewEvolutionLoop(evoStore, func() config.EvolutionConfig { return evoCfg }, e.llmClient)
 }
 
 func (e *Engine) Start(ctx context.Context) error {
@@ -898,6 +949,75 @@ func knowledgeArtifactDataFromDB(a db.Artifact) knowledge_engine.ArtifactData {
 		Metadata:        a.Metadata,
 		CreatedAt:       parseTime(a.CreatedAt),
 	}
+}
+
+// WikiEngine returns the WikiEngine subsystem. It is nil when the engine was
+// created without wiki configuration (via NewEngine or NewEngineWithEvents).
+func (e *Engine) WikiEngine() *wiki_engine.WikiEngine { return e.wikiEngine }
+
+// EvolutionLoop returns the EvolutionLoop subsystem. It is nil when the engine
+// was created without evolution configuration.
+func (e *Engine) EvolutionLoop() *evolution_loop.EvolutionLoop { return e.evolutionLoop }
+
+// WikiSynthesizer returns the wiki Synthesizer subsystem.
+func (e *Engine) WikiSynthesizer() *wiki_engine.Synthesizer { return e.wikiSynth }
+
+// RunWikiIngest runs a wiki ingest cycle. It returns nil, nil when the wiki
+// engine has not been initialised.
+func (e *Engine) RunWikiIngest(ctx context.Context) (*wiki_engine.IngestResult, error) {
+	if e.wikiEngine == nil {
+		return nil, nil
+	}
+	result, err := e.wikiEngine.RunIngest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("wiki ingest: %w", err)
+	}
+	return result, nil
+}
+
+// RunWikiMaintenance runs a wiki maintenance cycle. It returns nil, nil when
+// the wiki engine has not been initialised.
+func (e *Engine) RunWikiMaintenance(ctx context.Context) (*wiki_engine.MaintenanceResult, error) {
+	if e.wikiEngine == nil {
+		return nil, nil
+	}
+	result, err := e.wikiEngine.RunMaintenance(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("wiki maintenance: %w", err)
+	}
+	return result, nil
+}
+
+// RunEvolutionCycle executes one full evolution loop run with the given
+// triggerType. It returns nil, nil when the evolution loop has not been
+// initialised.
+//
+// timeoutMs, when > 0, overrides the configured TimeoutMs for this run only.
+// categories, when non-empty, overrides the configured Categories for this
+// run only. Pass 0 and nil to use the values from config.
+func (e *Engine) RunEvolutionCycle(ctx context.Context, triggerType string, timeoutMs int64, categories []string) (*evolution_loop.RunResult, error) {
+	if e.evolutionLoop == nil {
+		return nil, nil
+	}
+	result, err := e.evolutionLoop.Run(ctx, triggerType, timeoutMs, categories)
+	if err != nil {
+		return nil, fmt.Errorf("evolution cycle: %w", err)
+	}
+	return result, nil
+}
+
+// SynthesizeWikiAnswer uses the wiki synthesizer to answer a natural-language
+// query from existing wiki pages. An error is returned when the synthesizer has
+// not been initialised.
+func (e *Engine) SynthesizeWikiAnswer(ctx context.Context, query string, maxSources int, persist bool) (*wiki_engine.SynthesisResult, error) {
+	if e.wikiSynth == nil {
+		return nil, fmt.Errorf("wiki synthesizer not initialized")
+	}
+	result, err := e.wikiSynth.SynthesizeAnswer(ctx, query, maxSources, persist)
+	if err != nil {
+		return nil, fmt.Errorf("synthesize wiki answer: %w", err)
+	}
+	return result, nil
 }
 
 func parseTime(s string) time.Time {

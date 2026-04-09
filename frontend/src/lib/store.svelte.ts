@@ -13,14 +13,6 @@ interface AppState {
   updateError: string | null
   swarmUpdateCounter: number
   lastHeartbeats: Record<string, number>
-  // Analytics real-time updates
-  analyticsUpdateCounter: number
-  lastMetricsUpdate: number
-  // Real-time metrics
-  liveMetrics: any | null
-  metricsLive: boolean
-  activeAnomalies: any[]
-  lastMetricsAlert: any | null
   guardianAlertCount: number
 }
 
@@ -37,12 +29,6 @@ export const appState: AppState = $state({
   updateError: null,
   swarmUpdateCounter: 0,
   lastHeartbeats: {},
-  analyticsUpdateCounter: 0,
-  lastMetricsUpdate: 0,
-  liveMetrics: null,
-  metricsLive: false,
-  activeAnomalies: [],
-  lastMetricsAlert: null,
   guardianAlertCount: 0,
 })
 
@@ -96,7 +82,7 @@ export function initStore() {
     appState.connected = false
   })
 
-  const updateTypes = ['workflow_updated', 'workflow_aborted', 'workflow_deleted', 'event_saved', 'learning_update', 'governance_indexed']
+  const updateTypes = ['workflow_updated', 'workflow_aborted', 'workflow_deleted', 'event_saved', 'governance_indexed']
   for (const type of updateTypes) {
     wsClient.on(type, () => { refreshDashboard() })
   }

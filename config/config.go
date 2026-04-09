@@ -81,6 +81,7 @@ type Config struct {
 	Port                     int            `json:"port"`
 	DataDir                  string         `json:"data_dir"`
 	ProjectRoot              string         `json:"project_root"`
+	LLM                      LLMConfig      `json:"llm"`
 	Vexor                    VexorConfig    `json:"vexor"`
 	STT                      STTConfig      `json:"stt"`
 	Guardian                 GuardianConfig `json:"guardian"`
@@ -109,6 +110,11 @@ func Default() Config {
 		Port:        41777,
 		DataDir:     filepath.Join(home, ".stratus", "data"),
 		ProjectRoot: wd,
+		LLM: LLMConfig{
+			Timeout:     120,
+			MaxTokens:   16384,
+			Temperature: 0.7,
+		},
 		Vexor: VexorConfig{
 			BinaryPath: "vexor",
 			Model:      "nomic-embed-text-v1.5",

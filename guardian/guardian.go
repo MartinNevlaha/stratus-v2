@@ -10,8 +10,16 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 )
+
+// guardianLLM is the interface used by all guardian checks for LLM operations.
+// Both *llmClient and *llmAdapter satisfy this interface.
+type guardianLLM interface {
+	Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	configured() bool
+}
 
 // hubBroadcaster is the subset of api.Hub used by the Guardian.
 type hubBroadcaster interface {
@@ -20,11 +28,12 @@ type hubBroadcaster interface {
 
 // Guardian runs periodic codebase health checks.
 type Guardian struct {
-	db       *db.DB
-	coord    *orchestration.Coordinator
-	cfg      func() config.GuardianConfig
-	hub      hubBroadcaster
-	projRoot string
+	db          *db.DB
+	coord       *orchestration.Coordinator
+	cfg         func() config.GuardianConfig
+	hub         hubBroadcaster
+	projRoot    string
+	injectedLLM llm.Client // optional: if set, used instead of creating llmClient from config each tick
 }
 
 // New creates a new Guardian.
@@ -37,6 +46,13 @@ func New(d *db.DB, coord *orchestration.Coordinator, cfgFn func() config.Guardia
 		hub:      hub,
 		projRoot: projRoot,
 	}
+}
+
+// SetLLMClient injects a shared LLM client. If set, runChecks() uses this
+// client (via llmAdapter) instead of creating a new llmClient from config
+// each tick. This allows sharing a single client across subsystems.
+func (g *Guardian) SetLLMClient(c llm.Client) {
+	g.injectedLLM = c
 }
 
 // Run starts the guardian ticker loop. It blocks until ctx is cancelled.
@@ -88,7 +104,12 @@ func (g *Guardian) RunOnce(ctx context.Context) {
 
 func (g *Guardian) runChecks(ctx context.Context) {
 	cfg := g.cfg()
-	llm := newLLMClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMTemperature, cfg.LLMMaxTokens)
+	var llmCli guardianLLM
+	if g.injectedLLM != nil {
+		llmCli = newLLMAdapter(g.injectedLLM)
+	} else {
+		llmCli = newLLMClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMTemperature, cfg.LLMMaxTokens)
+	}
 
 	var candidates []alertInput
 
@@ -114,7 +135,7 @@ func (g *Guardian) runChecks(ctx context.Context) {
 	candidates = append(candidates, checkCoverageDrift(g.db, g.projRoot, cfg)...)
 
 	// 5. Governance violations
-	candidates = append(candidates, checkGovernanceViolations(ctx, g.db, llm, g.projRoot)...)
+	candidates = append(candidates, checkGovernanceViolations(ctx, g.db, llmCli, g.projRoot)...)
 
 	for _, c := range candidates {
 		g.maybeEmit(c)

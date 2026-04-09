@@ -86,35 +86,6 @@ CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
     INSERT INTO docs_fts(docs_fts, rowid, title, content, doc_type) VALUES ('delete', old.id, old.title, old.content, old.doc_type);
 END;
 
--- Learning: pattern candidates
-CREATE TABLE IF NOT EXISTS candidates (
-    id             TEXT PRIMARY KEY,
-    detection_type TEXT    NOT NULL,
-    count          INTEGER NOT NULL DEFAULT 1,
-    confidence     REAL    NOT NULL DEFAULT 0.5,
-    files          TEXT    NOT NULL DEFAULT '[]',
-    description    TEXT    NOT NULL,
-    status         TEXT    NOT NULL DEFAULT 'pending',
-    detected_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
--- Learning: proposals
-CREATE TABLE IF NOT EXISTS proposals (
-    id               TEXT PRIMARY KEY,
-    candidate_id     TEXT    NOT NULL REFERENCES candidates(id),
-    type             TEXT    NOT NULL DEFAULT 'rule',
-    title            TEXT    NOT NULL,
-    description      TEXT    NOT NULL,
-    proposed_content TEXT    NOT NULL DEFAULT '',
-    proposed_path    TEXT,
-    confidence       REAL    NOT NULL DEFAULT 0.5,
-    status           TEXT    NOT NULL DEFAULT 'pending',
-    decision         TEXT,
-    decided_at       TEXT,
-    session_id       TEXT,
-    created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
 -- Orchestration workflows (replaces spec-state.json + bug-state.json)
 CREATE TABLE IF NOT EXISTS workflows (
     id         TEXT PRIMARY KEY,
@@ -796,4 +767,134 @@ CREATE INDEX IF NOT EXISTS idx_pi_proposals_project ON pi_feature_proposals(proj
 CREATE INDEX IF NOT EXISTS idx_pi_proposals_status ON pi_feature_proposals(status);
 CREATE INDEX IF NOT EXISTS idx_pi_proposals_gap ON pi_feature_proposals(gap_id);
 CREATE INDEX IF NOT EXISTS idx_pi_proposals_workflow ON pi_feature_proposals(workflow_id);
+
+-- Wiki: Pages (LLM-generated knowledge pages)
+CREATE TABLE IF NOT EXISTS wiki_pages (
+    id               TEXT PRIMARY KEY,
+    page_type        TEXT NOT NULL DEFAULT 'summary',
+    title            TEXT NOT NULL,
+    content          TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'draft',
+    staleness_score  REAL NOT NULL DEFAULT 0,
+    source_hashes_json TEXT NOT NULL DEFAULT '[]',
+    tags_json        TEXT NOT NULL DEFAULT '[]',
+    metadata_json    TEXT NOT NULL DEFAULT '{}',
+    generated_by     TEXT NOT NULL DEFAULT 'ingest',
+    version          INTEGER NOT NULL DEFAULT 1,
+    created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_type ON wiki_pages(page_type);
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_status ON wiki_pages(status);
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_staleness ON wiki_pages(staleness_score DESC);
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_updated ON wiki_pages(updated_at DESC);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS wiki_pages_fts USING fts5(
+    title, content, tags_json,
+    content='wiki_pages', content_rowid='rowid',
+    tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS wiki_pages_ai AFTER INSERT ON wiki_pages BEGIN
+    INSERT INTO wiki_pages_fts(rowid, title, content, tags_json)
+    VALUES (new.rowid, new.title, new.content, new.tags_json);
+END;
+CREATE TRIGGER IF NOT EXISTS wiki_pages_au AFTER UPDATE ON wiki_pages BEGIN
+    INSERT INTO wiki_pages_fts(wiki_pages_fts, rowid, title, content, tags_json)
+    VALUES ('delete', old.rowid, old.title, old.content, old.tags_json);
+    INSERT INTO wiki_pages_fts(rowid, title, content, tags_json)
+    VALUES (new.rowid, new.title, new.content, new.tags_json);
+END;
+CREATE TRIGGER IF NOT EXISTS wiki_pages_ad AFTER DELETE ON wiki_pages BEGIN
+    INSERT INTO wiki_pages_fts(wiki_pages_fts, rowid, title, content, tags_json)
+    VALUES ('delete', old.rowid, old.title, old.content, old.tags_json);
+END;
+
+-- Wiki: Links (cross-references between pages)
+CREATE TABLE IF NOT EXISTS wiki_links (
+    id           TEXT PRIMARY KEY,
+    from_page_id TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
+    to_page_id   TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
+    link_type    TEXT NOT NULL DEFAULT 'related',
+    strength     REAL NOT NULL DEFAULT 0.5,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(from_page_id, to_page_id, link_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_links_from ON wiki_links(from_page_id);
+CREATE INDEX IF NOT EXISTS idx_wiki_links_to ON wiki_links(to_page_id);
+
+-- Wiki: Page References (citations to raw sources)
+CREATE TABLE IF NOT EXISTS wiki_page_refs (
+    id          TEXT PRIMARY KEY,
+    page_id     TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL,
+    source_id   TEXT NOT NULL,
+    excerpt     TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(page_id, source_type, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_refs_page ON wiki_page_refs(page_id);
+CREATE INDEX IF NOT EXISTS idx_wiki_refs_source ON wiki_page_refs(source_type, source_id);
+
+-- Evolution: Runs (time-bounded evolution cycles)
+CREATE TABLE IF NOT EXISTS evolution_runs (
+    id                 TEXT PRIMARY KEY,
+    trigger_type       TEXT NOT NULL DEFAULT 'scheduled',
+    status             TEXT NOT NULL DEFAULT 'running',
+    hypotheses_count   INTEGER NOT NULL DEFAULT 0,
+    experiments_run    INTEGER NOT NULL DEFAULT 0,
+    auto_applied       INTEGER NOT NULL DEFAULT 0,
+    proposals_created  INTEGER NOT NULL DEFAULT 0,
+    wiki_pages_updated INTEGER NOT NULL DEFAULT 0,
+    duration_ms        INTEGER NOT NULL DEFAULT 0,
+    timeout_ms         INTEGER NOT NULL DEFAULT 0,
+    error_message      TEXT NOT NULL DEFAULT '',
+    metadata_json      TEXT NOT NULL DEFAULT '{}',
+    started_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at       TEXT,
+    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_evolution_runs_status ON evolution_runs(status);
+CREATE INDEX IF NOT EXISTS idx_evolution_runs_started ON evolution_runs(started_at DESC);
+
+-- Evolution: Hypotheses (individual experiments within a run)
+CREATE TABLE IF NOT EXISTS evolution_hypotheses (
+    id                TEXT PRIMARY KEY,
+    run_id            TEXT NOT NULL REFERENCES evolution_runs(id) ON DELETE CASCADE,
+    category          TEXT NOT NULL,
+    description       TEXT NOT NULL,
+    baseline_value    TEXT NOT NULL DEFAULT '{}',
+    proposed_value    TEXT NOT NULL DEFAULT '{}',
+    metric            TEXT NOT NULL DEFAULT '',
+    baseline_metric   REAL NOT NULL DEFAULT 0,
+    experiment_metric REAL NOT NULL DEFAULT 0,
+    confidence        REAL NOT NULL DEFAULT 0,
+    decision          TEXT NOT NULL DEFAULT 'inconclusive',
+    decision_reason   TEXT NOT NULL DEFAULT '',
+    wiki_page_id      TEXT,
+    evidence_json     TEXT NOT NULL DEFAULT '{}',
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_evolution_hypotheses_run ON evolution_hypotheses(run_id);
+CREATE INDEX IF NOT EXISTS idx_evolution_hypotheses_category ON evolution_hypotheses(category);
+CREATE INDEX IF NOT EXISTS idx_evolution_hypotheses_decision ON evolution_hypotheses(decision);
+
+-- LLM token usage tracking
+CREATE TABLE IF NOT EXISTS llm_token_usage (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    date          TEXT    NOT NULL,
+    subsystem     TEXT    NOT NULL,
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    requests      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_date_sub
+    ON llm_token_usage(date, subsystem);
 `

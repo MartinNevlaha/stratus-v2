@@ -100,6 +100,30 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			if err := s.engine.RunAnalysis(); err != nil {
 				slog.Error("insight: analysis failed", "error", err)
 			}
+
+			// Wiki ingest and maintenance
+			if s.engine.wikiCfg.Enabled {
+				if result, err := s.engine.RunWikiIngest(ctx); err != nil {
+					slog.Error("insight: wiki ingest failed", "error", err)
+				} else if result != nil {
+					slog.Info("insight: wiki ingest complete", "created", result.PagesCreated, "updated", result.PagesUpdated)
+				}
+
+				if mResult, err := s.engine.RunWikiMaintenance(ctx); err != nil {
+					slog.Error("insight: wiki maintenance failed", "error", err)
+				} else if mResult != nil {
+					slog.Info("insight: wiki maintenance complete", "scored", mResult.PagesScored, "stale", mResult.PagesMarkedStale)
+				}
+			}
+
+			// Evolution loop
+			if s.engine.evoCfg.Enabled {
+				if evoResult, err := s.engine.RunEvolutionCycle(ctx, "scheduled", 0, nil); err != nil {
+					slog.Error("insight: evolution cycle failed", "error", err)
+				} else if evoResult != nil {
+					slog.Info("insight: evolution complete", "hypotheses", evoResult.HypothesesTested, "auto_applied", evoResult.AutoApplied)
+				}
+			}
 		case <-ctx.Done():
 			slog.Info("insight: scheduler stopped")
 			return ctx.Err()

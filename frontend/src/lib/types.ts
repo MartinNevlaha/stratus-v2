@@ -56,32 +56,6 @@ export interface Task {
   status: 'pending' | 'in_progress' | 'done'
 }
 
-export interface Candidate {
-  id: string
-  detection_type: string
-  count: number
-  confidence: number
-  files: string[]
-  description: string
-  status: string
-  detected_at: string
-}
-
-export interface Proposal {
-  id: string
-  candidate_id: string
-  type: string
-  title: string
-  description: string
-  proposed_content: string
-  proposed_path?: string
-  confidence: number
-  status: string
-  decision?: string
-  decided_at?: string
-  created_at: string
-}
-
 export interface SearchResult {
   source: 'code' | 'governance'
   file_path: string
@@ -94,8 +68,6 @@ export interface SearchResult {
 export interface DashboardState {
   workflows: WorkflowState[]
   recent_events: Event[]
-  pending_candidates: Candidate[]
-  pending_proposals: Proposal[]
   governance: { total_chunks: number; by_type: Array<{ type: string; count: number }> }
   vexor_available: boolean
   ws_clients: number
@@ -225,71 +197,6 @@ export interface AgentsResponse {
   opencode: AgentDef[]
 }
 
-export interface Anomaly {
-  id: string
-  type: string
-  metric_name: string
-  actual_value: number
-  expected_value: number
-  deviation: number
-  severity: string
-  detected_at: string
-  description: string
-}
-
-export interface MetricsSummary {
-  total_workflows: number
-  completed_workflows: number
-  success_rate: number
-  avg_workflow_duration_ms: number
-  total_tasks: number
-  completed_tasks: number
-}
-
-export interface DailyMetric {
-  date: string
-  total: number
-  completed: number
-  failed: number
-  avg_duration_ms: number
-}
-
-export interface AgentMetric {
-  agent_id: string
-  total_tasks: number
-  completed_tasks: number
-  avg_duration_ms: number
-  success_rate: number
-}
-
-export interface LiveMetricsUpdate {
-  summary: MetricsSummary
-  daily: DailyMetric[]
-  agents: AgentMetric[]
-  ts: number
-}
-
-export interface MetricsAnomalyAlert {
-  anomaly: Anomaly
-  ts: number
-  alert_msg: string
-}
-
-export interface MetricsAlert {
-  message: string
-  severity: string
-  count: number
-  ts: number
-}
-
-export interface ProjectMetric {
-  project: string
-  total_workflows: number
-  completed_workflows: number
-  avg_duration_ms: number
-  success_rate: number
-}
-
 export interface AgentDetail {
   name: string
   claude_code?: AgentDef
@@ -298,18 +205,6 @@ export interface AgentDetail {
 
 export interface SkillsResponse {
   skills: SkillDef[]
-}
-
-export interface DailyMetricsResponse {
-  metrics: DailyMetric[]
-}
-
-export interface AgentMetricsResponse {
-  metrics: AgentMetric[]
-}
-
-export interface ProjectMetricsResponse {
-  metrics: ProjectMetric[]
 }
 
 export interface RuleDef {
@@ -462,4 +357,116 @@ export interface KBRecommendation {
 export interface KBStats {
   solution_patterns: number
   problem_classes: number
+}
+
+// Self-Evolving System
+
+export interface WikiPage {
+  id: string
+  page_type: 'summary' | 'entity' | 'concept' | 'answer' | 'index'
+  title: string
+  content: string
+  status: 'draft' | 'published' | 'stale' | 'archived'
+  staleness_score: number
+  source_hashes: string[]
+  tags: string[]
+  metadata: Record<string, unknown>
+  generated_by: string
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WikiLink {
+  id: string
+  from_page_id: string
+  to_page_id: string
+  link_type: 'related' | 'parent' | 'child' | 'contradicts' | 'supersedes' | 'cites'
+  strength: number
+  created_at: string
+}
+
+export interface WikiPageRef {
+  id: string
+  page_id: string
+  source_type: string
+  source_id: string
+  excerpt: string
+  created_at: string
+}
+
+export interface WikiGraphData {
+  nodes: { id: string; title: string; page_type: string; status: string; staleness_score: number }[]
+  edges: { from: string; to: string; link_type: string; strength: number }[]
+}
+
+export interface WikiQueryResult {
+  answer: string
+  citations: { source_type: string; source_id: string; excerpt: string; relevance: number }[]
+  wiki_page_id: string | null
+  tokens_used: number
+}
+
+export interface VaultStatus {
+  last_sync: string | null
+  file_count: number
+  vault_path: string
+  errors: string[]
+}
+
+export interface EvolutionRun {
+  id: string
+  trigger_type: 'scheduled' | 'manual' | 'event_driven'
+  status: 'running' | 'completed' | 'failed' | 'timeout'
+  hypotheses_count: number
+  experiments_run: number
+  auto_applied: number
+  proposals_created: number
+  wiki_pages_updated: number
+  duration_ms: number
+  timeout_ms: number
+  error_message: string
+  metadata: Record<string, unknown>
+  started_at: string
+  completed_at: string | null
+  created_at: string
+}
+
+export interface EvolutionHypothesis {
+  id: string
+  run_id: string
+  category: 'prompt_tuning' | 'workflow_routing' | 'agent_selection' | 'threshold_adjustment'
+  description: string
+  baseline_value: string
+  proposed_value: string
+  metric: string
+  baseline_metric: number
+  experiment_metric: number
+  confidence: number
+  decision: 'auto_applied' | 'proposal_created' | 'rejected' | 'inconclusive'
+  decision_reason: string
+  wiki_page_id: string | null
+  evidence: Record<string, unknown>
+  created_at: string
+}
+
+export interface WikiConfig {
+  enabled: boolean
+  ingest_on_event: boolean
+  max_pages_per_ingest: number
+  staleness_threshold: number
+  max_page_size_tokens: number
+  vault_path: string
+  vault_sync_on_save: boolean
+}
+
+export interface EvolutionConfig {
+  enabled: boolean
+  timeout_ms: number
+  max_hypotheses_per_run: number
+  auto_apply_threshold: number
+  proposal_threshold: number
+  min_sample_size: number
+  daily_token_budget: number
+  categories: string[]
 }

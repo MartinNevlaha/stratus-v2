@@ -538,6 +538,101 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			return client.post("/api/swarm/missions/"+missionID+"/forge/execute", map[string]any{})
 		},
 	})
+
+	// --- Wiki tools ---
+
+	s.Register(Tool{
+		Name:        "wiki_search",
+		Description: "Search knowledge wiki pages using full-text search.",
+		InputSchema: obj(
+			req("query", "string", "Search query"),
+			opt("type", "string", "Filter by page type (summary, entity, concept, answer, index)"),
+			opt("limit", "integer", "Max results (default: 20)"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			params := neturl.Values{}
+			if q, ok := args["query"].(string); ok && q != "" {
+				params.Set("q", q)
+			}
+			if t, ok := args["type"].(string); ok && t != "" {
+				params.Set("type", t)
+			}
+			if n := intArg(args, "limit", 0); n > 0 {
+				params.Set("limit", fmt.Sprintf("%d", n))
+			}
+			return client.get("/api/wiki/search", params)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "wiki_query",
+		Description: "Synthesis query: asks an LLM to answer a question from wiki knowledge with citations.",
+		InputSchema: obj(
+			req("query", "string", "Natural language question to answer from the wiki"),
+			opt("persist", "boolean", "Whether to persist the answer as a new wiki page"),
+			opt("max_sources", "integer", "Maximum number of source pages to use (default: 10)"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			body := map[string]any{}
+			if q, ok := args["query"].(string); ok {
+				body["query"] = q
+			}
+			if p, ok := args["persist"].(bool); ok {
+				body["persist"] = p
+			}
+			if n := intArg(args, "max_sources", 0); n > 0 {
+				body["max_sources"] = n
+			}
+			return client.post("/api/wiki/query", body)
+		},
+	})
+
+	// --- Evolution tools ---
+
+	s.Register(Tool{
+		Name:        "evolution_status",
+		Description: "Get recent agent evolution runs and their outcomes.",
+		InputSchema: obj(
+			opt("limit", "integer", "Max runs to return (default: 20)"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			params := neturl.Values{}
+			if n := intArg(args, "limit", 0); n > 0 {
+				params.Set("limit", fmt.Sprintf("%d", n))
+			}
+			return client.get("/api/evolution/runs", params)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "evolution_trigger",
+		Description: "Trigger an autonomous evolution cycle that tests hypotheses and applies improvements.",
+		InputSchema: obj(
+			opt("timeout_ms", "integer", "Timeout in milliseconds (default: 600000)"),
+			opt("categories", "array", "Hypothesis categories to test: prompt_tuning, workflow_routing, agent_selection, threshold_adjustment"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			body := map[string]any{}
+			if n := intArg(args, "timeout_ms", 0); n > 0 {
+				body["timeout_ms"] = n
+			}
+			if cats, ok := args["categories"].([]any); ok {
+				body["categories"] = cats
+			}
+			return client.post("/api/evolution/trigger", body)
+		},
+	})
+
+	// --- Vault sync tool ---
+
+	s.Register(Tool{
+		Name:        "vault_sync",
+		Description: "Trigger a full Obsidian vault sync: exports all published wiki pages to the configured vault directory.",
+		InputSchema: obj(),
+		Handler: func(args map[string]any) (any, error) {
+			return client.post("/api/wiki/vault/sync", map[string]any{})
+		},
+	})
 }
 
 // apiClient is a minimal HTTP client for calling the Stratus API.

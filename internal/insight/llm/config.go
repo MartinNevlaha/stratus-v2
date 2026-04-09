@@ -48,8 +48,13 @@ func (c Config) TimeoutDuration() time.Duration {
 }
 
 func (c Config) Validate() error {
+	// Empty provider means LLM is disabled — valid for top-level config.
 	if c.Provider == "" {
-		return fmt.Errorf("llm: provider is required")
+		return nil
+	}
+	validProviders := map[string]bool{"zai": true, "openai": true, "ollama": true, "anthropic": true}
+	if !validProviders[c.Provider] {
+		return fmt.Errorf("llm: unsupported provider %q, must be one of: zai, openai, ollama, anthropic", c.Provider)
 	}
 	if c.Model == "" {
 		return fmt.Errorf("llm: model is required")
@@ -57,11 +62,17 @@ func (c Config) Validate() error {
 	if c.APIKey == "" && c.Provider != "ollama" {
 		return fmt.Errorf("llm: api_key is required for provider %s", c.Provider)
 	}
-	if c.MaxTokens < 0 || c.MaxTokens > 204800 {
-		return fmt.Errorf("llm: max_tokens must be between 1 and 204800 (200K)")
+	if c.MaxTokens < 0 || c.MaxTokens > 131072 {
+		return fmt.Errorf("llm: max_tokens must be between 0 and 131072, got %d", c.MaxTokens)
 	}
 	if c.Temperature < 0 || c.Temperature > 2 {
-		return fmt.Errorf("llm: temperature must be between 0 and 2")
+		return fmt.Errorf("llm: temperature must be between 0 and 2, got %f", c.Temperature)
+	}
+	if c.Timeout < 0 || c.Timeout > 600 {
+		return fmt.Errorf("llm: timeout must be between 0 and 600 seconds, got %d", c.Timeout)
+	}
+	if c.MaxRetries < 0 || c.MaxRetries > 10 {
+		return fmt.Errorf("llm: max_retries must be between 0 and 10, got %d", c.MaxRetries)
 	}
 	return nil
 }
