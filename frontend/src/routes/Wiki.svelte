@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { listWikiPages, searchWiki, queryWiki, getWikiGraph, getVaultStatus, triggerVaultSync } from '$lib/api'
-	import type { WikiPage, WikiGraphData, WikiQueryResult, VaultStatus } from '$lib/types'
+	import { listWikiPages, searchWiki, queryWiki, getWikiGraph, getVaultStatus, triggerVaultSync, triggerOnboarding, getOnboardingStatus } from '$lib/api'
+	import type { WikiPage, WikiGraphData, WikiQueryResult, VaultStatus, OnboardingProgress, OnboardingResult } from '$lib/types'
 
 	let pages = $state<WikiPage[]>([])
 	let totalCount = $state(0)
@@ -22,6 +22,13 @@
 	let syncLoading = $state(false)
 	let error = $state<string | null>(null)
 	let syncMessage = $state<string | null>(null)
+
+	let onboardingProgress = $state<OnboardingProgress | null>(null)
+	let onboardingResult = $state<OnboardingResult | null>(null)
+	let onboardingDepth = $state<'shallow' | 'standard' | 'deep'>('standard')
+	let onboardingLoading = $state(false)
+	let onboardingError = $state<string | null>(null)
+	let showOnboarding = $state(false)
 
 	$effect(() => {
 		loadPages()
@@ -105,6 +112,40 @@
 			syncMessage = e instanceof Error ? e.message : 'Sync failed'
 		} finally {
 			syncLoading = false
+		}
+	}
+
+	async function startOnboarding() {
+		onboardingLoading = true
+		onboardingError = null
+		onboardingResult = null
+		try {
+			await triggerOnboarding({ depth: onboardingDepth })
+			pollOnboardingStatus()
+		} catch (e) {
+			onboardingError = e instanceof Error ? e.message : 'Failed to start onboarding'
+			onboardingLoading = false
+		}
+	}
+
+	async function pollOnboardingStatus() {
+		try {
+			const status = await getOnboardingStatus()
+			onboardingProgress = status
+			if (status.result) {
+				onboardingResult = status.result
+			}
+			if (status.status === 'complete' || status.status === 'failed') {
+				onboardingLoading = false
+				if (status.status === 'complete') {
+					await loadPages() // refresh page list
+				}
+			} else {
+				setTimeout(pollOnboardingStatus, 2000) // poll every 2s
+			}
+		} catch (e) {
+			onboardingError = e instanceof Error ? e.message : 'Failed to check status'
+			onboardingLoading = false
 		}
 	}
 
@@ -195,6 +236,9 @@
 					{/if}
 				</span>
 			{/if}
+			<button class="onboard-btn" onclick={() => showOnboarding = !showOnboarding} disabled={onboardingLoading}>
+				{onboardingLoading ? 'Onboarding...' : 'Onboard Project'}
+			</button>
 			<button class="sync-btn" onclick={doVaultSync} disabled={syncLoading}>
 				{syncLoading ? 'Syncing...' : '↻ Sync Vault'}
 			</button>
@@ -203,6 +247,76 @@
 			{/if}
 		</div>
 	</header>
+
+	{#if showOnboarding}
+		<div class="onboarding-panel">
+			<div class="onboarding-header">
+				<h3>Project Onboarding</h3>
+				<p class="onboarding-desc">Auto-generate documentation wiki pages from your codebase.</p>
+			</div>
+
+			<div class="onboarding-controls">
+				<label class="depth-label">
+					Depth:
+					<select bind:value={onboardingDepth} disabled={onboardingLoading}>
+						<option value="shallow">Shallow (3-5 pages)</option>
+						<option value="standard">Standard (8-15 pages)</option>
+						<option value="deep">Deep (15-25 pages)</option>
+					</select>
+				</label>
+				<button class="start-btn" onclick={startOnboarding} disabled={onboardingLoading}>
+					{onboardingLoading ? 'Running...' : 'Start Onboarding'}
+				</button>
+			</div>
+
+			{#if onboardingError}
+				<div class="onboarding-error">{onboardingError}</div>
+			{/if}
+
+			{#if onboardingProgress && onboardingProgress.status !== 'idle'}
+				<div class="onboarding-progress">
+					<div class="progress-header">
+						<span class="progress-status">{onboardingProgress.status}</span>
+						{#if onboardingProgress.total > 0}
+							<span class="progress-count">{onboardingProgress.generated}/{onboardingProgress.total}</span>
+						{/if}
+					</div>
+					{#if onboardingProgress.current_page}
+						<div class="progress-current">Generating: {onboardingProgress.current_page}</div>
+					{/if}
+					{#if onboardingProgress.total > 0}
+						<div class="progress-bar-track">
+							<div class="progress-bar-fill" style="width: {(onboardingProgress.generated / onboardingProgress.total) * 100}%"></div>
+						</div>
+					{/if}
+					{#if onboardingProgress.errors.length > 0}
+						<div class="progress-errors">
+							{#each onboardingProgress.errors as err}
+								<div class="progress-error-item">{err}</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+
+			{#if onboardingResult}
+				<div class="onboarding-result">
+					<h4>Onboarding Complete</h4>
+					<div class="result-stats">
+						<span>Pages generated: {onboardingResult.pages_generated}</span>
+						{#if onboardingResult.pages_skipped > 0}
+							<span>Skipped: {onboardingResult.pages_skipped}</span>
+						{/if}
+						{#if onboardingResult.pages_failed > 0}
+							<span class="result-failed">Failed: {onboardingResult.pages_failed}</span>
+						{/if}
+						<span>Links: {onboardingResult.links_created}</span>
+						<span>Tokens: {onboardingResult.tokens_used}</span>
+					</div>
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if error}
 		<div class="error-banner">
@@ -1012,5 +1126,169 @@
 		margin-top: 0.75rem;
 		font-size: 0.75rem;
 		color: #6e7681;
+	}
+
+	.onboard-btn {
+		padding: 0.4rem 0.9rem;
+		border-radius: 6px;
+		border: 1px solid #1f6feb;
+		background: #1f6feb;
+		color: #ffffff;
+		cursor: pointer;
+		font-size: 0.8rem;
+		transition: background 0.15s;
+	}
+	.onboard-btn:hover:not(:disabled) {
+		background: #388bfd;
+	}
+	.onboard-btn:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.onboarding-panel {
+		background: #161b22;
+		border: 1px solid #30363d;
+		border-radius: 8px;
+		padding: 1.25rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.onboarding-header h3 {
+		margin: 0 0 0.25rem;
+		color: #c9d1d9;
+		font-size: 1rem;
+	}
+
+	.onboarding-desc {
+		color: #8b949e;
+		font-size: 0.85rem;
+		margin: 0 0 1rem;
+	}
+
+	.onboarding-controls {
+		display: flex;
+		gap: 1rem;
+		align-items: center;
+		margin-bottom: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.depth-label {
+		font-size: 0.85rem;
+		color: #8b949e;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.depth-label select {
+		padding: 0.35rem 0.6rem;
+		background: #21262d;
+		border: 1px solid #30363d;
+		border-radius: 6px;
+		color: #c9d1d9;
+		font-size: 0.8rem;
+	}
+
+	.start-btn {
+		padding: 0.5rem 1.25rem;
+		background: #1f6feb;
+		border: none;
+		border-radius: 6px;
+		color: #ffffff;
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+	.start-btn:hover:not(:disabled) {
+		background: #388bfd;
+	}
+	.start-btn:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.onboarding-error {
+		color: #f85149;
+		font-size: 0.85rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.onboarding-progress {
+		margin-top: 0.75rem;
+	}
+
+	.progress-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.375rem;
+	}
+
+	.progress-status {
+		font-size: 0.8rem;
+		color: #58a6ff;
+		text-transform: capitalize;
+	}
+
+	.progress-count {
+		font-size: 0.8rem;
+		color: #8b949e;
+	}
+
+	.progress-current {
+		font-size: 0.8rem;
+		color: #8b949e;
+		margin-bottom: 0.5rem;
+	}
+
+	.progress-bar-track {
+		height: 4px;
+		background: #21262d;
+		border-radius: 2px;
+		overflow: hidden;
+	}
+
+	.progress-bar-fill {
+		height: 100%;
+		background: #1f6feb;
+		border-radius: 2px;
+		transition: width 0.3s;
+	}
+
+	.progress-errors {
+		margin-top: 0.5rem;
+	}
+
+	.progress-error-item {
+		font-size: 0.78rem;
+		color: #f85149;
+		padding: 0.25rem 0;
+	}
+
+	.onboarding-result {
+		margin-top: 0.75rem;
+		padding: 0.75rem;
+		background: #1a3a2a;
+		border: 1px solid #2ea043;
+		border-radius: 6px;
+	}
+
+	.onboarding-result h4 {
+		margin: 0 0 0.5rem;
+		color: #3fb950;
+		font-size: 0.875rem;
+	}
+
+	.result-stats {
+		display: flex;
+		gap: 1rem;
+		flex-wrap: wrap;
+		font-size: 0.8rem;
+		color: #8b949e;
+	}
+
+	.result-failed {
+		color: #f85149;
 	}
 </style>

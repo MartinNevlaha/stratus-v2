@@ -262,3 +262,13 @@ func TestBudgetedClient_ProviderAndModel(t *testing.T) {
 		t.Errorf("expected Model() 'mock-model', got %q", client.Model())
 	}
 }
+
+func TestAllowedSubsystems_ContainsOnboarding(t *testing.T) {
+	allowed, ok := AllowedSubsystems["onboarding"]
+	if !ok {
+		t.Fatal("expected 'onboarding' key to exist in AllowedSubsystems map")
+	}
+	if !allowed {
+		t.Error("expected AllowedSubsystems[\"onboarding\"] to be true")
+	}
+}

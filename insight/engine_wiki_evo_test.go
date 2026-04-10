@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
+	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
 )
 
 func makeEngineWithWikiEvo(t *testing.T) *Engine {
@@ -140,5 +142,163 @@ func TestEngine_RunEvolutionCycle_WithEvolutionLoop(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected non-nil RunResult")
+	}
+}
+
+// TestHandleWorkflowWikiStaleness_NoFiles verifies that events without a
+// "files" payload key are handled gracefully without touching the DB.
+func TestHandleWorkflowWikiStaleness_NoFiles(t *testing.T) {
+	e := makeEngineWithWikiEvo(t)
+
+	// Should not panic or error — no files means early return.
+	e.handleWorkflowWikiStaleness(map[string]any{
+		"workflow_id": "wf-1",
+	})
+}
+
+// TestHandleWorkflowWikiStaleness_WithFiles verifies that when the event
+// payload contains a "files" key, wiki pages referencing those files have
+// their staleness score boosted by 0.2 (clamped to 1.0).
+func TestHandleWorkflowWikiStaleness_WithFiles(t *testing.T) {
+	e := makeEngineWithWikiEvo(t)
+
+	// Seed a wiki page that references "api/handler.go".
+	page := &db.WikiPage{
+		PageType:       "summary",
+		Title:          "API Handler",
+		Status:         "published",
+		GeneratedBy:    "ingest",
+		StalenessScore: 0.4,
+	}
+	if err := e.database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+	ref := &db.WikiPageRef{PageID: page.ID, SourceType: "artifact", SourceID: "api/handler.go"}
+	if err := e.database.SaveWikiPageRef(ref); err != nil {
+		t.Fatalf("SaveWikiPageRef: %v", err)
+	}
+
+	e.handleWorkflowWikiStaleness(map[string]any{
+		"workflow_id": "wf-2",
+		"files":       []any{"api/handler.go", "api/server.go"},
+	})
+
+	updated, err := e.database.GetWikiPage(page.ID)
+	if err != nil {
+		t.Fatalf("GetWikiPage: %v", err)
+	}
+	want := 0.6 // 0.4 + 0.2
+	if updated.StalenessScore < want-0.001 || updated.StalenessScore > want+0.001 {
+		t.Errorf("StalenessScore = %.3f, want %.3f", updated.StalenessScore, want)
+	}
+}
+
+// TestHandleWorkflowWikiStaleness_Clamped verifies that the staleness score
+// is clamped to 1.0 and does not exceed it.
+func TestHandleWorkflowWikiStaleness_Clamped(t *testing.T) {
+	e := makeEngineWithWikiEvo(t)
+
+	page := &db.WikiPage{
+		PageType:       "summary",
+		Title:          "Near Full Stale",
+		Status:         "published",
+		GeneratedBy:    "ingest",
+		StalenessScore: 0.95,
+	}
+	if err := e.database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+	ref := &db.WikiPageRef{PageID: page.ID, SourceType: "artifact", SourceID: "cmd/main.go"}
+	if err := e.database.SaveWikiPageRef(ref); err != nil {
+		t.Fatalf("SaveWikiPageRef: %v", err)
+	}
+
+	e.handleWorkflowWikiStaleness(map[string]any{
+		"files": []any{"cmd/main.go"},
+	})
+
+	updated, err := e.database.GetWikiPage(page.ID)
+	if err != nil {
+		t.Fatalf("GetWikiPage: %v", err)
+	}
+	if updated.StalenessScore > 1.0 {
+		t.Errorf("StalenessScore %.3f exceeds max 1.0", updated.StalenessScore)
+	}
+	if updated.StalenessScore < 0.999 {
+		t.Errorf("StalenessScore %.3f should be 1.0", updated.StalenessScore)
+	}
+}
+
+// TestHandleWorkflowWikiStaleness_NilDB verifies that the method returns
+// immediately when the engine has no database (nil guard).
+func TestHandleWorkflowWikiStaleness_NilDB(t *testing.T) {
+	e := &Engine{} // no database
+	// Must not panic.
+	e.handleWorkflowWikiStaleness(map[string]any{
+		"files": []any{"some/file.go"},
+	})
+}
+
+// TestHandleEvent_WorkflowCompleted_TriggersWikiStaleness verifies that
+// HandleEvent dispatches handleWorkflowWikiStaleness for EventWorkflowCompleted.
+func TestHandleEvent_WorkflowCompleted_TriggersWikiStaleness(t *testing.T) {
+	e := makeEngineWithWikiEvo(t)
+
+	// Seed a wiki page with a matching file reference.
+	page := &db.WikiPage{
+		PageType:       "summary",
+		Title:          "Event-Triggered",
+		Status:         "published",
+		GeneratedBy:    "ingest",
+		StalenessScore: 0.0,
+	}
+	if err := e.database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+	ref := &db.WikiPageRef{PageID: page.ID, SourceType: "artifact", SourceID: "insight/engine.go"}
+	if err := e.database.SaveWikiPageRef(ref); err != nil {
+		t.Fatalf("SaveWikiPageRef: %v", err)
+	}
+
+	// Start the engine so HandleEvent does not early-return.
+	ctx := context.Background()
+	if err := e.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer e.Stop()
+
+	evt := events.Event{
+		ID:     "evt-1",
+		Type:   events.EventWorkflowCompleted,
+		Source: "test",
+		Payload: map[string]any{
+			"workflow_id": "wf-ev-1",
+			"files":       []any{"insight/engine.go"},
+		},
+	}
+	e.HandleEvent(ctx, evt)
+
+	// HandleEvent spawns a goroutine; give it time to finish.
+	deadline := context.Background()
+	_ = deadline
+
+	// Poll briefly.
+	var updated *db.WikiPage
+	for i := 0; i < 50; i++ {
+		var err error
+		updated, err = e.database.GetWikiPage(page.ID)
+		if err != nil {
+			t.Fatalf("GetWikiPage: %v", err)
+		}
+		if updated.StalenessScore > 0.0 {
+			break
+		}
+		// sleep via a channel wait equivalent — use a small busy wait
+		for j := 0; j < 1000000; j++ {
+		}
+	}
+
+	if updated.StalenessScore < 0.19 {
+		t.Errorf("expected staleness boost after EventWorkflowCompleted, got %.3f", updated.StalenessScore)
 	}
 }

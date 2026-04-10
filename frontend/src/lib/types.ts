@@ -470,3 +470,25 @@ export interface EvolutionConfig {
   daily_token_budget: number
   categories: string[]
 }
+
+export interface OnboardingProgress {
+  job_id: string
+  status: 'idle' | 'scanning' | 'generating' | 'linking' | 'syncing' | 'complete' | 'failed'
+  current_page: string
+  generated: number
+  total: number
+  errors: string[]
+}
+
+export interface OnboardingResult {
+  pages_generated: number
+  pages_failed: number
+  pages_skipped: number
+  links_created: number
+  vault_synced: boolean
+  output_dir?: string
+  duration: number
+  tokens_used: number
+  errors: string[]
+  page_ids: string[]
+}

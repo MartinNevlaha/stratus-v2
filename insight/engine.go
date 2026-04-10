@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,10 +56,11 @@ type Engine struct {
 	wikiSynth           *wiki_engine.Synthesizer
 	wikiLinker          *wiki_engine.Linker
 
-	ctx     context.Context
-	cancel  context.CancelFunc
-	running bool
-	mu      sync.Mutex
+	ctx         context.Context
+	cancel      context.CancelFunc
+	running     bool
+	mu          sync.Mutex
+	projectRoot string
 
 	analysisMu sync.Mutex
 }
@@ -269,6 +272,9 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.ctx, e.cancel = context.WithCancel(ctx)
 	e.running = true
 
+	// Non-blocking startup staleness check — failures are logged and ignored.
+	go e.checkStartupStaleness()
+
 	go func() {
 		defer func() {
 			e.mu.Lock()
@@ -326,6 +332,113 @@ func (e *Engine) IsRunning() bool {
 	return e.running
 }
 
+// SetProjectRoot configures the directory used for git-based staleness checks
+// at startup. Must be called before Start().
+func (e *Engine) SetProjectRoot(dir string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.projectRoot = dir
+}
+
+// runGitCmd executes a git command in the given directory and returns its stdout.
+func runGitCmd(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w", args[0], err)
+	}
+	return string(out), nil
+}
+
+// checkStartupStaleness compares the stored HEAD SHA against the current one
+// and boosts the staleness score of any wiki pages whose source files changed.
+func (e *Engine) checkStartupStaleness() {
+	if e.database == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Get current HEAD.
+	currentSHA, err := runGitCmd(ctx, e.projectRoot, "rev-parse", "HEAD")
+	if err != nil {
+		slog.Warn("startup staleness: git rev-parse failed, skipping", "err", err)
+		return
+	}
+	currentSHA = strings.TrimSpace(currentSHA)
+
+	// Get stored HEAD.
+	storedSHA, err := e.database.GetGuardianBaseline("wiki_last_head_sha")
+	if err != nil {
+		slog.Warn("startup staleness: get baseline failed", "err", err)
+	}
+
+	// Always update stored HEAD before returning.
+	defer func() {
+		if setErr := e.database.SetGuardianBaseline("wiki_last_head_sha", currentSHA); setErr != nil {
+			slog.Warn("startup staleness: set baseline failed", "err", setErr)
+		}
+	}()
+
+	// First run or same SHA — nothing to diff.
+	if storedSHA == "" || storedSHA == currentSHA {
+		return
+	}
+
+	// Get changed files.
+	diffCtx, diffCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer diffCancel()
+
+	diffOutput, err := runGitCmd(diffCtx, e.projectRoot, "diff", "--name-only", storedSHA, currentSHA)
+	if err != nil {
+		slog.Warn("startup staleness: git diff failed", "storedSHA", storedSHA, "err", err)
+		return
+	}
+
+	changedFiles := strings.Split(strings.TrimSpace(diffOutput), "\n")
+	if len(changedFiles) == 0 || (len(changedFiles) == 1 && changedFiles[0] == "") {
+		return
+	}
+
+	// Cap at 500 files to avoid query bloat.
+	if len(changedFiles) > 500 {
+		changedFiles = changedFiles[:500]
+	}
+
+	// Find wiki pages that reference any of the changed files.
+	pageIDs, err := e.database.FindPagesBySourceFiles(changedFiles)
+	if err != nil {
+		slog.Warn("startup staleness: find pages failed", "err", err)
+		return
+	}
+
+	if len(pageIDs) == 0 {
+		return
+	}
+
+	// Boost staleness for each affected page.
+	for _, id := range pageIDs {
+		page, getErr := e.database.GetWikiPage(id)
+		if getErr != nil || page == nil {
+			continue
+		}
+		newScore := page.StalenessScore + 0.3
+		if newScore > 1.0 {
+			newScore = 1.0
+		}
+		if updateErr := e.database.UpdateWikiPageStaleness(id, newScore); updateErr != nil {
+			slog.Warn("startup staleness: update failed", "page_id", id, "err", updateErr)
+		}
+	}
+
+	slog.Info("startup staleness: updated wiki pages",
+		"changed_files", len(changedFiles),
+		"affected_pages", len(pageIDs),
+	)
+}
+
 func (e *Engine) HandleEvent(ctx context.Context, event events.Event) {
 	if !e.IsRunning() {
 		return
@@ -339,6 +452,63 @@ func (e *Engine) HandleEvent(ctx context.Context, event events.Event) {
 		if err := e.eventStore.SaveEvent(ctx, event); err != nil {
 			slog.Error("insight: failed to persist event", "error", err, "event_id", event.ID)
 		}
+	}
+
+	if event.Type == events.EventWorkflowCompleted {
+		go e.handleWorkflowWikiStaleness(event.Payload)
+	}
+}
+
+// handleWorkflowWikiStaleness boosts the staleness score of wiki pages that
+// reference files listed in the event payload's "files" key. It is intended to
+// be called as a goroutine and must never propagate errors to the caller.
+func (e *Engine) handleWorkflowWikiStaleness(payload map[string]any) {
+	if e.database == nil {
+		return
+	}
+
+	// Extract file paths from the payload.
+	var files []string
+	if rawFiles, ok := payload["files"]; ok {
+		if fileList, ok := rawFiles.([]any); ok {
+			for _, f := range fileList {
+				if s, ok := f.(string); ok {
+					files = append(files, s)
+				}
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		slog.Debug("workflow wiki staleness: no files in event payload, skipping")
+		return
+	}
+
+	pageIDs, err := e.database.FindPagesBySourceFiles(files)
+	if err != nil {
+		slog.Warn("workflow wiki staleness: find pages failed", "err", err)
+		return
+	}
+
+	for _, id := range pageIDs {
+		page, getErr := e.database.GetWikiPage(id)
+		if getErr != nil || page == nil {
+			continue
+		}
+		newScore := page.StalenessScore + 0.2
+		if newScore > 1.0 {
+			newScore = 1.0
+		}
+		if updateErr := e.database.UpdateWikiPageStaleness(id, newScore); updateErr != nil {
+			slog.Warn("workflow wiki staleness: update failed", "page_id", id, "err", updateErr)
+		}
+	}
+
+	if len(pageIDs) > 0 {
+		slog.Info("workflow wiki staleness: updated pages",
+			"files", len(files),
+			"pages", len(pageIDs),
+		)
 	}
 }
 

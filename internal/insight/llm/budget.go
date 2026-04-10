@@ -27,6 +27,7 @@ var AllowedSubsystems = map[string]bool{
 	"guardian":       true,
 	"synthesizer":    true,
 	"product_intel":  true,
+	"onboarding":     true,
 	"unknown":        true,
 }
 

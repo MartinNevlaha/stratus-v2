@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -441,5 +442,49 @@ func (d *DB) DeleteWikiPageRefs(pageID string) error {
 		return fmt.Errorf("delete wiki page refs: %w", err)
 	}
 	return nil
+}
+
+// WikiPageCount returns the total number of wiki pages.
+func (d *DB) WikiPageCount() (int, error) {
+	var count int
+	err := d.sql.QueryRow("SELECT COUNT(*) FROM wiki_pages").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("wiki page count: %w", err)
+	}
+	return count, nil
+}
+
+// FindPagesBySourceFiles returns wiki page IDs that reference any of the given
+// file paths via wiki_page_refs with source_type='artifact'.
+func (d *DB) FindPagesBySourceFiles(files []string) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(files))
+	args := make([]any, len(files))
+	for i, f := range files {
+		placeholders[i] = "?"
+		args[i] = f
+	}
+
+	query := `SELECT DISTINCT page_id FROM wiki_page_refs
+              WHERE source_type = 'artifact' AND source_id IN (` + strings.Join(placeholders, ",") + `)`
+
+	rows, err := d.sql.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("find pages by source files: %w", err)
+	}
+	defer rows.Close()
+
+	var pageIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("find pages by source files: scan: %w", err)
+		}
+		pageIDs = append(pageIDs, id)
+	}
+	return pageIDs, rows.Err()
 }
 

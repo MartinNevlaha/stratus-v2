@@ -127,10 +127,10 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "retrieve",
-		Description: "Semantic search across code (Vexor) and governance docs. Auto-routes by query type.",
+		Description: "Semantic search across code (Vexor), governance docs, and wiki knowledge pages. Auto-routes by query type.",
 		InputSchema: obj(
-			req("query", "string", "Search query for code or governance docs"),
-			opt("corpus", "string", "Force search corpus: 'code' or 'governance'. Omit for auto-routing."),
+			req("query", "string", "Search query for code, governance docs, or wiki knowledge"),
+			opt("corpus", "string", "Force search corpus: 'code', 'governance', or 'wiki'. Omit for auto-routing across all sources."),
 			opt("top_k", "integer", "Max results (default: 10)"),
 		),
 		Handler: func(args map[string]any) (any, error) {

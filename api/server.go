@@ -17,6 +17,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/insight"
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
 	wiki_engine "github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
@@ -54,6 +55,10 @@ type Server struct {
 	dirtyCh    chan struct{}
 
 	updateMu sync.Mutex
+
+	onboardingMu       sync.Mutex
+	onboardingProgress *onboarding.OnboardingProgress
+	onboardingResult   *onboarding.OnboardingResult
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -387,6 +392,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/wiki/graph", s.handleGetWikiGraph)
 	mux.HandleFunc("POST /api/wiki/vault/sync", s.handleVaultSync)
 	mux.HandleFunc("GET /api/wiki/vault/status", s.handleVaultStatus)
+
+	// Onboarding
+	mux.HandleFunc("POST /api/onboard", s.handleOnboard)
+	mux.HandleFunc("GET /api/onboard/status", s.handleOnboardStatus)
 
 	// Knowledge Base
 	mux.HandleFunc("GET /api/kb/solutions", s.handleListKBSolutions)

@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +30,8 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
+	wiki_engine "github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/mcp"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
@@ -92,6 +95,8 @@ func main() {
 		fmt.Println("stratus v" + Version)
 	case "port":
 		cmdPort()
+	case "onboard":
+		cmdOnboard()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -113,7 +118,8 @@ Commands:
               Flags: --target [claude-code|opencode|both]
   statusline  Emit ANSI status bar (invoked by Claude Code via settings.json)
   version     Print version
-  port        Print the configured API port (reads .stratus.json / STRATUS_PORT env)`)
+  port        Print the configured API port (reads .stratus.json / STRATUS_PORT env)
+  onboard     Auto-generate project documentation wiki pages`)
 }
 
 func cmdServe() {
@@ -167,6 +173,7 @@ func cmdServe() {
 		if eventBus != nil {
 			insightEngine.SetEventBus(eventBus)
 		}
+		insightEngine.SetProjectRoot(cfg.ProjectRoot)
 		ctx, cancel := context.WithCancel(context.Background())
 		insightCancel = cancel
 		if err := insightEngine.Start(ctx); err != nil {
@@ -497,6 +504,12 @@ func cmdInit() {
 
 	// Index governance docs into the DB (best-effort)
 	governanceIndex(wd)
+
+	// Detect non-greenfield project and suggest onboarding.
+	if isNonGreenfield, confidence := onboarding.IsNonGreenfield(wd); isNonGreenfield {
+		fmt.Printf("\n  Detected existing project (confidence: %.0f%%).\n", confidence*100)
+		fmt.Println("  Run `stratus onboard` to auto-generate documentation wiki pages.")
+	}
 
 	printInitSummary(target)
 }
@@ -1364,4 +1377,178 @@ func writeProjectInfo(dir, projectRoot string) {
 	}
 	data, _ := json.MarshalIndent(info, "", "  ")
 	_ = os.WriteFile(infoPath, data, 0o644)
+}
+
+func cmdOnboard() {
+	// Parse flags
+	depth := "standard"
+	outputDir := ""
+	dryRun := false
+	maxPages := 0
+
+	for i := 2; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--depth":
+			if i+1 < len(os.Args) {
+				i++
+				depth = os.Args[i]
+			}
+		case "--output-dir":
+			if i+1 < len(os.Args) {
+				i++
+				outputDir = os.Args[i]
+			}
+		case "--dry-run":
+			dryRun = true
+		case "--max-pages":
+			if i+1 < len(os.Args) {
+				i++
+				n, parseErr := strconv.Atoi(os.Args[i])
+				if parseErr != nil {
+					fmt.Fprintf(os.Stderr, "invalid --max-pages value %q: must be a number\n", os.Args[i])
+					os.Exit(1)
+				}
+				maxPages = n
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", os.Args[i])
+			os.Exit(1)
+		}
+	}
+
+	// Validate depth
+	validDepths := map[string]bool{"shallow": true, "standard": true, "deep": true}
+	if !validDepths[depth] {
+		fmt.Fprintf(os.Stderr, "invalid depth %q, must be one of: shallow, standard, deep\n", depth)
+		os.Exit(1)
+	}
+
+	// Validate output-dir path traversal.
+	if outputDir != "" {
+		abs, absErr := filepath.Abs(outputDir)
+		if absErr != nil {
+			fmt.Fprintf(os.Stderr, "invalid --output-dir: %v\n", absErr)
+			os.Exit(1)
+		}
+		wd, _ := os.Getwd()
+		projectRoot, _ := filepath.Abs(wd)
+		if !strings.HasPrefix(abs, projectRoot+string(filepath.Separator)) && abs != projectRoot {
+			fmt.Fprintf(os.Stderr, "--output-dir must be within the project directory\n")
+			os.Exit(1)
+		}
+	}
+
+	cfg := config.Load()
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("onboard: get working directory: %v", err)
+	}
+
+	fmt.Println("  Scanning project...")
+	profile, err := onboarding.ScanProject(wd, depth)
+	if err != nil {
+		log.Fatalf("onboard: scan project: %v", err)
+	}
+
+	if dryRun {
+		data, _ := json.MarshalIndent(profile, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	// Open database
+	dataDir := cfg.ProjectDataDir()
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		log.Fatalf("onboard: create data dir: %v", err)
+	}
+	database, err := db.Open(filepath.Join(dataDir, "stratus.db"))
+	if err != nil {
+		log.Fatalf("onboard: open database: %v", err)
+	}
+	defer database.Close()
+
+	// Create LLM client
+	llmCfg := llm.Config{
+		Provider:    cfg.LLM.Provider,
+		Model:       cfg.LLM.Model,
+		APIKey:      cfg.LLM.APIKey,
+		BaseURL:     cfg.LLM.BaseURL,
+		Timeout:     cfg.LLM.Timeout,
+		MaxTokens:   cfg.LLM.MaxTokens,
+		Temperature: cfg.LLM.Temperature,
+		MaxRetries:  cfg.LLM.MaxRetries,
+	}.WithEnv()
+
+	if llmCfg.Provider == "" {
+		fmt.Fprintln(os.Stderr, "  Error: No LLM provider configured.")
+		fmt.Fprintln(os.Stderr, "  Set llm.provider and llm.api_key in .stratus.json, or set LLM_API_KEY env var.")
+		os.Exit(1)
+	}
+
+	bareClient, err := llm.NewClient(llmCfg)
+	if err != nil {
+		log.Fatalf("onboard: create LLM client: %v", err)
+	}
+	budgetedClient := llm.NewBudgetedClient(bareClient, database, cfg.Evolution.DailyTokenBudget)
+	llmClient := llm.NewSubsystemClient(budgetedClient, "onboarding", llm.PriorityMedium)
+
+	// Create wiki store, linker, vault sync
+	wikiStore := wiki_engine.NewDBWikiStore(database)
+	linker := wiki_engine.NewLinker(wikiStore)
+	var vaultSync *wiki_engine.VaultSync
+	if cfg.Wiki.VaultPath != "" {
+		vaultSync = wiki_engine.NewVaultSync(wikiStore, cfg.Wiki.VaultPath)
+	}
+
+	// Determine max pages
+	if maxPages <= 0 {
+		maxPages = cfg.Wiki.OnboardingMaxPages
+	}
+	if maxPages <= 0 {
+		maxPages = 20
+	}
+
+	// Run onboarding
+	fmt.Printf("  Generating documentation (depth=%s, max_pages=%d)...\n", depth, maxPages)
+	result, err := onboarding.RunOnboarding(
+		context.Background(),
+		wikiStore,
+		llmClient,
+		linker,
+		vaultSync,
+		profile,
+		onboarding.OnboardingOpts{
+			Depth:     depth,
+			MaxPages:  maxPages,
+			OutputDir: outputDir,
+			ProgressFn: func(p onboarding.OnboardingProgress) {
+				if p.CurrentPage != "" {
+					fmt.Printf("  [%d/%d] %s\n", p.Generated, p.Total, p.CurrentPage)
+				}
+			},
+		},
+	)
+	if err != nil {
+		log.Fatalf("onboard: %v", err)
+	}
+
+	// Print summary
+	fmt.Println()
+	fmt.Printf("  Onboarding complete:\n")
+	fmt.Printf("    Pages generated: %d\n", result.PagesGenerated)
+	if result.PagesSkipped > 0 {
+		fmt.Printf("    Pages skipped:   %d (already exist)\n", result.PagesSkipped)
+	}
+	if result.PagesFailed > 0 {
+		fmt.Printf("    Pages failed:    %d\n", result.PagesFailed)
+	}
+	fmt.Printf("    Links created:   %d\n", result.LinksCreated)
+	fmt.Printf("    Tokens used:     %d\n", result.TokensUsed)
+	if result.VaultSynced {
+		fmt.Printf("    Vault synced:    yes (%s)\n", cfg.Wiki.VaultPath)
+	}
+	if result.OutputDir != "" {
+		fmt.Printf("    Output dir:      %s\n", result.OutputDir)
+	}
+	fmt.Printf("    Duration:        %s\n", result.Duration.Round(time.Millisecond))
 }

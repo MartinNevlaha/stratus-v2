@@ -8,7 +8,7 @@ import (
 
 func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 	query := queryStr(r, "q")
-	corpus := queryStr(r, "corpus") // "code" | "governance" | "" (auto)
+	corpus := queryStr(r, "corpus") // "code" | "governance" | "wiki" | "" (auto)
 	topK := queryInt(r, "top_k", 10)
 
 	if query == "" {
@@ -16,19 +16,27 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if corpus != "" && corpus != "code" && corpus != "governance" && corpus != "wiki" {
+		jsonErr(w, http.StatusBadRequest, "invalid corpus value, must be: code, governance, wiki, or empty")
+		return
+	}
+
 	type result struct {
-		Source   string  `json:"source"`
-		FilePath string  `json:"file_path"`
-		Title    string  `json:"title"`
-		Excerpt  string  `json:"excerpt"`
-		Score    float64 `json:"score"`
-		DocType  string  `json:"doc_type,omitempty"`
+		Source         string  `json:"source"`
+		FilePath       string  `json:"file_path"`
+		Title          string  `json:"title"`
+		Excerpt        string  `json:"excerpt"`
+		Score          float64 `json:"score"`
+		DocType        string  `json:"doc_type,omitempty"`
+		PageType       string  `json:"page_type,omitempty"`
+		StalenessScore float64 `json:"staleness_score,omitempty"`
 	}
 
 	var results []result
 
 	useCode := corpus == "" || corpus == "code"
 	useGov := corpus == "" || corpus == "governance"
+	useWiki := corpus == "" || corpus == "wiki"
 
 	if useCode && s.vexor.Available() {
 		hits, err := s.vexor.Search(query, topK, "auto")
@@ -67,6 +75,43 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if useWiki {
+		// In auto mode, cap wiki results to avoid drowning code/governance.
+		wikiLimit := topK
+		if corpus == "" {
+			wikiLimit = topK / 3
+			if wikiLimit < 1 {
+				wikiLimit = 1
+			}
+		}
+
+		wikiPages, err := s.db.SearchWikiPages(query, "", wikiLimit)
+		if err == nil {
+			log.Printf("[wiki search] query=%q results=%d", query, len(wikiPages))
+			for i, p := range wikiPages {
+				// Synthetic score based on result position (FTS5 already orders by rank).
+				score := 1.0 - float64(i)*0.1
+				if score < 0.1 {
+					score = 0.1
+				}
+				// Penalize stale pages by 50%.
+				if p.StalenessScore > 0.7 {
+					score *= 0.5
+				}
+				results = append(results, result{
+					Source:         "wiki",
+					Title:          p.Title,
+					Excerpt:        truncate(p.Content, 500),
+					Score:          score,
+					PageType:       p.PageType,
+					StalenessScore: p.StalenessScore,
+				})
+			}
+		} else {
+			log.Printf("[wiki search] query=%q error=%v", query, err)
+		}
+	}
+
 	if results == nil {
 		results = []result{}
 	}
@@ -80,9 +125,12 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRetrieveStatus(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.db.GovernanceStats()
+	wikiCount, _ := s.db.WikiPageCount()
 	json200(w, map[string]any{
 		"vexor_available":      s.vexor.Available(),
 		"governance_available": true,
+		"wiki_available":       wikiCount > 0,
+		"wiki_page_count":      wikiCount,
 		"governance_stats":     stats,
 	})
 }

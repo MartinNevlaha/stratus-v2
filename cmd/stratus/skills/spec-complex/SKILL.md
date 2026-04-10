@@ -71,6 +71,8 @@ Delegate to the `Explore` agent via Task tool (`subagent_type: "Explore"`) with 
 
 Do NOT write code during exploration.
 
+Additionally, call `mcp__stratus__retrieve` with the requirement keywords and `corpus` omitted (auto-routing) to surface any existing wiki knowledge pages about the project architecture, modules, and conventions. Note any results with `staleness_score > 0.7` as potentially outdated.
+
 ### STEP 4 — Strategic Analysis
 
 Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis, constraints, technology landscape.

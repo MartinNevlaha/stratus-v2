@@ -36,6 +36,8 @@ import type {
   EvolutionHypothesis,
   WikiConfig,
   EvolutionConfig,
+  OnboardingProgress,
+  OnboardingResult,
 } from './types'
 
 const BASE = '/api'
@@ -344,3 +346,12 @@ export const getWikiConfig = () => get<WikiConfig>('/wiki/config')
 
 export const updateWikiConfig = (cfg: WikiConfig) =>
   post<WikiConfig>('/wiki/config', cfg)
+
+// Onboarding
+export async function triggerOnboarding(opts: { depth?: string; output_dir?: string; max_pages?: number }): Promise<{ job_id: string; status: string; message: string }> {
+  return post('/onboard', opts)
+}
+
+export async function getOnboardingStatus(): Promise<OnboardingProgress & { result?: OnboardingResult }> {
+  return get('/onboard/status')
+}

@@ -47,6 +47,8 @@ Delegate to the `Explore` agent via Task tool (`subagent_type: "Explore"`) with 
 
 Do NOT write code during exploration.
 
+Additionally, call `mcp__stratus__retrieve` with the requirement keywords to check if wiki has relevant architecture documentation, module descriptions, or prior design decisions that should inform the implementation plan.
+
 ### STEP 3 — Governance Check
 
 Delegate to `delivery-strategic-architect` or `delivery-system-architect` (Task tool) to review the requirement against project governance.

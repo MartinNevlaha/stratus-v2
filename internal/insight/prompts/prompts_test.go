@@ -49,3 +49,35 @@ func TestConstants_NonEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestOnboardingPrompts_NonEmpty(t *testing.T) {
+	tests := []struct {
+		name   string
+		prompt string
+	}{
+		{"OnboardingArchitecture", OnboardingArchitecture},
+		{"OnboardingModule", OnboardingModule},
+		{"OnboardingConventions", OnboardingConventions},
+		{"OnboardingBuildGuide", OnboardingBuildGuide},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.prompt == "" {
+				t.Errorf("%s must be a non-empty string", tt.name)
+			}
+		})
+	}
+}
+
+func TestOnboardingPrompts_ComposeWithObsidian(t *testing.T) {
+	result := Compose(OnboardingArchitecture, ObsidianMarkdown)
+	if result == "" {
+		t.Fatal("Compose(OnboardingArchitecture, ObsidianMarkdown) must return a non-empty string")
+	}
+	if !strings.Contains(result, OnboardingArchitecture) {
+		t.Error("result must contain OnboardingArchitecture")
+	}
+	if !strings.Contains(result, ObsidianMarkdown) {
+		t.Error("result must contain ObsidianMarkdown")
+	}
+}

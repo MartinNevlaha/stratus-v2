@@ -1,5 +1,5 @@
 {
-  "port": 41778,
+  "port": 41780,
   "data_dir": "/home/martin/.stratus/data",
   "project_root": "/home/martin/Documents/projects/stratus-v2",
   "vexor": {

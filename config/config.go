@@ -62,6 +62,8 @@ type WikiConfig struct {
 	MaxPageSizeTokens  int     `json:"max_page_size_tokens"`
 	VaultPath          string  `json:"vault_path"`
 	VaultSyncOnSave    bool    `json:"vault_sync_on_save"`
+	OnboardingDepth    string  `json:"onboarding_depth"`
+	OnboardingMaxPages int     `json:"onboarding_max_pages"`
 }
 
 // EvolutionConfig configures the autonomous rule evolution subsystem.
@@ -158,6 +160,8 @@ func Default() Config {
 			MaxPageSizeTokens:  4096,
 			VaultPath:          "",
 			VaultSyncOnSave:    true,
+			OnboardingDepth:    "standard",
+			OnboardingMaxPages: 20,
 		},
 		Evolution: EvolutionConfig{
 			Enabled:             false,

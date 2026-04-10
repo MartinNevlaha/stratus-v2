@@ -726,3 +726,97 @@ func TestGetWikiGraph_EmptyDB(t *testing.T) {
 		t.Errorf("expected 0 links, got %d", len(links))
 	}
 }
+
+// --- WikiPageCount ---
+
+func TestWikiPageCount(t *testing.T) {
+	database := openTestDB(t)
+
+	for i := 0; i < 3; i++ {
+		p := &WikiPage{PageType: "summary", Title: "Page", Status: "published", GeneratedBy: "ingest"}
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage: %v", err)
+		}
+	}
+
+	count, err := database.WikiPageCount()
+	if err != nil {
+		t.Fatalf("WikiPageCount: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("WikiPageCount: got %d, want 3", count)
+	}
+}
+
+func TestWikiPageCount_Empty(t *testing.T) {
+	database := openTestDB(t)
+
+	count, err := database.WikiPageCount()
+	if err != nil {
+		t.Fatalf("WikiPageCount: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("WikiPageCount: got %d, want 0", count)
+	}
+}
+
+// --- FindPagesBySourceFiles ---
+
+func TestFindPagesBySourceFiles(t *testing.T) {
+	database := openTestDB(t)
+
+	page := &WikiPage{PageType: "summary", Title: "Main", Status: "published", GeneratedBy: "ingest"}
+	if err := database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+
+	ref := &WikiPageRef{PageID: page.ID, SourceType: "artifact", SourceID: "main.go", Excerpt: ""}
+	if err := database.SaveWikiPageRef(ref); err != nil {
+		t.Fatalf("SaveWikiPageRef: %v", err)
+	}
+
+	ids, err := database.FindPagesBySourceFiles([]string{"main.go"})
+	if err != nil {
+		t.Fatalf("FindPagesBySourceFiles: %v", err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("expected 1 page ID, got %d", len(ids))
+	}
+	if ids[0] != page.ID {
+		t.Errorf("got page ID %q, want %q", ids[0], page.ID)
+	}
+}
+
+func TestFindPagesBySourceFiles_Empty(t *testing.T) {
+	database := openTestDB(t)
+
+	ids, err := database.FindPagesBySourceFiles([]string{})
+	if err != nil {
+		t.Fatalf("FindPagesBySourceFiles empty: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected nil/empty result, got %v", ids)
+	}
+}
+
+func TestFindPagesBySourceFiles_NoMatches(t *testing.T) {
+	database := openTestDB(t)
+
+	page := &WikiPage{PageType: "summary", Title: "Other", Status: "published", GeneratedBy: "ingest"}
+	if err := database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+
+	ref := &WikiPageRef{PageID: page.ID, SourceType: "artifact", SourceID: "server.go", Excerpt: ""}
+	if err := database.SaveWikiPageRef(ref); err != nil {
+		t.Fatalf("SaveWikiPageRef: %v", err)
+	}
+
+	ids, err := database.FindPagesBySourceFiles([]string{"nonexistent.go"})
+	if err != nil {
+		t.Fatalf("FindPagesBySourceFiles: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected empty result, got %v", ids)
+	}
+}

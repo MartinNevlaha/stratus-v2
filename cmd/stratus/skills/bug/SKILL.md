@@ -50,6 +50,8 @@ agent_id: "delivery-debugger"
 
 The debugger will return a structured diagnosis with symptom, root cause, classification, evidence, and recommended fix.
 
+Before or alongside the debugger, call `mcp__stratus__retrieve` with the error/symptom keywords to check if wiki has documented solutions, module documentation, or known issues related to this area of the codebase.
+
 ### STEP 3 — Assess Severity — Intelligent Decision
 
 Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
