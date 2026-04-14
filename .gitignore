@@ -8,6 +8,10 @@
 # Data directory
 .stratus/
 
+# Local project config — may contain LLM API keys
+.stratus.json
+**/.stratus.json
+
 # Air hot-reload build output
 /tmp/
 build-errors.log
