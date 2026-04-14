@@ -15,6 +15,9 @@ type Config struct {
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
 	MaxRetries  int     `json:"max_retries,omitempty"`
+	// Concurrency limits simultaneous in-flight requests to this provider.
+	// 0 = unlimited; 1 = serialized (required for z.ai free tier); >1 = bounded.
+	Concurrency int `json:"concurrency,omitempty"`
 }
 
 func DefaultConfig() Config {
@@ -73,6 +76,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaxRetries < 0 || c.MaxRetries > 10 {
 		return fmt.Errorf("llm: max_retries must be between 0 and 10, got %d", c.MaxRetries)
+	}
+	if c.Concurrency < 0 {
+		return fmt.Errorf("llm: concurrency must be >= 0, got %d", c.Concurrency)
 	}
 	return nil
 }

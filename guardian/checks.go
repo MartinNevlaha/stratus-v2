@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -23,8 +24,70 @@ type alertInput struct {
 	Metadata map[string]any
 }
 
+// alertMessages maps lang → alertType → format string.
+// Add a new outer key for each supported language. The "en" entry is the
+// canonical fallback; every type present in "en" should also appear in "sk".
+var alertMessages = map[string]map[string]string{
+	"en": {
+		"stale_workflow":     `Workflow "%s" has been in phase "%s" for over %dh`,
+		"stale_worker":       `Swarm worker %s (%s) has not heartbeated for >%v — marked stale`,
+		"reviewer_timeout":   `Mission "%s" has been in 'verifying' for >%dmin — reviewer may be stuck`,
+		"ticket_timeout":     `Ticket "%s" timed out after >%dmin in_progress — marked failed`,
+		"memory_health":      `Memory store has %d events (threshold: %d). Consider running /learn to distill and prune.`,
+		"tech_debt":          `Tech debt grew by %d files with TODO/FIXME/HACK (baseline: %d, now: %d)`,
+		"coverage_drift":     `Test coverage dropped by %.1f%% (baseline: %.1f%%, now: %.1f%%)`,
+		"governance_violation": `Possible governance violation in %s: %s`,
+		"governance_match":   `Changed file %s matches governance rules: %s — review manually`,
+	},
+	"sk": {
+		"stale_workflow":     `Workflow "%s" je v fáze "%s" dlhšie ako %d hodín`,
+		"stale_worker":       `Swarm worker %s (%s) neodoslal heartbeat dlhšie ako %v — označený ako neaktívny`,
+		"reviewer_timeout":   `Misia "%s" je v stave 'verifying' dlhšie ako %d min — recenzent môže byť zaseknutý`,
+		"ticket_timeout":     `Ticket "%s" vypršal po viac ako %d min v stave in_progress — označený ako zlyhaný`,
+		"memory_health":      `Pamäťové úložisko obsahuje %d udalostí (prahová hodnota: %d). Zvážte spustenie /learn na destilláciu a čistenie.`,
+		"tech_debt":          `Technický dlh narástol o %d súborov s TODO/FIXME/HACK (základ: %d, teraz: %d)`,
+		"coverage_drift":     `Pokrytie testami kleslo o %.1f%% (základ: %.1f%%, teraz: %.1f%%)`,
+		"governance_violation": `Možné porušenie pravidiel správy v %s: %s`,
+		"governance_match":   `Zmenený súbor %s zodpovedá pravidlám správy: %s — skontrolujte manuálne`,
+	},
+}
+
+// alertMessage looks up the format string for lang/alertType, falls back to
+// "en" if lang is unknown, and formats it with the provided args. If alertType
+// is not found even in "en", it returns a best-effort fallback string and logs
+// a warning.
+func alertMessage(lang, alertType string, args ...any) string {
+	byType, ok := alertMessages[lang]
+	if !ok {
+		slog.Warn("guardian: unknown language, falling back to en",
+			"lang", lang,
+			"alert_type", alertType,
+		)
+		byType = alertMessages["en"]
+	}
+
+	format, ok := byType[alertType]
+	if !ok {
+		// Try English fallback before giving up.
+		format, ok = alertMessages["en"][alertType]
+		if !ok {
+			slog.Warn("guardian: unknown alert type, using fallback message",
+				"lang", lang,
+				"alert_type", alertType,
+			)
+			return fmt.Sprintf("guardian alert: %s", alertType)
+		}
+		slog.Warn("guardian: alert type missing in language, falling back to en",
+			"lang", lang,
+			"alert_type", alertType,
+		)
+	}
+
+	return fmt.Sprintf(format, args...)
+}
+
 // checkStaleWorkflows flags workflows that have been in the same phase too long.
-func checkStaleWorkflows(coord *orchestration.Coordinator, cfg config.GuardianConfig) []alertInput {
+func checkStaleWorkflows(coord *orchestration.Coordinator, cfg config.GuardianConfig, lang string) []alertInput {
 	workflows, err := coord.ListActive()
 	if err != nil || len(workflows) == 0 {
 		return nil
@@ -50,7 +113,7 @@ func checkStaleWorkflows(coord *orchestration.Coordinator, cfg config.GuardianCo
 			alerts = append(alerts, alertInput{
 				Type:     "stale_workflow",
 				Severity: "warning",
-				Message:  fmt.Sprintf("Workflow \"%s\" has been in phase \"%s\" for over %dh", w.Title, w.Phase, cfg.StaleWorkflowHours),
+				Message:  alertMessage(lang, "stale_workflow", w.Title, string(w.Phase), cfg.StaleWorkflowHours),
 				Metadata: map[string]any{
 					"dedup_key":   w.ID,
 					"workflow_id": w.ID,
@@ -64,7 +127,7 @@ func checkStaleWorkflows(coord *orchestration.Coordinator, cfg config.GuardianCo
 }
 
 // checkStaleWorkers flags swarm workers that have stopped heartbeating.
-func checkStaleWorkers(database *db.DB, cfg config.GuardianConfig) []alertInput {
+func checkStaleWorkers(database *db.DB, cfg config.GuardianConfig, lang string) []alertInput {
 	threshold := 5 * time.Minute
 	if cfg.StaleWorkflowHours > 0 {
 		// Use a fraction of the stale workflow threshold for workers (workers should heartbeat more frequently)
@@ -86,7 +149,7 @@ func checkStaleWorkers(database *db.DB, cfg config.GuardianConfig) []alertInput 
 		alerts = append(alerts, alertInput{
 			Type:     "stale_worker",
 			Severity: "warning",
-			Message:  fmt.Sprintf("Swarm worker %s (%s) has not heartbeated for >%v — marked stale", w.ID, w.AgentType, threshold),
+			Message:  alertMessage(lang, "stale_worker", w.ID, w.AgentType, threshold),
 			Metadata: map[string]any{
 				"dedup_key":      "stale_worker_" + w.ID,
 				"worker_id":      w.ID,
@@ -102,7 +165,7 @@ func checkStaleWorkers(database *db.DB, cfg config.GuardianConfig) []alertInput 
 // checkStaleVerifying alerts when a mission has been stuck in 'verifying' longer
 // than cfg.ReviewerTimeoutMinutes (default 30). This catches reviewer agents that
 // silently hang without producing an evidence verdict.
-func checkStaleVerifying(database *db.DB, cfg config.GuardianConfig) []alertInput {
+func checkStaleVerifying(database *db.DB, cfg config.GuardianConfig, lang string) []alertInput {
 	minutes := cfg.ReviewerTimeoutMinutes
 	if minutes <= 0 {
 		minutes = 30
@@ -119,7 +182,7 @@ func checkStaleVerifying(database *db.DB, cfg config.GuardianConfig) []alertInpu
 		alerts = append(alerts, alertInput{
 			Type:     "reviewer_timeout",
 			Severity: "warning",
-			Message:  fmt.Sprintf("Mission \"%s\" has been in 'verifying' for >%dmin — reviewer may be stuck", m.Title, minutes),
+			Message:  alertMessage(lang, "reviewer_timeout", m.Title, minutes),
 			Metadata: map[string]any{
 				"dedup_key":       "reviewer_timeout_" + m.ID,
 				"mission_id":      m.ID,
@@ -132,7 +195,7 @@ func checkStaleVerifying(database *db.DB, cfg config.GuardianConfig) []alertInpu
 
 // checkOverdueTickets alerts when a ticket has been in_progress longer than
 // cfg.TicketTimeoutMinutes (default 30) and marks it failed to unblock the worker.
-func checkOverdueTickets(database *db.DB, cfg config.GuardianConfig) []alertInput {
+func checkOverdueTickets(database *db.DB, cfg config.GuardianConfig, lang string) []alertInput {
 	minutes := cfg.TicketTimeoutMinutes
 	if minutes <= 0 {
 		minutes = 30
@@ -162,7 +225,7 @@ func checkOverdueTickets(database *db.DB, cfg config.GuardianConfig) []alertInpu
 		alerts = append(alerts, alertInput{
 			Type:     "ticket_timeout",
 			Severity: "warning",
-			Message:  fmt.Sprintf("Ticket \"%s\" timed out after >%dmin in_progress — marked failed", t.Title, minutes),
+			Message:  alertMessage(lang, "ticket_timeout", t.Title, minutes),
 			Metadata: map[string]any{
 				"dedup_key":  "ticket_timeout_" + t.ID,
 				"ticket_id":  t.ID,
@@ -175,7 +238,7 @@ func checkOverdueTickets(database *db.DB, cfg config.GuardianConfig) []alertInpu
 }
 
 // checkMemoryHealth warns when the events table grows too large.
-func checkMemoryHealth(database *db.DB, cfg config.GuardianConfig) []alertInput {
+func checkMemoryHealth(database *db.DB, cfg config.GuardianConfig, lang string) []alertInput {
 	count, err := database.CountEvents()
 	if err != nil || count < cfg.MemoryThreshold {
 		return nil
@@ -183,7 +246,7 @@ func checkMemoryHealth(database *db.DB, cfg config.GuardianConfig) []alertInput 
 	return []alertInput{{
 		Type:     "memory_health",
 		Severity: "info",
-		Message:  fmt.Sprintf("Memory store has %d events (threshold: %d). Consider running /learn to distill and prune.", count, cfg.MemoryThreshold),
+		Message:  alertMessage(lang, "memory_health", count, cfg.MemoryThreshold),
 		Metadata: map[string]any{
 			"dedup_key": "memory_health",
 			"count":     count,
@@ -193,7 +256,7 @@ func checkMemoryHealth(database *db.DB, cfg config.GuardianConfig) []alertInput 
 }
 
 // checkTechDebt counts TODO/FIXME/HACK comments and compares to baseline.
-func checkTechDebt(database *db.DB, projRoot string, cfg config.GuardianConfig) []alertInput {
+func checkTechDebt(database *db.DB, projRoot string, cfg config.GuardianConfig, lang string) []alertInput {
 	out, err := runCmd(projRoot, "grep", "-rlE", "--include=*.go", "--include=*.ts", "--include=*.svelte", "TODO|FIXME|HACK", ".")
 	if err != nil && len(out) == 0 {
 		return nil
@@ -221,7 +284,7 @@ func checkTechDebt(database *db.DB, projRoot string, cfg config.GuardianConfig) 
 		return []alertInput{{
 			Type:     "tech_debt",
 			Severity: "warning",
-			Message:  fmt.Sprintf("Tech debt grew by %d files with TODO/FIXME/HACK (baseline: %d, now: %d)", delta, baseline, fileCount),
+			Message:  alertMessage(lang, "tech_debt", delta, baseline, fileCount),
 			Metadata: map[string]any{
 				"dedup_key":  "tech_debt",
 				"file_count": fileCount,
@@ -239,7 +302,7 @@ func checkTechDebt(database *db.DB, projRoot string, cfg config.GuardianConfig) 
 }
 
 // checkCoverageDrift runs go test -cover and flags if coverage dropped.
-func checkCoverageDrift(database *db.DB, projRoot string, cfg config.GuardianConfig) []alertInput {
+func checkCoverageDrift(database *db.DB, projRoot string, cfg config.GuardianConfig, lang string) []alertInput {
 	out, err := runCmdTimeout(projRoot, 120*time.Second, "go", "test", "-cover", "./...")
 	if err != nil && len(out) == 0 {
 		return nil
@@ -280,7 +343,7 @@ func checkCoverageDrift(database *db.DB, projRoot string, cfg config.GuardianCon
 		return []alertInput{{
 			Type:     "coverage_drift",
 			Severity: "warning",
-			Message:  fmt.Sprintf("Test coverage dropped by %.1f%% (baseline: %.1f%%, now: %.1f%%)", drop, baseline, current),
+			Message:  alertMessage(lang, "coverage_drift", drop, baseline, current),
 			Metadata: map[string]any{
 				"dedup_key": "coverage_drift",
 				"baseline":  baseline,
@@ -299,7 +362,7 @@ func checkCoverageDrift(database *db.DB, projRoot string, cfg config.GuardianCon
 
 // checkGovernanceViolations checks recently modified files against governance rules.
 // Uses LLM when configured; falls back to FTS-only match.
-func checkGovernanceViolations(ctx context.Context, database *db.DB, llm guardianLLM, projRoot string) []alertInput {
+func checkGovernanceViolations(ctx context.Context, database *db.DB, llm guardianLLM, projRoot string, lang string) []alertInput {
 	// Get recently changed files from git.
 	// Use git log instead of diff HEAD~1 to handle single-commit repos gracefully.
 	out, err := runCmd(projRoot, "git", "log", "--diff-filter=d", "--name-only", "-1", "--format=")
@@ -370,7 +433,7 @@ func checkGovernanceViolations(ctx context.Context, database *db.DB, llm guardia
 			alerts = append(alerts, alertInput{
 				Type:     "governance_violation",
 				Severity: "warning",
-				Message:  fmt.Sprintf("Possible governance violation in %s: %s", file, reason),
+				Message:  alertMessage(lang, "governance_violation", file, reason),
 				Metadata: map[string]any{
 					"dedup_key": "gov_" + file,
 					"file":      file,
@@ -386,7 +449,7 @@ func checkGovernanceViolations(ctx context.Context, database *db.DB, llm guardia
 			alerts = append(alerts, alertInput{
 				Type:     "governance_violation",
 				Severity: "info",
-				Message:  fmt.Sprintf("Changed file %s matches governance rules: %s — review manually", file, strings.Join(ruleNames, ", ")),
+				Message:  alertMessage(lang, "governance_match", file, strings.Join(ruleNames, ", ")),
 				Metadata: map[string]any{
 					"dedup_key": "gov_" + file,
 					"file":      file,

@@ -22,7 +22,7 @@ Read, Grep, Glob, Bash (read-only: git log, cat, ls)
 
 ## Workflow
 
-1. **Read the codebase first** - understand existing component boundaries, data flows, and interfaces. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find architecture-relevant code. Never design in a vacuum.
+1. **Read the codebase first** - understand existing component boundaries, data flows, and interfaces. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find architecture-relevant code. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for evolution findings and existing knowledge relevant to this task. Never design in a vacuum.
 2. **Identify affected components** - which existing modules, services, or layers does this change touch?
 3. **Design the solution** - produce a Technical Design Document (TDD).
 4. **Flag breaking changes** - explicitly mark any interface changes that require migration.

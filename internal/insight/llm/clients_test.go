@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -48,13 +49,8 @@ func newOpenAISuccessHandler(content, model string, promptTokens, completionToke
 func newOpenAIErrorHandler(statusCode int, message string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(openAIError{
-			Error: struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-				Code    string `json:"code"`
-			}{Message: message},
-		})
+		// Write the standard OpenAI object-shaped error directly.
+		fmt.Fprintf(w, `{"error":{"message":%q,"type":"","code":""}}`, message)
 	}
 }
 
@@ -728,9 +724,108 @@ func TestNewClient_WithRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient with retries: %v", err)
 	}
-	// Should be wrapped in ClientWithRetry
-	if _, ok := client.(*ClientWithRetry); !ok {
-		t.Error("expected *ClientWithRetry when MaxRetries > 0")
+	// semaphore is always the outermost wrapper (even when Concurrency==0 it is a
+	// no-op semaphoreClient). The retry wrapper lives inside it.
+	if _, ok := client.(*semaphoreClient); !ok {
+		t.Error("expected outermost wrapper to be *semaphoreClient when MaxRetries > 0")
+	}
+}
+
+func TestNewClient_SemaphoreOuterRetryInner(t *testing.T) {
+	// With Concurrency=1 and MaxRetries=2 the wrap order must be
+	// semaphoreClient( ClientWithRetry( innerClient ) ).
+	// This ensures a single semaphore slot is held for the full duration of all
+	// retry attempts, not re-acquired on every attempt.
+	cfg := Config{Provider: "ollama", Model: "llama3.1", MaxRetries: 2, Concurrency: 1}
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	sc, ok := client.(*semaphoreClient)
+	if !ok {
+		t.Fatalf("outermost wrapper = %T, want *semaphoreClient", client)
+	}
+	if _, ok := sc.inner.(*ClientWithRetry); !ok {
+		t.Errorf("inner of semaphoreClient = %T, want *ClientWithRetry", sc.inner)
+	}
+}
+
+func TestNewClient_SemaphoreHeldAcrossRetries(t *testing.T) {
+	// Goroutine A: Concurrency=1, returns 429 with short RetryAfter twice then succeeds.
+	// Goroutine B: same endpoint, tries to complete concurrently.
+	// Expected: B cannot start until A has exhausted retries AND released the slot.
+	//
+	// We verify this by observing that B's call does not begin until A finishes.
+	cfg := Config{Provider: "ollama", Model: "llama3.1", MaxRetries: 2, Concurrency: 1}
+
+	retryAfter := 20 * time.Millisecond
+
+	aAttempts := 0
+	innerA := &countingClient{
+		fn: func(i int) (*CompletionResponse, error) {
+			aAttempts++
+			if i < 2 {
+				return nil, &RateLimitedError{RetryAfter: retryAfter}
+			}
+			return &CompletionResponse{Content: "a-done"}, nil
+		},
+	}
+
+	// Build the client stack manually with the same wrap order as NewClient.
+	retryA := NewClientWithRetry(innerA, RetryConfig{
+		MaxRetries:  cfg.MaxRetries,
+		InitialWait: retryAfter,
+		MaxWait:     retryAfter * 10,
+		Multiplier:  2.0,
+	})
+	sem := newSemaphoreClient(retryA, cfg)
+
+	// B uses the SAME semaphore (same provider key) but a different inner client.
+	bStarted := make(chan struct{})
+	innerB := &countingClient{
+		fn: func(i int) (*CompletionResponse, error) {
+			close(bStarted)
+			return &CompletionResponse{Content: "b-done"}, nil
+		},
+	}
+	semB := &semaphoreClient{inner: innerB, sem: sem.sem}
+
+	// Start A.
+	aDone := make(chan error, 1)
+	go func() {
+		_, err := sem.Complete(context.Background(), CompletionRequest{})
+		aDone <- err
+	}()
+
+	// Give A a moment to acquire the semaphore.
+	time.Sleep(5 * time.Millisecond)
+
+	// Start B.
+	bDone := make(chan error, 1)
+	go func() {
+		_, err := semB.Complete(context.Background(), CompletionRequest{})
+		bDone <- err
+	}()
+
+	// Wait for A to finish.
+	if err := <-aDone; err != nil {
+		t.Fatalf("goroutine A failed: %v", err)
+	}
+
+	// Only after A is done should B be able to start.
+	select {
+	case <-bStarted:
+		// good
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("goroutine B never started — semaphore was not released by A")
+	}
+
+	if err := <-bDone; err != nil {
+		t.Fatalf("goroutine B failed: %v", err)
+	}
+
+	if aAttempts != 3 { // 1 initial + 2 retries
+		t.Errorf("goroutine A attempts = %d, want 3", aAttempts)
 	}
 }
 
@@ -753,4 +848,130 @@ func TestMustNewClient_Panics(t *testing.T) {
 		}
 	}()
 	MustNewClient(Config{Provider: "bad_provider", Model: "m", APIKey: "k"})
+}
+
+// ---------------------------------------------------------------------------
+// RateLimitedError / 429 tests
+// ---------------------------------------------------------------------------
+
+func TestZAIClient_429_ReturnsRateLimitedError_SecondsForm(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "zai", Model: "glm-5", APIKey: "k", BaseURL: srv.URL}
+	client, _ := NewZAIClient(cfg)
+
+	_, err := client.Complete(context.Background(), CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error for 429")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("expected ErrRateLimited, got: %v", err)
+	}
+	var rle *RateLimitedError
+	if !errors.As(err, &rle) {
+		t.Fatal("expected *RateLimitedError")
+	}
+	if rle.RetryAfter != 5*time.Second {
+		t.Errorf("RetryAfter = %v, want 5s", rle.RetryAfter)
+	}
+}
+
+func TestZAIClient_429_ReturnsRateLimitedError_HTTPDateForm(t *testing.T) {
+	retryAt := time.Now().Add(3 * time.Second).UTC()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", retryAt.Format(http.TimeFormat))
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "zai", Model: "glm-5", APIKey: "k", BaseURL: srv.URL}
+	client, _ := NewZAIClient(cfg)
+
+	_, err := client.Complete(context.Background(), CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("expected ErrRateLimited, got: %v", err)
+	}
+	var rle *RateLimitedError
+	errors.As(err, &rle)
+	// HTTP-date has 1s granularity; allow ±2s.
+	if rle.RetryAfter < 1*time.Second || rle.RetryAfter > 5*time.Second {
+		t.Errorf("RetryAfter = %v, expected ~3s", rle.RetryAfter)
+	}
+}
+
+func TestOpenAIClient_429_ReturnsRateLimitedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "10")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "openai", Model: "gpt-4", APIKey: "k", BaseURL: srv.URL}
+	client, _ := NewOpenAIClient(cfg)
+
+	_, err := client.Complete(context.Background(), CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("expected ErrRateLimited, got: %v", err)
+	}
+	var rle *RateLimitedError
+	errors.As(err, &rle)
+	if rle.RetryAfter != 10*time.Second {
+		t.Errorf("RetryAfter = %v, want 10s", rle.RetryAfter)
+	}
+}
+
+func TestRateLimitedError_Is_ErrRateLimited(t *testing.T) {
+	err := &RateLimitedError{RetryAfter: 2 * time.Second}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Error("errors.Is(RateLimitedError, ErrRateLimited) must return true")
+	}
+}
+
+func TestParseRetryAfter_NegativeSeconds_ReturnsZero(t *testing.T) {
+	h := http.Header{}
+	h.Set("Retry-After", "-3")
+	d := parseRetryAfter(h)
+	if d != 0 {
+		t.Errorf("parseRetryAfter(-3) = %v, want 0", d)
+	}
+}
+
+func TestParseRetryAfter_PositiveSeconds_ReturnsCorrectDuration(t *testing.T) {
+	h := http.Header{}
+	h.Set("Retry-After", "5")
+	d := parseRetryAfter(h)
+	if d != 5*time.Second {
+		t.Errorf("parseRetryAfter(5) = %v, want 5s", d)
+	}
+}
+
+func TestConfig_Validate_NegativeConcurrency(t *testing.T) {
+	cfg := Config{Provider: "ollama", Model: "m", Concurrency: -1}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for negative concurrency")
+	}
+}
+
+func TestNewClient_WithConcurrency_WrapsInSemaphore(t *testing.T) {
+	cfg := Config{Provider: "ollama", Model: "llama3.1", Concurrency: 1}
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, ok := client.(*semaphoreClient); !ok {
+		t.Error("expected *semaphoreClient when Concurrency > 0")
+	}
 }

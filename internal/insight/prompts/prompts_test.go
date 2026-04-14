@@ -81,3 +81,49 @@ func TestOnboardingPrompts_ComposeWithObsidian(t *testing.T) {
 		t.Error("result must contain ObsidianMarkdown")
 	}
 }
+
+func TestWithLanguage_Slovak(t *testing.T) {
+	base := "You are a helpful assistant."
+	result := WithLanguage(base, "sk")
+	if !strings.HasSuffix(result, "Respond in Slovak.") {
+		t.Errorf("expected suffix 'Respond in Slovak.', got: %q", result)
+	}
+	if !strings.Contains(result, base) {
+		t.Errorf("base string not preserved in result: %q", result)
+	}
+}
+
+func TestWithLanguage_EnglishDefault(t *testing.T) {
+	base := "You are a helpful assistant."
+
+	tests := []struct {
+		lang   string
+		label  string
+	}{
+		{"en", "English"},
+		{"", "empty string"},
+		{"fr", "unknown language"},
+		{"SK", "wrong case"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.label, func(t *testing.T) {
+			result := WithLanguage(base, tt.lang)
+			if !strings.HasSuffix(result, "Respond in English.") {
+				t.Errorf("lang=%q: expected suffix 'Respond in English.', got: %q", tt.lang, result)
+			}
+			if !strings.Contains(result, base) {
+				t.Errorf("lang=%q: base string not preserved in result: %q", tt.lang, result)
+			}
+		})
+	}
+}
+
+func TestWithLanguage_DoesNotMutateBase(t *testing.T) {
+	base := HypothesisGeneration
+	_ = WithLanguage(base, "sk")
+	// Verify the original constant is unchanged
+	if HypothesisGeneration != base {
+		t.Error("WithLanguage mutated the HypothesisGeneration constant")
+	}
+}

@@ -25,9 +25,26 @@ Generate well-structured markdown wiki pages. Use Obsidian-compatible syntax inc
 	OnboardingConventions = `You are a technical documentation author. Given project configuration files, detected code patterns, and test structure information, generate a project conventions wiki page. Include: coding standards, file organization patterns, naming conventions, testing approach, error handling patterns, and any project-specific idioms. Use Obsidian-compatible markdown.`
 
 	OnboardingBuildGuide = `You are a technical documentation author. Given build configuration files (Makefile, Dockerfile, CI configs, entry points), generate a build and deployment guide wiki page. Include: prerequisites, build commands, test commands, deployment steps, and environment setup. Use Obsidian-compatible markdown.`
+
+	WikiLinkSuggestion = `You are analyzing a wiki page. Identify at most 5 reusable concepts, entities, or topics that appear in the content and DESERVE their own dedicated wiki page but don't have one yet. Only suggest non-trivial, named concepts (not generic terms like "system" or "user"). Return a strict JSON array; no preamble. Each element must have: title (string, canonical name), rationale (string, one sentence why it deserves its own page), page_type (one of: concept, entity), tags (string array, may be empty).`
+
+	WikiTopicSynthesis = `You are a knowledge synthesizer. Several raw sources (notes, transcripts, article extracts) belong to a single topic. Synthesize them into a single coherent TOPIC wiki page. Structure: "## TL;DR" (3-5 sentences), "## Key Concepts" (bullet list with short definitions), "## Open Questions" (bullet list, may be empty), "## Sources" (bullet list of source titles). Use Obsidian-compatible markdown with [[wikilinks]] to related concepts.`
 )
 
 // Compose concatenates prompt fragments with double-newline separators.
 func Compose(parts ...string) string {
 	return strings.Join(parts, "\n\n")
+}
+
+// WithLanguage appends a language instruction to base and returns the result as
+// a new string. The original base string is never mutated.
+// When lang is "sk" the suffix "Respond in Slovak." is appended.
+// For any other value (including "en", empty, or unknown) the suffix
+// "Respond in English." is appended, making this function safe to call with
+// any language code without breaking existing English-only behaviour.
+func WithLanguage(base, lang string) string {
+	if lang == "sk" {
+		return base + "\n\nRespond in Slovak."
+	}
+	return base + "\n\nRespond in English."
 }

@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MartinNevlaha/stratus-v2/guardian"
+	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	insightllm "github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 )
 
@@ -221,10 +222,8 @@ func (s *Server) handleAnalyzeWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	result := calculateRisk(req, history)
 
-	// Enrich with LLM analysis if configured
-	gcfg := s.cfg.Guardian
-	llm := guardian.NewLLMClient(gcfg.LLMEndpoint, gcfg.LLMAPIKey, gcfg.LLMModel, gcfg.LLMTemperature, gcfg.LLMMaxTokens)
-	if llm.Configured() {
+	// Enrich with LLM analysis if a shared client is configured.
+	if s.guardianLLM != nil {
 		// Gather context from Vexor (code embeddings) and governance docs
 		var contextParts []string
 
@@ -281,8 +280,12 @@ func (s *Server) handleAnalyzeWorkflow(w http.ResponseWriter, r *http.Request) {
 			strings.Join(result.RiskFactors, "; "),
 			contextBlock,
 		)
-		if answer, err := llm.Complete(r.Context(), systemPrompt, userPrompt); err == nil {
-			result.LLMAnalysis = answer
+		resp, err := s.guardianLLM.Complete(r.Context(), insightllm.CompletionRequest{
+			SystemPrompt: systemPrompt,
+			Messages:     []insightllm.Message{{Role: "user", Content: userPrompt}},
+		})
+		if err == nil {
+			result.LLMAnalysis = resp.Content
 		}
 	}
 
@@ -369,6 +372,12 @@ func (s *Server) handleTransitionPhase(w http.ResponseWriter, r *http.Request) {
 	s.hub.BroadcastJSON("phase_changed", map[string]any{
 		"workflow_id": id,
 		"phase":       body.Phase,
+	})
+	s.emitEvent(events.EventPhaseTransition, "orchestration", map[string]any{
+		"workflow_id":   state.ID,
+		"workflow_type": string(state.Type),
+		"to_phase":      string(state.Phase),
+		"title":         state.Title,
 	})
 	if body.Phase == "complete" {
 		s.hub.BroadcastJSON("workflow_completed", map[string]any{

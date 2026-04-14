@@ -1,7 +1,10 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +13,31 @@ import (
 )
 
 const wikiStalenessThreshold = 0.7
+
+// Page type constants. page_type in DB is a free string — these are the
+// canonical values used throughout the codebase.
+const (
+	PageTypeSummary = "summary"
+	PageTypeEntity  = "entity"
+	PageTypeConcept = "concept"
+	PageTypeAnswer  = "answer"
+	PageTypeIndex   = "index"
+	PageTypeFeature = "feature"
+	PageTypeRaw     = "raw"   // Karpathy raw layer: unprocessed ingested source
+	PageTypeTopic   = "topic" // Clustered synthesis of ≥N raw pages
+)
+
+// GeneratedBy constants.
+const (
+	GeneratedByIngest        = "ingest"
+	GeneratedByQuery         = "query"
+	GeneratedByMaintenance   = "maintenance"
+	GeneratedByEvolution     = "evolution"
+	GeneratedByUserEdit      = "user_edit"
+	GeneratedByLinkSuggester = "link_suggester"
+	GeneratedByCluster       = "cluster"
+	GeneratedByWorkflow      = "workflow"
+)
 
 // WikiPage is a LLM-generated knowledge page.
 type WikiPage struct {
@@ -24,6 +52,8 @@ type WikiPage struct {
 	Metadata       map[string]any `json:"metadata"`
 	GeneratedBy    string         `json:"generated_by"`   // ingest | query | maintenance | evolution
 	Version        int            `json:"version"`
+	WorkflowID     string         `json:"workflow_id,omitempty"`
+	FeatureSlug    string         `json:"feature_slug,omitempty"`
 	CreatedAt      string         `json:"created_at"`
 	UpdatedAt      string         `json:"updated_at"`
 }
@@ -452,6 +482,132 @@ func (d *DB) WikiPageCount() (int, error) {
 		return 0, fmt.Errorf("wiki page count: %w", err)
 	}
 	return count, nil
+}
+
+// UpsertWikiPageByWorkflow inserts or updates a wiki page identified by the
+// (workflow_id, feature_slug) pair.  When a row already exists the content,
+// title, status, staleness_score, source_hashes, tags, metadata, and
+// generated_by fields are updated, the version counter is incremented, and
+// created_at is preserved.  When no row exists a new one is inserted with the
+// supplied workflow_id and feature_slug populated.  The returned *WikiPage
+// always reflects the final state in the database.
+func (d *DB) UpsertWikiPageByWorkflow(ctx context.Context, workflowID, featureSlug string, page *WikiPage) (*WikiPage, error) {
+	if workflowID == "" {
+		return nil, fmt.Errorf("upsert wiki page by workflow: workflow_id is required")
+	}
+	if featureSlug == "" {
+		return nil, fmt.Errorf("upsert wiki page by workflow: feature_slug is required")
+	}
+
+	hashesBytes, err := json.Marshal(page.SourceHashes)
+	if err != nil {
+		return nil, fmt.Errorf("upsert wiki page by workflow: marshal source_hashes: %w", err)
+	}
+	if page.SourceHashes == nil {
+		hashesBytes = []byte("[]")
+	}
+
+	tagsBytes, err := json.Marshal(page.Tags)
+	if err != nil {
+		return nil, fmt.Errorf("upsert wiki page by workflow: marshal tags: %w", err)
+	}
+	if page.Tags == nil {
+		tagsBytes = []byte("[]")
+	}
+
+	metaBytes, err := json.Marshal(page.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("upsert wiki page by workflow: marshal metadata: %w", err)
+	}
+	if page.Metadata == nil {
+		metaBytes = []byte("{}")
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// Look up an existing row by (workflow_id, feature_slug).
+	var existingID string
+	err = d.sql.QueryRowContext(ctx,
+		`SELECT id FROM wiki_pages WHERE workflow_id = ? AND feature_slug = ?`,
+		workflowID, featureSlug,
+	).Scan(&existingID)
+
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("upsert wiki page by workflow: lookup: %w", err)
+		}
+		// sql.ErrNoRows — no existing row, fall through to insert.
+	}
+
+	if existingID != "" {
+		// Update existing row; preserve created_at, bump version.
+		_, err = d.sql.ExecContext(ctx, `
+			UPDATE wiki_pages
+			SET title = ?, content = ?, status = ?, staleness_score = ?,
+			    source_hashes_json = ?, tags_json = ?, metadata_json = ?,
+			    generated_by = ?, version = version + 1, updated_at = ?
+			WHERE id = ?
+		`,
+			page.Title, page.Content, page.Status, page.StalenessScore,
+			string(hashesBytes), string(tagsBytes), string(metaBytes),
+			page.GeneratedBy, now, existingID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("upsert wiki page by workflow: update: %w", err)
+		}
+
+		row := d.sql.QueryRowContext(ctx, `
+			SELECT id, page_type, title, content, status, staleness_score,
+			       source_hashes_json, tags_json, metadata_json, generated_by, version, created_at, updated_at
+			FROM wiki_pages WHERE id = ?
+		`, existingID)
+		updated, err := scanWikiPage(row)
+		if err != nil {
+			return nil, fmt.Errorf("upsert wiki page by workflow: reload: %w", err)
+		}
+		updated.WorkflowID = workflowID
+		updated.FeatureSlug = featureSlug
+		return updated, nil
+	}
+
+	// Insert new row.
+	newID := page.ID
+	if newID == "" {
+		newID = uuid.NewString()
+	}
+	pageType := page.PageType
+	if pageType == "" {
+		pageType = "summary"
+	}
+	version := page.Version
+	if version <= 0 {
+		version = 1
+	}
+
+	_, err = d.sql.ExecContext(ctx, `
+		INSERT INTO wiki_pages
+		(id, page_type, title, content, status, staleness_score,
+		 source_hashes_json, tags_json, metadata_json, generated_by, version,
+		 workflow_id, feature_slug, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		newID, pageType, page.Title, page.Content, page.Status, page.StalenessScore,
+		string(hashesBytes), string(tagsBytes), string(metaBytes),
+		page.GeneratedBy, version, workflowID, featureSlug, now, now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("upsert wiki page by workflow: insert: %w", err)
+	}
+
+	result := *page
+	result.ID = newID
+	result.PageType = pageType
+	result.Version = version
+	result.WorkflowID = workflowID
+	result.FeatureSlug = featureSlug
+	result.CreatedAt = now
+	result.UpdatedAt = now
+	return &result, nil
 }
 
 // FindPagesBySourceFiles returns wiki page IDs that reference any of the given

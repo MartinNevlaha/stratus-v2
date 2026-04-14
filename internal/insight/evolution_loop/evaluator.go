@@ -8,11 +8,10 @@ import (
 )
 
 // internalCategories are categories eligible for auto-apply without human review.
-var internalCategories = map[string]bool{
-	"workflow_routing":      true,
-	"agent_selection":       true,
-	"threshold_adjustment":  true,
-}
+// NOTE: workflow_routing, agent_selection, and threshold_adjustment were removed
+// in T9. The map is intentionally empty — no category currently qualifies for
+// auto-apply. It is kept as a hook for future use.
+var internalCategories = map[string]bool{}
 
 // Evaluator decides the outcome of a hypothesis experiment.
 type Evaluator struct {

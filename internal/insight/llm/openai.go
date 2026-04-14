@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -60,11 +61,33 @@ type openAIResponse struct {
 }
 
 type openAIError struct {
-	Error struct {
+	// Error is stored as raw JSON to tolerate both shapes:
+	//   object: {"error": {"message": "...", "type": "...", "code": "..."}}
+	//   string: {"error": "some message"}
+	// Some OpenAI-compatible providers (e.g. local proxies) return the string shape.
+	RawError json.RawMessage `json:"error,omitempty"`
+}
+
+// errorMessage extracts a human-readable error message from the raw JSON field,
+// tolerating both the object shape {"message":"..."} and the bare string shape.
+func (e openAIError) errorMessage() string {
+	if len(e.RawError) == 0 || string(e.RawError) == "null" {
+		return ""
+	}
+	// Try string shape first.
+	var s string
+	if err := json.Unmarshal(e.RawError, &s); err == nil {
+		return s
+	}
+	// Try object shape.
+	var obj struct {
 		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-	} `json:"error"`
+	}
+	if err := json.Unmarshal(e.RawError, &obj); err == nil && obj.Message != "" {
+		return obj.Message
+	}
+	// Fallback: return raw bytes.
+	return string(e.RawError)
 }
 
 func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
@@ -106,7 +129,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 		return nil, fmt.Errorf("llm: failed to marshal request: %w", err)
 	}
 
-	url := c.config.EffectiveBaseURL() + "/chat/completions"
+	url := strings.TrimRight(c.config.EffectiveBaseURL(), "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("llm: failed to create request: %w", err)
@@ -126,10 +149,21 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 		return nil, fmt.Errorf("llm: failed to read response: %w", err)
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, &RateLimitedError{RetryAfter: parseRetryAfter(resp.Header)}
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		var apiErr openAIError
 		_ = json.Unmarshal(respBody, &apiErr)
-		return nil, fmt.Errorf("llm: api error (status %d): %s", resp.StatusCode, apiErr.Error.Message)
+		if msg := apiErr.errorMessage(); msg != "" {
+			return nil, fmt.Errorf("llm: api error (status %d): %s", resp.StatusCode, msg)
+		}
+		snippet := string(respBody)
+		if len(snippet) > 512 {
+			snippet = snippet[:512] + "..."
+		}
+		return nil, fmt.Errorf("llm: api error (status %d): %s", resp.StatusCode, snippet)
 	}
 
 	var openAIResp openAIResponse

@@ -26,6 +26,9 @@ func ResolveLLMConfig(topLevel, override LLMConfig) LLMConfig {
 		if result.MaxRetries == 0 {
 			result.MaxRetries = topLevel.MaxRetries
 		}
+		if result.Concurrency == 0 {
+			result.Concurrency = topLevel.Concurrency
+		}
 		return result
 	}
 	// Otherwise use top-level as base, override individual fields
@@ -54,22 +57,9 @@ func ResolveLLMConfig(topLevel, override LLMConfig) LLMConfig {
 	if override.MaxRetries != 0 {
 		result.MaxRetries = override.MaxRetries
 	}
+	if override.Concurrency != 0 {
+		result.Concurrency = override.Concurrency
+	}
 	return result
 }
 
-// ResolveGuardianLLMConfig creates an LLMConfig from Guardian's flat fields,
-// falling back to the top-level config for missing values.
-func ResolveGuardianLLMConfig(topLevel LLMConfig, g GuardianConfig) LLMConfig {
-	override := LLMConfig{
-		BaseURL:     g.LLMEndpoint,
-		APIKey:      g.LLMAPIKey,
-		Model:       g.LLMModel,
-		Temperature: g.LLMTemperature,
-		MaxTokens:   g.LLMMaxTokens,
-	}
-	// If guardian has endpoint set, treat as openai-compatible
-	if override.BaseURL != "" && override.Provider == "" {
-		override.Provider = "openai"
-	}
-	return ResolveLLMConfig(topLevel, override)
-}

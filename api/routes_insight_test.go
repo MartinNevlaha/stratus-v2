@@ -2,9 +2,13 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -459,5 +463,514 @@ func TestListWorkflowScorecards(t *testing.T) {
 
 	if len(scorecards) != 1 {
 		t.Errorf("Expected 1 scorecard, got %d", len(scorecards))
+	}
+}
+
+// ---- applyAssetProposal tests ----
+
+func TestApplyAssetProposal_WritesFile(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{projectRoot: dir}
+
+	proposal := &db.InsightProposal{
+		ID:   "asset-write-1",
+		Type: "asset.skill",
+		Recommendation: map[string]interface{}{
+			"proposed_path":    "skills/new-skill.md",
+			"proposed_content": "# New Skill\nContent here.",
+		},
+	}
+
+	if err := server.applyAssetProposal(proposal); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	dest := filepath.Join(dir, "skills", "new-skill.md")
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("expected file to exist at %s: %v", dest, err)
+	}
+	if string(data) != "# New Skill\nContent here." {
+		t.Errorf("unexpected file content: %s", string(data))
+	}
+}
+
+func TestApplyAssetProposal_MissingPath_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{projectRoot: dir}
+
+	proposal := &db.InsightProposal{
+		ID:   "asset-missing-path",
+		Type: "asset.skill",
+		Recommendation: map[string]interface{}{
+			"proposed_content": "some content",
+		},
+	}
+
+	err := server.applyAssetProposal(proposal)
+	if err == nil {
+		t.Fatal("expected error for missing proposed_path, got nil")
+	}
+}
+
+func TestApplyAssetProposal_MissingContent_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{projectRoot: dir}
+
+	proposal := &db.InsightProposal{
+		ID:   "asset-missing-content",
+		Type: "asset.skill",
+		Recommendation: map[string]interface{}{
+			"proposed_path": "skills/empty.md",
+		},
+	}
+
+	err := server.applyAssetProposal(proposal)
+	if err == nil {
+		t.Fatal("expected error for missing proposed_content, got nil")
+	}
+}
+
+func TestApplyAssetProposal_PathTraversal_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{projectRoot: dir}
+
+	proposal := &db.InsightProposal{
+		ID:   "asset-traversal",
+		Type: "asset.skill",
+		Recommendation: map[string]interface{}{
+			"proposed_path":    "../../etc/passwd",
+			"proposed_content": "malicious content",
+		},
+	}
+
+	err := server.applyAssetProposal(proposal)
+	if err == nil {
+		t.Fatal("expected path traversal error, got nil")
+	}
+}
+
+func TestApplyAssetProposal_FileAlreadyExists_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{projectRoot: dir}
+
+	// Pre-create the target file.
+	dest := filepath.Join(dir, "skills", "existing.md")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(dest, []byte("existing"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	proposal := &db.InsightProposal{
+		ID:   "asset-exists",
+		Type: "asset.skill",
+		Recommendation: map[string]interface{}{
+			"proposed_path":    "skills/existing.md",
+			"proposed_content": "new content",
+		},
+	}
+
+	err := server.applyAssetProposal(proposal)
+	if err == nil {
+		t.Fatal("expected error for existing file, got nil")
+	}
+}
+
+func TestApplyAssetProposal_CreatesNestedDirs(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{projectRoot: dir}
+
+	proposal := &db.InsightProposal{
+		ID:   "asset-nested-dirs",
+		Type: "asset.agent",
+		Recommendation: map[string]interface{}{
+			"proposed_path":    "agents/sub/dir/agent.md",
+			"proposed_content": "agent content",
+		},
+	}
+
+	if err := server.applyAssetProposal(proposal); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dest := filepath.Join(dir, "agents", "sub", "dir", "agent.md")
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("expected file at %s: %v", dest, err)
+	}
+}
+
+// ---- Integration: approval of asset proposal triggers file write ----
+
+func TestHandleUpdateInsightProposalStatus_AssetApproval_WritesFile(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	dir := t.TempDir()
+	server := &Server{db: database, projectRoot: dir}
+
+	proposal := &db.InsightProposal{
+		ID:     "asset-approval-1",
+		Type:   "asset.skill",
+		Status: "drafted",
+		Title:  "New Skill Proposal",
+		Recommendation: map[string]interface{}{
+			"proposed_path":    "skills/auto-skill.md",
+			"proposed_content": "# Auto Skill",
+		},
+		Confidence: 0.9,
+		RiskLevel:  "low",
+	}
+
+	if err := database.SaveInsightProposal(proposal); err != nil {
+		t.Fatalf("setup: save proposal: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"status": "approved", "reason": "looks good"})
+	req := httptest.NewRequest("PATCH", "/api/insight/proposals/asset-approval-1/status", bytes.NewReader(body))
+	req.SetPathValue("id", "asset-approval-1")
+	w := httptest.NewRecorder()
+
+	server.handleUpdateInsightProposalStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	dest := filepath.Join(dir, "skills", "auto-skill.md")
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("expected file to be written at %s: %v", dest, err)
+	}
+	if string(data) != "# Auto Skill" {
+		t.Errorf("unexpected content: %s", string(data))
+	}
+}
+
+func TestHandleUpdateInsightProposalStatus_AssetApproval_RollsBackOnWriteError(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	dir := t.TempDir()
+	server := &Server{db: database, projectRoot: dir}
+
+	// Pre-create the file so the write will fail (file already exists guard).
+	dest := filepath.Join(dir, "skills", "conflict.md")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(dest, []byte("pre-existing"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	proposal := &db.InsightProposal{
+		ID:     "asset-rollback-1",
+		Type:   "asset.skill",
+		Status: "drafted",
+		Title:  "Conflicting Skill",
+		Recommendation: map[string]interface{}{
+			"proposed_path":    "skills/conflict.md",
+			"proposed_content": "new content",
+		},
+		Confidence: 0.9,
+		RiskLevel:  "low",
+	}
+
+	if err := database.SaveInsightProposal(proposal); err != nil {
+		t.Fatalf("setup: save proposal: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"status": "approved"})
+	req := httptest.NewRequest("PATCH", "/api/insight/proposals/asset-rollback-1/status", bytes.NewReader(body))
+	req.SetPathValue("id", "asset-rollback-1")
+	w := httptest.NewRecorder()
+
+	server.handleUpdateInsightProposalStatus(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// Status should have been rolled back to "drafted".
+	fetched, err := database.GetInsightProposalByID("asset-rollback-1")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if fetched.Status != "drafted" {
+		t.Errorf("expected status rolled back to 'drafted', got %s", fetched.Status)
+	}
+}
+
+func TestHandleUpdateInsightProposalStatus_NonAssetApproval_NoFileWrite(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	dir := t.TempDir()
+	server := &Server{db: database, projectRoot: dir}
+
+	proposal := &db.InsightProposal{
+		ID:     "routing-approval-1",
+		Type:   "routing.change",
+		Status: "drafted",
+		Title:  "Routing Change",
+		Recommendation: map[string]interface{}{
+			"action": "reroute",
+		},
+		Confidence: 0.85,
+		RiskLevel:  "medium",
+	}
+
+	if err := database.SaveInsightProposal(proposal); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"status": "approved"})
+	req := httptest.NewRequest("PATCH", "/api/insight/proposals/routing-approval-1/status", bytes.NewReader(body))
+	req.SetPathValue("id", "routing-approval-1")
+	w := httptest.NewRecorder()
+
+	server.handleUpdateInsightProposalStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// No files should have been created in the temp dir (except system dirs).
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Errorf("expected no files written for non-asset proposal, found: %v", entries)
+	}
+}
+
+// ---- handleCreateInsightProposal tests ----
+
+func TestCreateProposal_NewTypeIdeaAccepted(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+	server := &Server{db: database}
+
+	body, _ := json.Marshal(map[string]any{
+		"type":        "idea",
+		"title":       "Add retry logic to LLM client",
+		"description": "The LLM client should retry transient failures",
+		"signal_refs": []string{"internal/insight/llm/client.go"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/insight/proposals", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleCreateInsightProposal(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["id"] == nil || resp["id"] == "" {
+		t.Error("expected non-empty id in response")
+	}
+}
+
+func TestCreateProposal_UnknownTypeReturns422(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+	server := &Server{db: database}
+
+	body, _ := json.Marshal(map[string]any{
+		"type":  "unknown_custom_type",
+		"title": "Some proposal",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/insight/proposals", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleCreateInsightProposal(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	errMsg, _ := resp["error"].(string)
+	if !strings.Contains(errMsg, "unsupported proposal type") {
+		t.Errorf("expected 'unsupported proposal type' in error, got: %s", errMsg)
+	}
+}
+
+func TestCreateProposal_ClientSuppliedHashReturns400(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+	server := &Server{db: database}
+
+	body, _ := json.Marshal(map[string]any{
+		"type":             "idea",
+		"title":            "Something",
+		"idempotency_hash": "abc123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/insight/proposals", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleCreateInsightProposal(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	errMsg, _ := resp["error"].(string)
+	if !strings.Contains(errMsg, "idempotency_hash is server-computed") {
+		t.Errorf("expected server-computed error, got: %s", errMsg)
+	}
+}
+
+func TestCreateProposal_SignalRefsForwarded(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+	server := &Server{db: database}
+
+	signalRefs := []string{"pkg/foo.go", "pkg/bar.go"}
+	body, _ := json.Marshal(map[string]any{
+		"type":        "refactor_opportunity",
+		"title":       "Refactor foo package",
+		"description": "Foo package needs cleanup",
+		"signal_refs": signalRefs,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/insight/proposals", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleCreateInsightProposal(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	id, _ := resp["id"].(string)
+	if id == "" {
+		t.Fatal("expected non-empty id in response")
+	}
+
+	// Query back to verify signal_refs persisted.
+	var storedJSON string
+	err := database.SQL().QueryRow(`SELECT signal_refs FROM insight_proposals WHERE id = ?`, id).Scan(&storedJSON)
+	if err != nil {
+		t.Fatalf("query signal_refs: %v", err)
+	}
+
+	var stored []string
+	if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
+		t.Fatalf("unmarshal signal_refs: %v", err)
+	}
+
+	// Both refs should be present (sorted order).
+	if len(stored) != 2 {
+		t.Errorf("expected 2 signal_refs, got %d: %v", len(stored), stored)
+	}
+}
+
+func TestCreateProposal_WikiPageIDForwarded(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+	server := &Server{db: database}
+
+	// First create a wiki page so the FK reference is valid.
+	_, err := database.SQL().Exec(`
+		INSERT INTO wiki_pages (id, page_type, title, content, status, generated_by, tags_json, metadata_json, created_at, updated_at)
+		VALUES ('wiki-test-1', 'idea', 'Test Page', 'content', 'draft', 'test', '[]', '{}', datetime('now'), datetime('now'))
+	`)
+	if err != nil {
+		t.Fatalf("setup wiki page: %v", err)
+	}
+
+	wikiID := "wiki-test-1"
+	body, _ := json.Marshal(map[string]any{
+		"type":         "feature_idea",
+		"title":        "Feature with wiki page",
+		"description":  "References a wiki page",
+		"wiki_page_id": wikiID,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/insight/proposals", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleCreateInsightProposal(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	id, _ := resp["id"].(string)
+	if id == "" {
+		t.Fatal("expected non-empty id")
+	}
+
+	var storedWikiID sql.NullString
+	err = database.SQL().QueryRow(`SELECT wiki_page_id FROM insight_proposals WHERE id = ?`, id).Scan(&storedWikiID)
+	if err != nil {
+		t.Fatalf("query wiki_page_id: %v", err)
+	}
+	if !storedWikiID.Valid || storedWikiID.String != wikiID {
+		t.Errorf("expected wiki_page_id %q, got %q (valid=%v)", wikiID, storedWikiID.String, storedWikiID.Valid)
+	}
+}
+
+func TestCreateProposal_Idempotent_SecondCallReturnsSameID(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+	server := &Server{db: database}
+
+	bodyPayload := map[string]any{
+		"type":        "test_gap",
+		"title":       "Missing tests for orchestration",
+		"description": "The orchestration package lacks unit tests",
+		"signal_refs": []string{"orchestration/coordinator.go"},
+	}
+	body1, _ := json.Marshal(bodyPayload)
+	body2, _ := json.Marshal(bodyPayload)
+
+	req1 := httptest.NewRequest(http.MethodPost, "/api/insight/proposals", bytes.NewReader(body1))
+	w1 := httptest.NewRecorder()
+	server.handleCreateInsightProposal(w1, req1)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first call: expected 201, got %d (body: %s)", w1.Code, w1.Body.String())
+	}
+
+	var resp1 map[string]any
+	json.NewDecoder(w1.Body).Decode(&resp1)
+	id1, _ := resp1["id"].(string)
+
+	req2 := httptest.NewRequest(http.MethodPost, "/api/insight/proposals", bytes.NewReader(body2))
+	w2 := httptest.NewRecorder()
+	server.handleCreateInsightProposal(w2, req2)
+	// Second call may return 200 (idempotent) or 201 — both acceptable; what matters is same ID.
+	if w2.Code != http.StatusOK && w2.Code != http.StatusCreated {
+		t.Fatalf("second call: expected 200 or 201, got %d (body: %s)", w2.Code, w2.Body.String())
+	}
+
+	var resp2 map[string]any
+	json.NewDecoder(w2.Body).Decode(&resp2)
+	id2, _ := resp2["id"].(string)
+
+	if id1 == "" || id2 == "" {
+		t.Fatal("expected non-empty ids from both calls")
+	}
+	if id1 != id2 {
+		t.Errorf("expected idempotent: same id on both calls, got %q vs %q", id1, id2)
 	}
 }

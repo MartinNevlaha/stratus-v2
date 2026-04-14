@@ -97,6 +97,8 @@ func main() {
 		cmdPort()
 	case "onboard":
 		cmdOnboard()
+	case "ingest":
+		cmdIngest()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -119,7 +121,9 @@ Commands:
   statusline  Emit ANSI status bar (invoked by Claude Code via settings.json)
   version     Print version
   port        Print the configured API port (reads .stratus.json / STRATUS_PORT env)
-  onboard     Auto-generate project documentation wiki pages`)
+  onboard     Auto-generate project documentation wiki pages
+  ingest      Ingest a PDF/URL/YouTube/markdown/text source into the wiki
+              Flags: --tags a,b,c --title "..." --no-synth --skip-links`)
 }
 
 func cmdServe() {
@@ -135,6 +139,7 @@ func cmdServe() {
 	}()
 
 	coord := orchestration.NewCoordinator(database)
+	coord.SetWikiStore(database)
 	var eventBus events.EventBus
 	if cfg.Insight.Enabled {
 		eventBus = events.NewInMemoryBus(1000)
@@ -160,16 +165,14 @@ func cmdServe() {
 
 	// Resolve LLM configs: top-level → subsystem-specific overrides
 	cfg.Insight.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.Insight.LLM)
+	cfg.Guardian.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.Guardian.LLM)
+	cfg.CodeAnalysis.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.CodeAnalysis.LLM)
 
 	// Initialize Insight engine
 	var insightEngine *insight.Engine
 	var insightCancel context.CancelFunc
 	if cfg.Insight.Enabled {
-		if cfg.Wiki.Enabled || cfg.Evolution.Enabled {
-			insightEngine = insight.NewEngineWithConfig(database, cfg.Insight, cfg.Wiki, cfg.Evolution)
-		} else {
-			insightEngine = insight.NewEngine(database, cfg.Insight)
-		}
+		insightEngine = insight.NewEngineWithFullConfig(database, cfg.Insight, cfg.Wiki, cfg.Evolution, cfg.CodeAnalysis, cfg.Language)
 		if eventBus != nil {
 			insightEngine.SetEventBus(eventBus)
 		}
@@ -195,27 +198,38 @@ func cmdServe() {
 		srv.SetProductIntelligenceEngine(insightEngine.ProductIntelligence())
 	}
 
+	// Wire code analysis trigger so the API can start a background run.
+	if insightEngine != nil {
+		srv.SetCodeAnalysisTrigger(func(ctx context.Context, categories []string) error {
+			_, err := insightEngine.RunCodeAnalysis(ctx, "manual", categories)
+			return err
+		})
+	}
+
 	// Start Guardian background service.
 	guardianCtx, guardianCancel := context.WithCancel(context.Background())
 	g := guardian.New(database, coord, func() config.GuardianConfig { return config.Load().Guardian }, hub, cfg.ProjectRoot)
+	// Wire language function so alert messages honour the configured language.
+	g.SetLangFn(func() string { return config.Load().Language })
 	srv.SetGuardian(g)
 
 	// Wire shared LLM client into guardian if configured.
-	guardianLLMCfg := config.ResolveGuardianLLMConfig(cfg.LLM, cfg.Guardian)
-	if guardianLLMCfg.Provider != "" && guardianLLMCfg.Model != "" {
+	if cfg.Guardian.LLM.Provider != "" && cfg.Guardian.LLM.Model != "" {
 		llmCfg := llm.Config{
-			Provider:    guardianLLMCfg.Provider,
-			Model:       guardianLLMCfg.Model,
-			APIKey:      guardianLLMCfg.APIKey,
-			BaseURL:     guardianLLMCfg.BaseURL,
-			Timeout:     guardianLLMCfg.Timeout,
-			MaxTokens:   guardianLLMCfg.MaxTokens,
-			Temperature: guardianLLMCfg.Temperature,
-			MaxRetries:  guardianLLMCfg.MaxRetries,
+			Provider:    cfg.Guardian.LLM.Provider,
+			Model:       cfg.Guardian.LLM.Model,
+			APIKey:      cfg.Guardian.LLM.APIKey,
+			BaseURL:     cfg.Guardian.LLM.BaseURL,
+			Timeout:     cfg.Guardian.LLM.Timeout,
+			MaxTokens:   cfg.Guardian.LLM.MaxTokens,
+			Temperature: cfg.Guardian.LLM.Temperature,
+			MaxRetries:  cfg.Guardian.LLM.MaxRetries,
+			Concurrency: cfg.Guardian.LLM.Concurrency,
 		}
 		llmCfg = llmCfg.WithEnv()
 		if guardianClient, err := llm.NewClient(llmCfg); err == nil {
 			g.SetLLMClient(guardianClient)
+			srv.SetGuardianLLM(guardianClient)
 			log.Printf("guardian: using shared LLM client (provider=%s, model=%s)", llmCfg.Provider, llmCfg.Model)
 		} else {
 			log.Printf("guardian: failed to initialize LLM client: %v", err)
@@ -261,6 +275,9 @@ func cmdServe() {
 		}
 	} else {
 		log.Printf("stratus serving on http://localhost:%d", cfg.Port)
+	}
+	if cfg.DevMode {
+		log.Printf("stratus running in DEV mode — open http://localhost:5173 for frontend")
 	}
 	if err := srv.Serve(ln); err != nil {
 		log.Fatalf("server error: %v", err)
@@ -1477,6 +1494,7 @@ func cmdOnboard() {
 		MaxTokens:   cfg.LLM.MaxTokens,
 		Temperature: cfg.LLM.Temperature,
 		MaxRetries:  cfg.LLM.MaxRetries,
+		Concurrency: cfg.LLM.Concurrency,
 	}.WithEnv()
 
 	if llmCfg.Provider == "" {

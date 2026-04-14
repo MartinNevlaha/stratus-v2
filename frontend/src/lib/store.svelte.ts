@@ -1,6 +1,8 @@
-import type { DashboardState, VersionInfo } from './types'
-import { getDashboardState, getVersion, triggerUpdate } from './api'
+import type { DashboardState, Language, VersionInfo } from './types'
+import { getDashboardState, getLanguage, getVersion, triggerUpdate } from './api'
 import { wsClient } from './ws'
+
+export type TabId = 'overview' | 'agents' | 'memory' | 'retrieval' | 'insight' | 'wiki' | 'evolution' | 'code-quality' | 'settings' | 'terminal'
 
 interface AppState {
   dashboard: DashboardState | null
@@ -14,6 +16,9 @@ interface AppState {
   swarmUpdateCounter: number
   lastHeartbeats: Record<string, number>
   guardianAlertCount: number
+  activeTab: TabId
+  pendingTerminalInput: string | null
+  language: Language
 }
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
@@ -30,7 +35,18 @@ export const appState: AppState = $state({
   swarmUpdateCounter: 0,
   lastHeartbeats: {},
   guardianAlertCount: 0,
+  activeTab: 'overview',
+  pendingTerminalInput: null,
+  language: 'en',
 })
+
+export function setActiveTab(id: TabId) {
+  appState.activeTab = id
+}
+
+export function requestTerminalPrefill(text: string) {
+  appState.pendingTerminalInput = text
+}
 
 export async function refreshDashboard() {
   try {
@@ -124,5 +140,6 @@ export function initStore() {
 
   refreshDashboard()
   getVersion().then(v => { appState.version = v }).catch(() => {})
+  getLanguage().then(r => { appState.language = r.language as Language }).catch(() => {})
   setInterval(() => wsClient.ping(), 30_000)
 }

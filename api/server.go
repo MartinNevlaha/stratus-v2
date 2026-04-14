@@ -17,6 +17,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/insight"
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
+	insightllm "github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
 	wiki_engine "github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
@@ -47,8 +48,10 @@ type Server struct {
 	eventBus             events.EventBus
 	piEngine             *product_intelligence.Engine
 	guardianSvc          *guardian.Guardian
-	cfg                  *config.Config // pointer so guardian config updates are reflected
+	guardianLLM          insightllm.Client // shared LLM client for orchestration risk analysis
+	cfg                  *config.Config    // pointer so guardian config updates are reflected
 	vaultSync            *wiki_engine.VaultSync
+	vaultSyncMu          sync.RWMutex // guards vaultSync (rebuilt when vault_path changes)
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -59,6 +62,11 @@ type Server struct {
 	onboardingMu       sync.Mutex
 	onboardingProgress *onboarding.OnboardingProgress
 	onboardingResult   *onboarding.OnboardingResult
+
+	// codeAnalysisTrigger, when set, is called by handleTriggerCodeAnalysis
+	// to start a background code analysis run. Wire this up after the code
+	// analysis engine is initialised.
+	codeAnalysisTrigger CodeAnalysisTriggerFn
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -115,9 +123,38 @@ func newVaultSyncForConfig(cfg *config.Config, database *db.DB) *wiki_engine.Vau
 	return wiki_engine.NewVaultSync(store, cfg.Wiki.VaultPath)
 }
 
+// getVaultSync returns the current VaultSync under a read lock.
+// Safe to call concurrently with rebuildVaultSync.
+func (s *Server) getVaultSync() *wiki_engine.VaultSync {
+	s.vaultSyncMu.RLock()
+	defer s.vaultSyncMu.RUnlock()
+	return s.vaultSync
+}
+
+// rebuildVaultSync replaces the VaultSync to match the current cfg.Wiki.VaultPath.
+// Call this after mutating cfg.Wiki.VaultPath so subsequent /vault/sync requests
+// pick up the new path without a server restart.
+func (s *Server) rebuildVaultSync() {
+	s.vaultSyncMu.Lock()
+	defer s.vaultSyncMu.Unlock()
+	s.vaultSync = newVaultSyncForConfig(s.cfg, s.db)
+}
+
+// SetCodeAnalysisTrigger sets the function used to start a background code
+// analysis run. Call this after the code analysis engine has been initialised.
+func (s *Server) SetCodeAnalysisTrigger(fn CodeAnalysisTriggerFn) {
+	s.codeAnalysisTrigger = fn
+}
+
 // SetGuardian attaches the guardian service so routes can trigger manual scans.
 func (s *Server) SetGuardian(g *guardian.Guardian) {
 	s.guardianSvc = g
+}
+
+// SetGuardianLLM injects the shared LLM client used for orchestration risk
+// analysis and Guardian governance checks. Idempotent; safe to call at startup.
+func (s *Server) SetGuardianLLM(c insightllm.Client) {
+	s.guardianLLM = c
 }
 
 // markDirty adds file paths to the dirty set and signals the index worker.
@@ -145,6 +182,9 @@ func (s *Server) emitEvent(eventType events.EventType, source string, payload ma
 
 func (s *Server) SetEventBus(bus events.EventBus) {
 	s.eventBus = bus
+	if bus != nil {
+		bus.Subscribe(newPrefetcher(s).handleEvent)
+	}
 }
 
 func (s *Server) SetProductIntelligenceEngine(engine *product_intelligence.Engine) {
@@ -292,6 +332,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/insight/patterns", s.handleGetInsightPatterns)
 	mux.HandleFunc("GET /api/insight/analyses", s.handleGetInsightAnalyses)
 	mux.HandleFunc("GET /api/insight/proposals", s.handleGetInsightProposals)
+	mux.HandleFunc("POST /api/insight/proposals", s.handleCreateInsightProposal)
 	mux.HandleFunc("GET /api/insight/proposals/{id}", s.handleGetInsightProposal)
 	mux.HandleFunc("POST /api/insight/proposals/generate", s.handleTriggerInsightProposalGeneration)
 	mux.HandleFunc("GET /api/insight/dashboard", s.handleGetInsightDashboard)
@@ -385,17 +426,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics/projects", s.handleMetricsProjects)
 
 	// Wiki
+	mux.HandleFunc("POST /api/wiki/pages", s.handleCreateWikiPageFromWorkflow)
 	mux.HandleFunc("GET /api/wiki/pages", s.handleListWikiPages)
 	mux.HandleFunc("GET /api/wiki/pages/{id}", s.handleGetWikiPage)
 	mux.HandleFunc("GET /api/wiki/search", s.handleSearchWikiPages)
 	mux.HandleFunc("POST /api/wiki/query", s.handleWikiQuery)
 	mux.HandleFunc("GET /api/wiki/graph", s.handleGetWikiGraph)
 	mux.HandleFunc("POST /api/wiki/vault/sync", s.handleVaultSync)
+	mux.HandleFunc("POST /api/wiki/vault/pull", s.handleVaultPull)
 	mux.HandleFunc("GET /api/wiki/vault/status", s.handleVaultStatus)
+	mux.HandleFunc("POST /api/wiki/cluster/run", s.handleClusterRun)
+	mux.HandleFunc("POST /api/ingest", s.handleIngest)
+	mux.HandleFunc("GET /api/wiki/config", s.handleGetWikiConfig)
+	mux.HandleFunc("PUT /api/wiki/config", s.handleUpdateWikiConfig)
 
 	// Onboarding
 	mux.HandleFunc("POST /api/onboard", s.handleOnboard)
 	mux.HandleFunc("GET /api/onboard/status", s.handleOnboardStatus)
+	mux.HandleFunc("POST /api/onboarding/propose-assets", s.handleProposeAssets)
 
 	// Knowledge Base
 	mux.HandleFunc("GET /api/kb/solutions", s.handleListKBSolutions)
@@ -404,13 +452,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/kb/stats", s.handleKBStats)
 
 	// Evolution
+	mux.HandleFunc("GET /api/evolution/status", s.handleGetEvolutionStatus)
 	mux.HandleFunc("GET /api/evolution/runs", s.handleListEvolutionRuns)
 	mux.HandleFunc("GET /api/evolution/runs/{id}", s.handleGetEvolutionRun)
 	mux.HandleFunc("POST /api/evolution/trigger", s.handleTriggerEvolution)
 	mux.HandleFunc("GET /api/evolution/config", s.handleGetEvolutionConfig)
 	mux.HandleFunc("POST /api/evolution/config", s.handleUpdateEvolutionConfig)
 
-	// LLM status, usage, and connectivity test
+	// Code Analysis
+	s.registerCodeAnalysisRoutes(mux)
+
+	// Global config
+	mux.HandleFunc("GET /api/config/language", s.handleGetLanguage)
+	mux.HandleFunc("PUT /api/config/language", s.handlePutLanguage)
+
+	// LLM config, status, usage, and connectivity test
+	mux.HandleFunc("GET /api/llm/config", s.handleGetLLMConfig)
+	mux.HandleFunc("PUT /api/llm/config", s.handleUpdateLLMConfig)
 	mux.HandleFunc("GET /api/llm/status", s.handleGetLLMStatus)
 	mux.HandleFunc("GET /api/llm/usage", s.handleGetLLMUsage)
 	mux.HandleFunc("POST /api/llm/test", s.handleTestLLM)
@@ -445,6 +503,10 @@ func (s *Server) Serve(ln net.Listener) error {
 func (s *Server) spaHandler() http.Handler {
 	fileServer := http.FileServer(http.FS(s.staticFiles))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg != nil && s.cfg.DevMode {
+			http.Error(w, "dev mode: frontend served by vite on :5173", http.StatusNotFound)
+			return
+		}
 		// Strip leading slash for fs.Stat
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path == "" {

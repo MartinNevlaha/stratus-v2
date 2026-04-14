@@ -6,6 +6,8 @@
   import SttButton from './SttButton.svelte'
   import ImageUploadToast from './ImageUploadToast.svelte'
   import { uploadTerminalImage } from '$lib/api'
+  import { appState } from '$lib/store'
+  import { sanitizeTerminalPayload } from '$lib/findingFlow'
 
   let container: HTMLDivElement
   let term: Terminal
@@ -24,6 +26,20 @@
   let toastMessage = $state<string | null>(null)
 
   let fitTimer: ReturnType<typeof setTimeout> | null = null
+
+  $effect(() => {
+    const text = appState.pendingTerminalInput
+    if (!text) return
+    if (ws?.readyState !== WebSocket.OPEN) return
+    const safe = sanitizeTerminalPayload(text)
+    try {
+      ws.send(JSON.stringify({ type: 'input', data: { id: sessionId, data: safe } }))
+      term?.focus()
+    } catch (e) {
+      if (e instanceof Error) console.error('terminal prefill send failed:', e.message)
+    }
+    appState.pendingTerminalInput = null
+  })
 
   function fitAndNotify() {
     if (!fitAddon || !container || container.clientHeight === 0) return

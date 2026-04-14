@@ -8,6 +8,10 @@
 # Data directory
 .stratus/
 
+# Air hot-reload build output
+/tmp/
+build-errors.log
+
 # Node
 frontend/node_modules/
 frontend/.vite/

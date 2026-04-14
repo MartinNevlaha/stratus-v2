@@ -338,6 +338,8 @@ CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(metric_date);
 CREATE INDEX IF NOT EXISTS idx_daily_metrics_type ON daily_metrics(workflow_type);
 
 -- Insight: Improvement proposals
+-- type is a free-text soft-enum; known values: workflow_routing, agent_selection,
+-- threshold_adjustment, idea (added for evolution-loop dual-write, v0.9.21+).
 CREATE TABLE IF NOT EXISTS insight_proposals (
     id                TEXT PRIMARY KEY,
     type              TEXT NOT NULL,
@@ -351,13 +353,20 @@ CREATE TABLE IF NOT EXISTS insight_proposals (
     recommendation    TEXT NOT NULL DEFAULT '{}',
     decision_reason   TEXT,
     created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    -- Evolution-loop dual-write columns (additive, nullable for backward compat):
+    wiki_page_id      TEXT NULL REFERENCES wiki_pages(id),
+    idempotency_hash  TEXT NULL,   -- sha256 hex (64 chars): sha256(category+"\n"+normalize(title)+"\n"+sorted signal_refs)
+    last_seen_at      INTEGER NULL, -- unix seconds; updated instead of re-inserting when hash matches
+    signal_refs       TEXT NOT NULL DEFAULT '[]' -- JSON array: file paths, symbol names, commit hashes
 );
 
 CREATE INDEX IF NOT EXISTS idx_insight_proposals_type ON insight_proposals(type);
 CREATE INDEX IF NOT EXISTS idx_insight_proposals_status ON insight_proposals(status);
 CREATE INDEX IF NOT EXISTS idx_insight_proposals_pattern ON insight_proposals(source_pattern_id);
 CREATE INDEX IF NOT EXISTS idx_insight_proposals_created ON insight_proposals(created_at DESC);
+-- Indexes on new v4 columns (idempotency_hash, last_seen_at) are created by db.go migrations
+-- because existing DBs need ALTER TABLE to run first.
 
 -- Insight: Agent Scorecards
 CREATE TABLE IF NOT EXISTS insight_agent_scorecards (
@@ -781,6 +790,8 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     metadata_json    TEXT NOT NULL DEFAULT '{}',
     generated_by     TEXT NOT NULL DEFAULT 'ingest',
     version          INTEGER NOT NULL DEFAULT 1,
+    workflow_id      TEXT,
+    feature_slug     TEXT,
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -789,6 +800,7 @@ CREATE INDEX IF NOT EXISTS idx_wiki_pages_type ON wiki_pages(page_type);
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_status ON wiki_pages(status);
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_staleness ON wiki_pages(staleness_score DESC);
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_updated ON wiki_pages(updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS wiki_pages_workflow_uniq ON wiki_pages(workflow_id, feature_slug) WHERE workflow_id IS NOT NULL;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS wiki_pages_fts USING fts5(
     title, content, tags_json,
@@ -897,4 +909,101 @@ CREATE TABLE IF NOT EXISTS llm_token_usage (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_date_sub
     ON llm_token_usage(date, subsystem);
+
+-- Code Analysis: Runs
+CREATE TABLE IF NOT EXISTS code_analysis_runs (
+    id                 TEXT PRIMARY KEY,
+    status             TEXT NOT NULL DEFAULT 'running',
+    files_scanned      INTEGER NOT NULL DEFAULT 0,
+    files_analyzed     INTEGER NOT NULL DEFAULT 0,
+    findings_count     INTEGER NOT NULL DEFAULT 0,
+    wiki_pages_created INTEGER NOT NULL DEFAULT 0,
+    wiki_pages_updated INTEGER NOT NULL DEFAULT 0,
+    duration_ms        INTEGER NOT NULL DEFAULT 0,
+    tokens_used        INTEGER NOT NULL DEFAULT 0,
+    git_commit_hash    TEXT NOT NULL DEFAULT '',
+    error_message      TEXT NOT NULL DEFAULT '',
+    metadata_json      TEXT NOT NULL DEFAULT '{}',
+    started_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at       TEXT,
+    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_analysis_runs_status ON code_analysis_runs(status);
+CREATE INDEX IF NOT EXISTS idx_code_analysis_runs_started ON code_analysis_runs(started_at DESC);
+
+-- Code Analysis: Findings
+CREATE TABLE IF NOT EXISTS code_findings (
+    id            TEXT PRIMARY KEY,
+    run_id        TEXT NOT NULL REFERENCES code_analysis_runs(id) ON DELETE CASCADE,
+    file_path     TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    severity      TEXT NOT NULL DEFAULT 'info',
+    title         TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    line_start    INTEGER NOT NULL DEFAULT 0,
+    line_end      INTEGER NOT NULL DEFAULT 0,
+    confidence    REAL NOT NULL DEFAULT 0,
+    suggestion    TEXT NOT NULL DEFAULT '',
+    wiki_page_id  TEXT,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','rejected','applied')),
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_findings_run ON code_findings(run_id);
+CREATE INDEX IF NOT EXISTS idx_code_findings_file ON code_findings(file_path);
+CREATE INDEX IF NOT EXISTS idx_code_findings_category ON code_findings(category);
+CREATE INDEX IF NOT EXISTS idx_code_findings_severity ON code_findings(severity);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS code_findings_fts USING fts5(
+    title, description, file_path, suggestion,
+    content='code_findings', content_rowid='rowid',
+    tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS code_findings_ai AFTER INSERT ON code_findings BEGIN
+    INSERT INTO code_findings_fts(rowid, title, description, file_path, suggestion)
+    VALUES (new.rowid, new.title, new.description, new.file_path, new.suggestion);
+END;
+CREATE TRIGGER IF NOT EXISTS code_findings_au AFTER UPDATE ON code_findings BEGIN
+    INSERT INTO code_findings_fts(code_findings_fts, rowid, title, description, file_path, suggestion)
+    VALUES ('delete', old.rowid, old.title, old.description, old.file_path, old.suggestion);
+    INSERT INTO code_findings_fts(rowid, title, description, file_path, suggestion)
+    VALUES (new.rowid, new.title, new.description, new.file_path, new.suggestion);
+END;
+CREATE TRIGGER IF NOT EXISTS code_findings_ad AFTER DELETE ON code_findings BEGIN
+    INSERT INTO code_findings_fts(code_findings_fts, rowid, title, description, file_path, suggestion)
+    VALUES ('delete', old.rowid, old.title, old.description, old.file_path, old.suggestion);
+END;
+
+-- Code Analysis: Quality Metrics (time series)
+CREATE TABLE IF NOT EXISTS code_quality_metrics (
+    id                        TEXT PRIMARY KEY,
+    metric_date               TEXT NOT NULL,
+    total_files               INTEGER NOT NULL DEFAULT 0,
+    files_analyzed            INTEGER NOT NULL DEFAULT 0,
+    findings_total            INTEGER NOT NULL DEFAULT 0,
+    findings_by_severity_json TEXT NOT NULL DEFAULT '{}',
+    findings_by_category_json TEXT NOT NULL DEFAULT '{}',
+    avg_churn_score           REAL NOT NULL DEFAULT 0,
+    avg_coverage              REAL NOT NULL DEFAULT 0,
+    created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(metric_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_quality_metrics_date ON code_quality_metrics(metric_date DESC);
+
+-- Code Analysis: File analysis cache (dedup)
+CREATE TABLE IF NOT EXISTS code_file_cache (
+    file_path        TEXT PRIMARY KEY,
+    git_hash         TEXT NOT NULL,
+    last_analyzed_at TEXT NOT NULL,
+    last_run_id      TEXT NOT NULL,
+    composite_score  REAL NOT NULL DEFAULT 0,
+    findings_count   INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_file_cache_score ON code_file_cache(composite_score DESC);
 `

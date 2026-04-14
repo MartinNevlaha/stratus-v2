@@ -277,7 +277,7 @@ func TestHandleUpdateEvolutionConfig(t *testing.T) {
 		ProposalThreshold:   0.70,
 		MinSampleSize:       20,
 		DailyTokenBudget:    200000,
-		Categories:          []string{"prompt_tuning", "agent_selection"},
+		Categories:          []string{"prompt_tuning", "refactor_opportunity"},
 	}
 	body, _ := json.Marshal(updated)
 
@@ -423,5 +423,55 @@ func TestHandleUpdateEvolutionConfig_ValidationErrors(t *testing.T) {
 				t.Error("expected non-empty error message in response")
 			}
 		})
+	}
+}
+
+// TestEvolutionStatus_ExposesCategoryBreakdown verifies that GET /api/evolution/status
+// returns a category_breakdown map populated from proposals in the DB.
+func TestEvolutionStatus_ExposesCategoryBreakdown(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	cfg := config.Default()
+	server := &Server{db: database, cfg: &cfg}
+
+	// Insert some proposals of different types.
+	for _, p := range []*db.InsightProposal{
+		{ID: "p1", Type: "refactor_opportunity", Status: "pending", Title: "r1", RiskLevel: "low"},
+		{ID: "p2", Type: "refactor_opportunity", Status: "pending", Title: "r2", RiskLevel: "low"},
+		{ID: "p3", Type: "test_gap", Status: "pending", Title: "t1", RiskLevel: "low"},
+	} {
+		if err := database.SaveInsightProposal(p); err != nil {
+			t.Fatalf("SaveInsightProposal %s: %v", p.ID, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/evolution/status", nil)
+	w := httptest.NewRecorder()
+
+	server.handleGetEvolutionStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	breakdown, ok := resp["category_breakdown"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected category_breakdown to be an object, got %T: %v", resp["category_breakdown"], resp["category_breakdown"])
+	}
+
+	refactorCount, _ := breakdown["refactor_opportunity"].(float64)
+	if int(refactorCount) != 2 {
+		t.Errorf("expected refactor_opportunity=2, got %v", refactorCount)
+	}
+
+	testGapCount, _ := breakdown["test_gap"].(float64)
+	if int(testGapCount) != 1 {
+		t.Errorf("expected test_gap=1, got %v", testGapCount)
 	}
 }

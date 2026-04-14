@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -61,7 +62,8 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db *db.DB
+	db        *db.DB
+	wikiStore WikiAutodocStore
 }
 
 // NewCoordinator creates a new coordinator.
@@ -69,6 +71,12 @@ func NewCoordinator(db *db.DB) *Coordinator {
 	return &Coordinator{
 		db: db,
 	}
+}
+
+// SetWikiStore injects the wiki persistence layer used for learn→complete autodoc.
+// If never called (or called with nil), autodoc is silently skipped.
+func (c *Coordinator) SetWikiStore(s WikiAutodocStore) {
+	c.wikiStore = s
 }
 
 // Start creates a new workflow or returns an existing one with the same ID.
@@ -312,9 +320,29 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 		log.Printf("warning: workflow %s phase transition: %s", id, w)
 	}
 
+	from := state.Phase
 	state.Phase = to
 	if err := c.save(state); err != nil {
 		return nil, err
+	}
+
+	// Fail-open: auto-write wiki page on learn→complete for spec workflows.
+	// Runs asynchronously so a slow wiki store never delays the transition response.
+	if to == PhaseComplete && from == PhaseLearn && c.wikiStore != nil {
+		snapshot := *state
+		store := c.wikiStore
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("warn: autodoc workflow %s panicked: %v", snapshot.ID, r)
+				}
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := AutodocWorkflow(ctx, store, &snapshot); err != nil {
+				log.Printf("warn: autodoc workflow %s: %v", snapshot.ID, err)
+			}
+		}()
 	}
 
 	return state, nil

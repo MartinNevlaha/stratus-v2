@@ -30,6 +30,8 @@ BASE=http://127.0.0.1:$(stratus port)
 
 ## Phase 1: Discovery
 
+> 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
+
 Start the workflow:
 
 ```bash
@@ -65,6 +67,8 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 ---
 
 ## Phase 2: Design
+
+> 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
 
 Delegate based on what the spec requires:
 
@@ -107,6 +111,8 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 ## Phase 3: Plan
 
+> 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
+
 Using the design document, create an ordered implementation plan:
 
 1. Write the plan to `docs/plans/<slug>.md`
@@ -132,6 +138,8 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 ---
 
 ## Phase 4: Implement
+
+> 🎯 **Karpathy — Simplicity First + Surgical Changes:** Minimum code that solves the problem. Touch only what the task requires. No speculative abstractions, no "improvements" to adjacent code. See `.claude/rules/karpathy-principles.md`.
 
 For each task (0-indexed):
 
@@ -181,6 +189,8 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 ---
 
 ## Phase 5: Verify
+
+> 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
 **Code review** — `@delivery-code-reviewer` for spec compliance, code quality, security, and test adequacy.
 
@@ -243,6 +253,16 @@ curl -sS -X POST $BASE/api/learning/candidates \
 
 ```bash
 curl -sS -X POST $BASE/api/retrieve/index
+```
+
+**Step 3.5 — Wiki auto-doc (optional enrichment):**
+
+On `learn → complete` the coordinator auto-upserts a wiki page keyed by `(workflow_id, feature_slug)` with `status=auto-generated`. For richer content, POST before transitioning (fail-open):
+
+```bash
+curl -sS -X POST $BASE/api/wiki/pages \
+  -H 'Content-Type: application/json' \
+  -d '{"workflow_id":"<slug>","feature_slug":"<feature>","title":"...","content":"<markdown>","confidence":0.9}'
 ```
 
 **Step 4 — Complete workflow:**

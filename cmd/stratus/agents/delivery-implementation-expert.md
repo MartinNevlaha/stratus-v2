@@ -18,7 +18,7 @@ Read, Grep, Glob, Edit, Write, Bash
 
 ## Workflow
 
-1. **Understand** — Read the task description and relevant code. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns.
+1. **Understand** — Read the task description and relevant code. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for evolution findings and existing knowledge relevant to this task.
 2. **Implement** — Follow project conventions. Write clean, minimal code that satisfies the requirements.
 3. **Test** — Write tests alongside implementation. Ensure all tests pass before reporting completion.
 

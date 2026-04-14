@@ -80,4 +80,4 @@ The Vite build output goes to `frontend/dist/`, which Vite is configured to outp
 - All HTTP handlers live in `api/routes_*.go` files, grouped by domain.
 - The `db.DB` struct wraps the raw SQLite connection; all queries are in the `db/` package.
 - Hook errors are silently ignored (fail-open) — hooks call `Allow()` on any parse error to avoid blocking Claude.
-- The `retrieve` endpoint auto-routes: queries containing code-like terms go to Vexor; others go to FTS5 governance docs.
+- The `retrieve` endpoint fans out in auto mode (`corpus=""`): queries hit Vexor (code), FTS5 `docs_fts` (governance), and FTS5 wiki in parallel, and results are merged. Wiki is capped at `top_k/3` in auto mode and stale pages (staleness > 0.7) have their score halved. Pass `corpus=code|governance|wiki` to target a single source.

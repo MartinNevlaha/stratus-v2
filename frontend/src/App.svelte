@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { appState, initStore, startUpdate, dismissUpdate } from '$lib/store'
+  import { appState, initStore, startUpdate, dismissUpdate, setActiveTab } from '$lib/store'
   import Overview from './routes/Overview.svelte'
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'
@@ -9,10 +9,9 @@
   import Settings from './routes/Settings.svelte'
   import Wiki from './routes/Wiki.svelte'
   import Evolution from './routes/Evolution.svelte'
+  import CodeQuality from './routes/CodeQuality.svelte'
   import Terminal from './components/Terminal.svelte'
 
-  let activeTab = $state<'overview' | 'agents' | 'memory' | 'retrieval' | 'insight' | 'wiki' | 'evolution' | 'settings' | 'terminal'>('overview')
-  
   onMount(() => {
     initStore()
   })
@@ -23,6 +22,7 @@
     { id: 'insight' as const, label: 'Insight' },
     { id: 'wiki' as const, label: 'Wiki' },
     { id: 'evolution' as const, label: 'Evolution' },
+    { id: 'code-quality' as const, label: 'Code Quality' },
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
     { id: 'settings' as const, label: 'Settings' },
@@ -69,8 +69,8 @@
     <nav>
       {#each tabs as t}
         <button
-          class:active={activeTab === t.id}
-          onclick={() => (activeTab = t.id)}
+          class:active={appState.activeTab === t.id}
+          onclick={() => setActiveTab(t.id)}
         >
           {t.label}
           {#if t.id === 'settings' && guardianAlerts > 0}
@@ -114,10 +114,10 @@
         class="split-view"
         class:dragging={isDragging}
         bind:this={splitView}
-        style:display={activeTab === 'overview' ? 'flex' : 'none'}
+        style:display={appState.activeTab === 'overview' ? 'flex' : 'none'}
       >
         <div class="split-pane" style="flex: 0 0 {splitRatio * 100}%; max-width: {splitRatio * 100}%;">
-          {#if activeTab === 'overview'}
+          {#if appState.activeTab === 'overview'}
             <Overview />
           {/if}
         </div>
@@ -132,19 +132,21 @@
         </div>
       </div>
 
-      {#if activeTab === 'memory'}
+      {#if appState.activeTab === 'memory'}
         <Memory />
-      {:else if activeTab === 'agents'}
+      {:else if appState.activeTab === 'agents'}
         <Agents />
-      {:else if activeTab === 'insight'}
+      {:else if appState.activeTab === 'insight'}
         <Insight />
-      {:else if activeTab === 'wiki'}
+      {:else if appState.activeTab === 'wiki'}
         <Wiki />
-      {:else if activeTab === 'evolution'}
+      {:else if appState.activeTab === 'evolution'}
         <Evolution />
-      {:else if activeTab === 'retrieval'}
+      {:else if appState.activeTab === 'code-quality'}
+        <CodeQuality />
+      {:else if appState.activeTab === 'retrieval'}
         <Retrieval />
-      {:else if activeTab === 'settings'}
+      {:else if appState.activeTab === 'settings'}
         <Settings />
       {/if}
     {/if}

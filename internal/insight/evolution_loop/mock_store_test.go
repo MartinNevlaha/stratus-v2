@@ -133,6 +133,18 @@ func (m *mockStore) runCount() int {
 	return len(m.runs)
 }
 
+// allHypotheses returns all stored hypotheses for assertions.
+func (m *mockStore) allHypotheses() []*db.EvolutionHypothesis {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*db.EvolutionHypothesis
+	for _, h := range m.hypotheses {
+		cp := *h
+		out = append(out, &cp)
+	}
+	return out
+}
+
 // latestRun returns the single run if exactly one exists, or panics.
 func (m *mockStore) latestRun() *db.EvolutionRun {
 	m.mu.Lock()

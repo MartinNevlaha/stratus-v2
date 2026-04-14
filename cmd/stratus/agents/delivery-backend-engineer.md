@@ -19,7 +19,7 @@ Read, Grep, Glob, Edit, Write, Bash
 
 ## Workflow
 
-1. **Understand** — Read the task and explore existing backend code. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns.
+1. **Understand** — Read the task and explore existing backend code. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for evolution findings and existing knowledge relevant to this task.
 2. **Test first** — Write a failing test that captures the expected behavior (TDD).
 3. **Implement** — Write minimal code to make the test pass.
 4. **Verify** — Run all tests, confirm green. Refactor if needed while keeping tests green.

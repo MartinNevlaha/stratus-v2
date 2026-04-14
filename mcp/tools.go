@@ -623,6 +623,98 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 		},
 	})
 
+	// --- Code analysis tools ---
+
+	s.Register(Tool{
+		Name:        "code_analysis_trigger",
+		Description: "Trigger a code quality analysis run on the host project. Analyzes top files by churn/risk score for anti-patterns, duplication, coverage gaps, error handling issues, complexity, dead code, and security concerns.",
+		InputSchema: obj(
+			opt("categories", "array", "Categories to analyze. Allowed: anti_pattern, duplication, coverage_gap, error_handling, complexity, dead_code, security. Empty = all."),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			body := map[string]any{}
+			if cats, ok := args["categories"].([]any); ok {
+				body["categories"] = cats
+			}
+			return client.post("/api/code-analysis/trigger", body)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "code_analysis_findings",
+		Description: "Query code quality findings from the most recent analysis. Filter by file path, category, or severity to find specific issues.",
+		InputSchema: obj(
+			opt("file", "string", "Filter by file path (prefix match)"),
+			opt("category", "string", "Filter by category: anti_pattern, duplication, coverage_gap, error_handling, complexity, dead_code, security"),
+			opt("severity", "string", "Filter by severity: critical, warning, info"),
+			opt("q", "string", "Full-text search across finding titles and descriptions"),
+			opt("limit", "integer", "Max results to return (default: 20)"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			params := neturl.Values{}
+			for _, k := range []string{"file", "category", "severity", "q"} {
+				if v, ok := args[k].(string); ok && v != "" {
+					params.Set(k, v)
+				}
+			}
+			if n := intArg(args, "limit", 0); n > 0 {
+				params.Set("limit", fmt.Sprintf("%d", n))
+			}
+			return client.get("/api/code-analysis/findings", params)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "code_quality_summary",
+		Description: "Get aggregated code quality metrics for the project over time. Shows trends in findings count, severity distribution, and coverage.",
+		InputSchema: obj(
+			opt("days", "integer", "Number of days of history to return (default: 30, max: 365)"),
+		),
+		Handler: func(args map[string]any) (any, error) {
+			params := neturl.Values{}
+			if n := intArg(args, "days", 0); n > 0 {
+				params.Set("days", fmt.Sprintf("%d", n))
+			}
+			return client.get("/api/code-analysis/metrics", params)
+		},
+	})
+
+	s.Register(Tool{
+		Name:        "code_quality_finding_update",
+		Description: "Update the lifecycle status of a code quality finding (rejected or applied). Agents should call this with status='applied' at the end of a successful fix workflow initiated from the Code Quality tab.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"finding_id": map[string]any{
+					"type":        "string",
+					"description": "The ID of the code quality finding to update",
+				},
+				"status": map[string]any{
+					"type":        "string",
+					"description": "New lifecycle status for the finding",
+					"enum":        []string{"rejected", "applied"},
+				},
+			},
+			"required": []string{"finding_id", "status"},
+		},
+		Handler: func(args map[string]any) (any, error) {
+			findingID, ok := args["finding_id"].(string)
+			if !ok || findingID == "" {
+				return nil, fmt.Errorf("finding_id is required")
+			}
+			status, ok := args["status"].(string)
+			if !ok || status == "" {
+				return nil, fmt.Errorf("status is required")
+			}
+			if status != "rejected" && status != "applied" {
+				return nil, fmt.Errorf("status must be one of: rejected, applied")
+			}
+			return client.put("/api/code-analysis/findings/"+findingID+"/status", map[string]any{
+				"status": status,
+			})
+		},
+	})
+
 	// --- Vault sync tool ---
 
 	s.Register(Tool{

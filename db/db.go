@@ -50,6 +50,9 @@ func (d *DB) migrate() error {
 	if err := d.migrateDailyMetrics(); err != nil {
 		return fmt.Errorf("migrate daily_metrics: %w", err)
 	}
+	if err := d.migrateWikiPagesWorkflowColumns(); err != nil {
+		return fmt.Errorf("migrate wiki_pages workflow cols: %w", err)
+	}
 	if _, err := d.sql.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
@@ -130,6 +133,50 @@ func (d *DB) migrateDailyMetrics() error {
 	for _, stmt := range stmts {
 		if _, err := d.sql.Exec(stmt); err != nil {
 			return fmt.Errorf("migrate daily_metrics: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateWikiPagesWorkflowColumns adds workflow_id/feature_slug on existing
+// wiki_pages tables before the embedded schema runs, since the schema creates
+// an index referencing those columns and would fail on pre-existing databases.
+func (d *DB) migrateWikiPagesWorkflowColumns() error {
+	var count int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='wiki_pages'`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	have := map[string]bool{}
+	rows, err := d.sql.Query(`PRAGMA table_info(wiki_pages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt *string
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !have["workflow_id"] {
+		if _, err := d.sql.Exec(`ALTER TABLE wiki_pages ADD COLUMN workflow_id TEXT`); err != nil {
+			return fmt.Errorf("add workflow_id: %w", err)
+		}
+	}
+	if !have["feature_slug"] {
+		if _, err := d.sql.Exec(`ALTER TABLE wiki_pages ADD COLUMN feature_slug TEXT`); err != nil {
+			return fmt.Errorf("add feature_slug: %w", err)
 		}
 	}
 	return nil
@@ -239,6 +286,19 @@ SELECT id, title, content, doc_type FROM docs;
 	// v2 migrations: additive columns on existing tables
 	`ALTER TABLE tickets ADD COLUMN files TEXT NOT NULL DEFAULT '[]'`,
 	`ALTER TABLE missions ADD COLUMN verifying_since TEXT NOT NULL DEFAULT ''`,
+	// v3 migrations: code_findings status lifecycle
+	`ALTER TABLE code_findings ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`,
+	// v4 migrations: evolution-loop dual-write columns on insight_proposals
+	`ALTER TABLE insight_proposals ADD COLUMN wiki_page_id TEXT NULL REFERENCES wiki_pages(id)`,
+	`ALTER TABLE insight_proposals ADD COLUMN idempotency_hash TEXT NULL`,
+	`ALTER TABLE insight_proposals ADD COLUMN last_seen_at INTEGER NULL`,
+	`ALTER TABLE insight_proposals ADD COLUMN signal_refs TEXT NOT NULL DEFAULT '[]'`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_insight_proposals_idempotency ON insight_proposals(idempotency_hash) WHERE idempotency_hash IS NOT NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_insight_proposals_type_last_seen ON insight_proposals(type, last_seen_at)`,
+	// wiki second-brain: workflow-scoped pages
+	`ALTER TABLE wiki_pages ADD COLUMN workflow_id TEXT`,
+	`ALTER TABLE wiki_pages ADD COLUMN feature_slug TEXT`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS wiki_pages_workflow_uniq ON wiki_pages(workflow_id, feature_slug) WHERE workflow_id IS NOT NULL`,
 }
 
 func isMigrationError(err error) bool {

@@ -1,6 +1,33 @@
 <script lang="ts">
-	import { listWikiPages, searchWiki, queryWiki, getWikiGraph, getVaultStatus, triggerVaultSync, triggerOnboarding, getOnboardingStatus } from '$lib/api'
-	import type { WikiPage, WikiGraphData, WikiQueryResult, VaultStatus, OnboardingProgress, OnboardingResult } from '$lib/types'
+	import { onDestroy } from 'svelte'
+	import {
+		forceSimulation,
+		forceLink,
+		forceManyBody,
+		forceCenter,
+		forceCollide,
+		forceX,
+		forceY,
+		type Simulation,
+		type SimulationNodeDatum,
+		type SimulationLinkDatum,
+	} from 'd3-force'
+	import { listWikiPages, searchWiki, queryWiki, getWikiGraph, getVaultStatus, triggerVaultSync, triggerOnboarding, getOnboardingStatus, getWikiPage } from '$lib/api'
+	import type { WikiPage, WikiLink, WikiGraphData, WikiQueryResult, VaultStatus, OnboardingProgress, OnboardingResult } from '$lib/types'
+	import WikiPagePanel from '../components/WikiPagePanel.svelte'
+	import { renderMarkdown } from '$lib/markdown'
+
+	interface SimNode extends SimulationNodeDatum {
+		id: string
+		title: string
+		page_type: string
+		status: string
+		staleness_score: number
+	}
+	interface SimLink extends SimulationLinkDatum<SimNode> {
+		link_type: string
+		strength: number
+	}
 
 	let pages = $state<WikiPage[]>([])
 	let totalCount = $state(0)
@@ -25,14 +52,34 @@
 
 	let onboardingProgress = $state<OnboardingProgress | null>(null)
 	let onboardingResult = $state<OnboardingResult | null>(null)
-	let onboardingDepth = $state<'shallow' | 'standard' | 'deep'>('standard')
+	let onboardingDepth = $state<'auto' | 'shallow' | 'standard' | 'deep'>('auto')
 	let onboardingLoading = $state(false)
 	let onboardingError = $state<string | null>(null)
 	let showOnboarding = $state(false)
 
+	let panelLinksFrom = $state<WikiLink[]>([])
+	let panelLinksTo = $state<WikiLink[]>([])
+
+	// Tooltip state for graph nodes
+	let tooltipNode = $state<SimNode | null>(null)
+	let tooltipX = $state(0)
+	let tooltipY = $state(0)
+
+	let pollTimer: ReturnType<typeof setTimeout> | null = null
+	let destroyed = false
+
 	$effect(() => {
 		loadPages()
 		loadVaultStatus()
+		restoreOnboardingState()
+	})
+
+	onDestroy(() => {
+		destroyed = true
+		if (pollTimer !== null) {
+			clearTimeout(pollTimer)
+			pollTimer = null
+		}
 	})
 
 	async function loadPages() {
@@ -131,21 +178,55 @@
 	async function pollOnboardingStatus() {
 		try {
 			const status = await getOnboardingStatus()
+			if (destroyed) return
 			onboardingProgress = status
 			if (status.result) {
 				onboardingResult = status.result
 			}
 			if (status.status === 'complete' || status.status === 'failed') {
 				onboardingLoading = false
+				pollTimer = null
 				if (status.status === 'complete') {
-					await loadPages() // refresh page list
+					await loadPages()
 				}
 			} else {
-				setTimeout(pollOnboardingStatus, 2000) // poll every 2s
+				clearTimeout(pollTimer ?? undefined)
+				pollTimer = setTimeout(pollOnboardingStatus, 2000)
 			}
 		} catch (e) {
+			if (destroyed) return
 			onboardingError = e instanceof Error ? e.message : 'Failed to check status'
 			onboardingLoading = false
+			pollTimer = null
+		}
+	}
+
+	async function restoreOnboardingState() {
+		onboardingLoading = true
+		try {
+			const status = await getOnboardingStatus()
+			if (destroyed) return
+			if (!status || status.status === 'idle') {
+				onboardingLoading = false
+				return
+			}
+			onboardingProgress = status
+			if (status.result) onboardingResult = status.result
+			showOnboarding = true
+			if (status.status === 'complete' || status.status === 'failed') {
+				onboardingLoading = false
+				if (status.status === 'complete') {
+					await loadPages()
+				}
+				if (status.status === 'failed' && status.errors?.length) {
+					onboardingError = status.errors[0]
+				}
+				return
+			}
+			pollOnboardingStatus()
+		} catch (e) {
+			if (!destroyed) onboardingLoading = false
+			console.error('Failed to restore onboarding state:', e)
 		}
 	}
 
@@ -159,6 +240,21 @@
 	function formatDate(ts: string) {
 		if (!ts) return '—'
 		return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+	}
+
+	function edgeColor(linkType: string): string {
+		switch (linkType) {
+			case 'parent':     return '#3b82f6'
+			case 'child':      return '#10b981'
+			case 'contradicts': return '#ef4444'
+			case 'supersedes': return '#f97316'
+			case 'cites':      return '#a855f7'
+			default:           return '#6b7280' // related
+		}
+	}
+
+	function edgeDash(linkType: string): string {
+		return linkType === 'related' ? '4 2' : 'none'
 	}
 
 	function stalenessColor(score: number): string {
@@ -189,35 +285,226 @@
 		}
 	}
 
-	// Graph layout: assign positions in a grid
-	function graphNodePositions(nodes: WikiGraphData['nodes']): Map<string, { x: number; y: number }> {
-		const positions = new Map<string, { x: number; y: number }>()
-		const cols = Math.ceil(Math.sqrt(nodes.length))
-		const cellW = 160
-		const cellH = 100
-		nodes.forEach((n, i) => {
-			const col = i % cols
-			const row = Math.floor(i / cols)
-			positions.set(n.id, {
-				x: 80 + col * cellW,
-				y: 50 + row * cellH,
-			})
+	// --- Force-directed graph state ---
+	const GRAPH_W = 900
+	const GRAPH_H = 560
+
+	// Plain (non-$state) because d3-force mutates node objects in place; Svelte's
+	// $state proxy would shadow those mutations. Re-renders are driven by the
+	// reactive `tickVersion` counter below via `{#key tickVersion}`.
+	let simNodes: SimNode[] = []
+	let simLinks: SimLink[] = []
+	let tickVersion = $state(0)
+	let transform = $state({ x: 0, y: 0, k: 1 })
+	let hoverId = $state<string | null>(null)
+
+	let sim: Simulation<SimNode, SimLink> | null = null
+	let degreeMap = new Map<string, number>()
+	let neighborMap = new Map<string, Set<string>>()
+
+	let svgEl = $state<SVGSVGElement | null>(null)
+	let panning = false
+	let panStart = { x: 0, y: 0, tx: 0, ty: 0 }
+	let draggingId: string | null = null
+	let dragMoved = false
+	let dragStart = { x: 0, y: 0 }
+
+	function rebuildGraph(data: WikiGraphData) {
+		// Preserve positions of existing nodes for stability on reload.
+		const prev = new Map(simNodes.map((n) => [n.id, n]))
+		const nextNodes: SimNode[] = data.nodes.map((n) => {
+			const old = prev.get(n.id)
+			return {
+				id: n.id,
+				title: n.title,
+				page_type: n.page_type,
+				status: n.status,
+				staleness_score: n.staleness_score,
+				x: old?.x,
+				y: old?.y,
+				vx: old?.vx,
+				vy: old?.vy,
+			}
 		})
-		return positions
+		const nextLinks: SimLink[] = data.edges.map((e) => ({
+			source: e.from_page_id,
+			target: e.to_page_id,
+			link_type: e.link_type,
+			strength: e.strength,
+		}))
+
+		degreeMap = new Map()
+		neighborMap = new Map()
+		for (const e of data.edges) {
+			degreeMap.set(e.from_page_id, (degreeMap.get(e.from_page_id) ?? 0) + 1)
+			degreeMap.set(e.to_page_id, (degreeMap.get(e.to_page_id) ?? 0) + 1)
+			if (!neighborMap.has(e.from_page_id)) neighborMap.set(e.from_page_id, new Set())
+			if (!neighborMap.has(e.to_page_id)) neighborMap.set(e.to_page_id, new Set())
+			neighborMap.get(e.from_page_id)!.add(e.to_page_id)
+			neighborMap.get(e.to_page_id)!.add(e.from_page_id)
+		}
+
+		sim?.stop()
+		simNodes = nextNodes
+		simLinks = nextLinks
+
+		sim = forceSimulation<SimNode, SimLink>(nextNodes)
+			.force(
+				'link',
+				forceLink<SimNode, SimLink>(nextLinks)
+					.id((d) => d.id)
+					.distance(90)
+					.strength((d) => Math.min(1, Math.max(0.1, d.strength ?? 0.5))),
+			)
+			.force('charge', forceManyBody().strength(-180).distanceMax(400))
+			.force('center', forceCenter(GRAPH_W / 2, GRAPH_H / 2))
+			.force('x', forceX(GRAPH_W / 2).strength(0.06))
+			.force('y', forceY(GRAPH_H / 2).strength(0.08))
+			.force('collide', forceCollide<SimNode>().radius((d) => nodeRadius(d) + 6))
+			.alpha(1)
+			.on('tick', () => {
+				tickVersion++
+			})
 	}
 
-	let graphPositions = $derived(graphData ? graphNodePositions(graphData.nodes) : new Map())
+	$effect(() => {
+		if (!graphData) return
+		rebuildGraph(graphData)
+	})
 
-	let graphWidth = $derived(
-		graphData && graphData.nodes.length > 0
-			? Math.ceil(Math.sqrt(graphData.nodes.length)) * 160 + 80
-			: 800
-	)
-	let graphHeight = $derived(
-		graphData && graphData.nodes.length > 0
-			? Math.ceil(graphData.nodes.length / Math.ceil(Math.sqrt(graphData.nodes.length))) * 100 + 80
-			: 400
-	)
+	onDestroy(() => {
+		sim?.stop()
+		sim = null
+	})
+
+	function nodeRadius(n: { id: string }): number {
+		const deg = degreeMap.get(n.id) ?? 0
+		return 10 + Math.min(14, deg * 1.8)
+	}
+
+	function isNeighbor(a: string, b: string): boolean {
+		return neighborMap.get(a)?.has(b) ?? false
+	}
+
+	function edgeIsIncident(e: SimLink, id: string): boolean {
+		const s = typeof e.source === 'object' ? (e.source as SimNode).id : (e.source as string)
+		const t = typeof e.target === 'object' ? (e.target as SimNode).id : (e.target as string)
+		return s === id || t === id
+	}
+
+	function screenToWorld(sx: number, sy: number): { x: number; y: number } {
+		return {
+			x: (sx - transform.x) / transform.k,
+			y: (sy - transform.y) / transform.k,
+		}
+	}
+
+	function onSvgWheel(e: WheelEvent) {
+		if (!svgEl) return
+		e.preventDefault()
+		const rect = svgEl.getBoundingClientRect()
+		const mx = e.clientX - rect.left
+		const my = e.clientY - rect.top
+		const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+		const nextK = Math.min(3, Math.max(0.2, transform.k * factor))
+		const k = nextK / transform.k
+		transform = {
+			k: nextK,
+			x: mx - (mx - transform.x) * k,
+			y: my - (my - transform.y) * k,
+		}
+	}
+
+	function onSvgPointerDown(e: PointerEvent) {
+		if (!svgEl) return
+		if (draggingId !== null) return
+		panning = true
+		panStart = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y }
+		svgEl.setPointerCapture(e.pointerId)
+	}
+
+	function onSvgPointerMove(e: PointerEvent) {
+		if (draggingId !== null) {
+			if (!svgEl) return
+			const rect = svgEl.getBoundingClientRect()
+			const pt = screenToWorld(e.clientX - rect.left, e.clientY - rect.top)
+			const node = simNodes.find((n) => n.id === draggingId)
+			if (node) {
+				node.fx = pt.x
+				node.fy = pt.y
+			}
+			if (
+				Math.abs(e.clientX - dragStart.x) > 3 ||
+				Math.abs(e.clientY - dragStart.y) > 3
+			) {
+				dragMoved = true
+			}
+			return
+		}
+		if (!panning) return
+		transform = {
+			...transform,
+			x: panStart.tx + (e.clientX - panStart.x),
+			y: panStart.ty + (e.clientY - panStart.y),
+		}
+	}
+
+	function onSvgPointerUp(e: PointerEvent) {
+		if (draggingId !== null) {
+			const node = simNodes.find((n) => n.id === draggingId)
+			if (node) {
+				node.fx = null
+				node.fy = null
+			}
+			sim?.alphaTarget(0)
+			draggingId = null
+		}
+		panning = false
+		if (svgEl && svgEl.hasPointerCapture?.(e.pointerId)) {
+			svgEl.releasePointerCapture(e.pointerId)
+		}
+	}
+
+	function onNodePointerDown(e: PointerEvent, node: SimNode) {
+		e.stopPropagation()
+		if (!svgEl) return
+		draggingId = node.id
+		dragMoved = false
+		dragStart = { x: e.clientX, y: e.clientY }
+		node.fx = node.x
+		node.fy = node.y
+		sim?.alphaTarget(0.3).restart()
+		svgEl.setPointerCapture(e.pointerId)
+	}
+
+	function onNodeClick(node: SimNode) {
+		if (dragMoved) return
+		navigateToPage(node.id)
+	}
+
+	async function navigateToPage(id: string) {
+		try {
+			const data = await getWikiPage(id)
+			selectedPage = data.page
+			panelLinksFrom = data.links_from
+			panelLinksTo = data.links_to
+		} catch (e) {
+			console.error('Failed to load wiki page:', e instanceof Error ? e.message : String(e))
+			// Fall back to pages list lookup
+			const page = pages.find((p) => p.id === id)
+			if (page) {
+				selectedPage = page
+				panelLinksFrom = []
+				panelLinksTo = []
+			}
+		}
+	}
+
+	function closePanelAndDeselect() {
+		selectedPage = null
+		panelLinksFrom = []
+		panelLinksTo = []
+	}
 </script>
 
 <div class="wiki">
@@ -259,6 +546,7 @@
 				<label class="depth-label">
 					Depth:
 					<select bind:value={onboardingDepth} disabled={onboardingLoading}>
+						<option value="auto">Auto (adapts to project size)</option>
 						<option value="shallow">Shallow (3-5 pages)</option>
 						<option value="standard">Standard (8-15 pages)</option>
 						<option value="deep">Deep (15-25 pages)</option>
@@ -400,7 +688,9 @@
 
 							{#if selectedPage?.id === page.id}
 								<div class="page-detail">
-									<div class="page-content">{page.content}</div>
+									<div class="page-content markdown-content">
+										{@html renderMarkdown(page.content)}
+									</div>
 									{#if page.generated_by}
 										<div class="page-footer">
 											<span class="generated-by">Generated by: {page.generated_by}</span>
@@ -524,62 +814,151 @@
 					<span>·</span>
 					<span>{graphData.edges.length} edges</span>
 				</div>
-				<div class="graph-container">
-					<svg
-						width={graphWidth}
-						height={graphHeight}
-						role="img"
-						aria-label="Knowledge graph"
-					>
-						<defs>
-							<marker id="arrowhead" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
-								<polygon points="0 0, 6 2, 0 4" fill="#444d56" />
-							</marker>
-						</defs>
 
-						<!-- Edges -->
-						{#each graphData.edges as edge}
-							{@const fromPos = graphPositions.get(edge.from)}
-							{@const toPos = graphPositions.get(edge.to)}
-							{#if fromPos && toPos}
-								<line
-									x1={fromPos.x}
-									y1={fromPos.y}
-									x2={toPos.x}
-									y2={toPos.y}
-									stroke="#30363d"
-									stroke-width={Math.max(1, edge.strength * 3)}
-									stroke-opacity="0.7"
-									marker-end="url(#arrowhead)"
-								/>
-							{/if}
-						{/each}
-
-						<!-- Nodes -->
-						{#each graphData.nodes as node}
-							{@const pos = graphPositions.get(node.id)}
-							{#if pos}
-								<g class="graph-node" transform="translate({pos.x},{pos.y})">
-									<circle
-										r="20"
-										fill="#21262d"
-										stroke={stalenessColor(node.staleness_score)}
-										stroke-width="2"
-									/>
-									<text
-										text-anchor="middle"
-										dy="35"
-										font-size="10"
-										fill="#8b949e"
-										class="node-label"
-									>{node.title.slice(0, 18)}{node.title.length > 18 ? '…' : ''}</text>
-									<title>{node.title} ({node.page_type}, {node.status})</title>
-								</g>
-							{/if}
-						{/each}
-					</svg>
+				<div class="graph-legend-bar">
+					<span class="legend-title">Edge types:</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#6b7280"></span>related</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#3b82f6"></span>parent</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#10b981"></span>child</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#ef4444"></span>contradicts</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#f97316"></span>supersedes</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#a855f7"></span>cites</span>
+					<span class="legend-sep">|</span>
+					<span class="legend-title">Staleness:</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#58a6ff"></span>fresh</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#3fb950"></span>minor</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#d29922"></span>moderate</span>
+					<span class="legend-item"><span class="legend-swatch" style="background:#f85149"></span>stale</span>
 				</div>
-				<p class="graph-legend">Node border color indicates staleness: <span style="color:#58a6ff">fresh</span> · <span style="color:#3fb950">minor</span> · <span style="color:#d29922">moderate</span> · <span style="color:#f85149">stale</span></p>
+
+				<div class="graph-layout">
+					<div class="graph-container">
+						<svg
+							bind:this={svgEl}
+							width={GRAPH_W}
+							height={GRAPH_H}
+							role="img"
+							aria-label="Knowledge graph"
+							onwheel={onSvgWheel}
+							onpointerdown={onSvgPointerDown}
+							onpointermove={onSvgPointerMove}
+							onpointerup={onSvgPointerUp}
+							onpointercancel={onSvgPointerUp}
+						>
+							{#key tickVersion}
+								<g transform="translate({transform.x},{transform.y}) scale({transform.k})">
+									<!-- Edges -->
+									{#each simLinks as edge}
+										{@const src = edge.source as SimNode}
+										{@const tgt = edge.target as SimNode}
+										{#if src && tgt && typeof src === 'object' && typeof tgt === 'object'}
+											<line
+												x1={src.x ?? 0}
+												y1={src.y ?? 0}
+												x2={tgt.x ?? 0}
+												y2={tgt.y ?? 0}
+												stroke={edgeColor(edge.link_type)}
+												stroke-width={Math.max(1, edge.strength * 3)}
+												stroke-opacity={hoverId && !edgeIsIncident(edge, hoverId) ? 0.1 : 0.7}
+												stroke-dasharray={edgeDash(edge.link_type)}
+											/>
+										{/if}
+									{/each}
+
+									<!-- Nodes -->
+									{#each simNodes as node (node.id)}
+										{@const r = nodeRadius(node)}
+										{@const dim = hoverId !== null && hoverId !== node.id && !isNeighbor(hoverId, node.id)}
+										<g
+											class="graph-node"
+											class:dim
+											transform="translate({node.x ?? 0},{node.y ?? 0})"
+											onpointerdown={(e) => onNodePointerDown(e, node)}
+											onpointerenter={(e) => {
+												hoverId = node.id
+												tooltipNode = node
+												if (svgEl) {
+													const rect = svgEl.getBoundingClientRect()
+													tooltipX = e.clientX - rect.left + 12
+													tooltipY = e.clientY - rect.top - 10
+												}
+											}}
+											onpointermove={(e) => {
+												if (tooltipNode?.id === node.id && svgEl) {
+													const rect = svgEl.getBoundingClientRect()
+													tooltipX = e.clientX - rect.left + 12
+													tooltipY = e.clientY - rect.top - 10
+												}
+											}}
+											onpointerleave={() => {
+												if (hoverId === node.id) hoverId = null
+												tooltipNode = null
+											}}
+											onclick={() => onNodeClick(node)}
+											onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNodeClick(node) } }}
+											role="button"
+											tabindex="0"
+											aria-label={node.title}
+										>
+											<circle
+												r={r}
+												fill={selectedPage?.id === node.id ? '#1c2a3a' : '#21262d'}
+												stroke={stalenessColor(node.staleness_score)}
+												stroke-width={selectedPage?.id === node.id ? 3 : 2}
+											/>
+											{#if transform.k >= 0.6}
+												<text
+													text-anchor="middle"
+													dy={r + 12}
+													font-size="10"
+													class="node-label"
+												>{node.title.slice(0, 22)}{node.title.length > 22 ? '…' : ''}</text>
+											{/if}
+										</g>
+									{/each}
+								</g>
+							{/key}
+						</svg>
+
+						<!-- Staleness tooltip -->
+						{#if tooltipNode}
+							<div
+								class="node-tooltip"
+								style="left: {tooltipX}px; top: {tooltipY}px;"
+								aria-hidden="true"
+							>
+								<div class="tooltip-title">{tooltipNode.title}</div>
+								<div class="tooltip-row">
+									<span class="tooltip-label">Staleness:</span>
+									<span style="color: {stalenessColor(tooltipNode.staleness_score)}">
+										{(tooltipNode.staleness_score * 100).toFixed(0)}%
+									</span>
+								</div>
+								<div class="tooltip-row">
+									<span class="tooltip-label">Type:</span>
+									<span>{tooltipNode.page_type}</span>
+								</div>
+								<div class="tooltip-row">
+									<span class="tooltip-label">Status:</span>
+									<span>{tooltipNode.status}</span>
+								</div>
+							</div>
+						{/if}
+					</div>
+
+					{#if selectedPage}
+						<WikiPagePanel
+							page={selectedPage}
+							linksFrom={panelLinksFrom}
+							linksTo={panelLinksTo}
+							allPages={pages}
+							onClose={closePanelAndDeselect}
+							onNavigate={navigateToPage}
+						/>
+					{/if}
+				</div>
+
+				<p class="graph-legend">Drag nodes · scroll to zoom · drag background to pan · click node to open detail panel</p>
 			{/if}
 		</section>
 	{/if}
@@ -1106,20 +1485,42 @@
 		background: #0d1117;
 		border: 1px solid #30363d;
 		border-radius: 8px;
-		overflow: auto;
-		max-height: 600px;
+		overflow: hidden;
+		cursor: grab;
+		touch-action: none;
+		position: relative;
+	}
+
+	.graph-container:active {
+		cursor: grabbing;
 	}
 
 	.graph-container svg {
 		display: block;
+		user-select: none;
 	}
 
 	.graph-node {
-		cursor: default;
+		cursor: pointer;
+		transition: opacity 0.15s;
+	}
+
+	.graph-node.dim {
+		opacity: 0.22;
+	}
+
+	.graph-node:focus {
+		outline: none;
 	}
 
 	.node-label {
 		pointer-events: none;
+		user-select: none;
+		fill: #c9d1d9;
+		paint-order: stroke;
+		stroke: #0d1117;
+		stroke-width: 3px;
+		stroke-linejoin: round;
 	}
 
 	.graph-legend {
@@ -1290,5 +1691,174 @@
 
 	.result-failed {
 		color: #f85149;
+	}
+
+	/* Graph legend bar */
+	.graph-legend-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.625rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.75rem;
+		font-size: 0.75rem;
+		color: #8b949e;
+	}
+
+	.legend-title {
+		color: #6e7681;
+		font-weight: 500;
+	}
+
+	.legend-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		color: #8b949e;
+	}
+
+	.legend-swatch {
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.legend-sep {
+		color: #30363d;
+		margin: 0 0.25rem;
+	}
+
+	/* Graph layout with side panel */
+	.graph-layout {
+		display: flex;
+		align-items: flex-start;
+		gap: 0;
+		overflow: hidden;
+	}
+
+	/* Node tooltip */
+	.node-tooltip {
+		position: absolute;
+		pointer-events: none;
+		background: #161b22;
+		border: 1px solid #30363d;
+		border-radius: 6px;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.75rem;
+		color: #c9d1d9;
+		z-index: 10;
+		min-width: 160px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+	}
+
+	.tooltip-title {
+		font-weight: 600;
+		color: #e6edf3;
+		margin-bottom: 0.375rem;
+		font-size: 0.8rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 200px;
+	}
+
+	.tooltip-row {
+		display: flex;
+		gap: 0.4rem;
+		margin-bottom: 0.125rem;
+		color: #8b949e;
+	}
+
+	.tooltip-label {
+		color: #6e7681;
+		flex-shrink: 0;
+	}
+
+	/* Markdown in browse view */
+	.page-content.markdown-content {
+		white-space: normal;
+	}
+
+	.page-content.markdown-content :global(h1),
+	.page-content.markdown-content :global(h2),
+	.page-content.markdown-content :global(h3),
+	.page-content.markdown-content :global(h4) {
+		color: #c9d1d9;
+		margin: 1em 0 0.4em;
+		font-weight: 600;
+	}
+
+	.page-content.markdown-content :global(h1) { font-size: 1rem; }
+	.page-content.markdown-content :global(h2) { font-size: 0.925rem; }
+	.page-content.markdown-content :global(h3) { font-size: 0.875rem; }
+
+	.page-content.markdown-content :global(p) {
+		margin: 0 0 0.75em;
+	}
+
+	.page-content.markdown-content :global(ul),
+	.page-content.markdown-content :global(ol) {
+		margin: 0 0 0.75em;
+		padding-left: 1.5em;
+	}
+
+	.page-content.markdown-content :global(li) {
+		margin-bottom: 0.2em;
+	}
+
+	.page-content.markdown-content :global(code) {
+		background: #21262d;
+		border: 1px solid #30363d;
+		border-radius: 3px;
+		padding: 0.1em 0.3em;
+		font-size: 0.8em;
+		font-family: monospace;
+		color: #e6edf3;
+	}
+
+	.page-content.markdown-content :global(pre) {
+		background: #21262d;
+		border: 1px solid #30363d;
+		border-radius: 5px;
+		padding: 0.75rem;
+		overflow-x: auto;
+		margin: 0 0 0.75em;
+	}
+
+	.page-content.markdown-content :global(pre code) {
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: 0.78rem;
+	}
+
+	.page-content.markdown-content :global(blockquote) {
+		border-left: 3px solid #30363d;
+		padding-left: 0.75rem;
+		color: #8b949e;
+		margin: 0 0 0.75em;
+	}
+
+	.page-content.markdown-content :global(a) {
+		color: #58a6ff;
+	}
+
+	.page-content.markdown-content :global(table) {
+		border-collapse: collapse;
+		width: 100%;
+		margin: 0 0 0.75em;
+		font-size: 0.78rem;
+	}
+
+	.page-content.markdown-content :global(th),
+	.page-content.markdown-content :global(td) {
+		border: 1px solid #30363d;
+		padding: 0.3rem 0.6rem;
+	}
+
+	.page-content.markdown-content :global(th) {
+		background: #21262d;
+		font-weight: 600;
 	}
 </style>

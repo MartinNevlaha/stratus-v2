@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -11,7 +15,49 @@ var (
 	ErrNoAPIKey             = errors.New("llm: no api key provided")
 	ErrProviderNotSupported = errors.New("llm: provider not supported")
 	ErrRequestFailed        = errors.New("llm: request failed")
+	ErrRateLimited          = errors.New("llm: rate limited")
 )
+
+// RateLimitedError is returned when the provider responds with HTTP 429.
+// RetryAfter carries the duration parsed from the Retry-After header (zero if absent).
+type RateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitedError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("llm: rate limited, retry after %v", e.RetryAfter)
+	}
+	return "llm: rate limited"
+}
+
+func (e *RateLimitedError) Is(target error) bool {
+	return target == ErrRateLimited
+}
+
+// parseRetryAfter parses the Retry-After header per RFC 7231:
+// it accepts both an integer seconds form and an HTTP-date form.
+// Returns 0 if the header is absent or unparseable.
+func parseRetryAfter(h http.Header) time.Duration {
+	val := h.Get("Retry-After")
+	if val == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(val); err == nil {
+		d := time.Until(t)
+		if d < 0 {
+			return 0
+		}
+		return d
+	}
+	return 0
+}
 
 type Message struct {
 	Role    string `json:"role"`
@@ -63,13 +109,17 @@ func NewClient(cfg Config) (Client, error) {
 		return nil, err
 	}
 
+	// Wrap retry first (inner), then semaphore (outer) so that a single semaphore
+	// slot is held across all retry attempts — retry loops while holding the slot.
 	if cfg.MaxRetries > 0 {
-		return NewClientWithRetry(client, RetryConfig{
+		client = NewClientWithRetry(client, RetryConfig{
 			MaxRetries:  cfg.MaxRetries,
 			InitialWait: 1 * time.Second,
 			MaxWait:     30 * time.Second,
-		}), nil
+			Multiplier:  2.0,
+		})
 	}
+	client = newSemaphoreClient(client, cfg)
 
 	return client, nil
 }

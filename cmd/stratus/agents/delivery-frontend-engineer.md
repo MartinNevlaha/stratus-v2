@@ -19,7 +19,7 @@ Read, Grep, Glob, Edit, Write, Bash
 
 ## Workflow
 
-1. **Understand** — Read the task and explore existing UI code. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find component patterns.
+1. **Understand** — Read the task and explore existing UI code. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find component patterns. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for evolution findings and existing knowledge relevant to this task.
 2. **Implement** — Build components following the project's existing framework and patterns.
 3. **Test** — Write component tests. Run all tests and confirm green.
 

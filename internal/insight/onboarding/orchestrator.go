@@ -24,10 +24,20 @@ type OnboardingOpts struct {
 	// MaxPages is the upper bound on module pages added beyond the core set.
 	// Zero means use a sensible default (10).
 	MaxPages int
+	// IngestTokenBudget is the cumulative LLM token budget for the entire run.
+	// When cumulative tokens exceed this value after a page is written, no
+	// further pages are generated and a budget-exceeded warning is appended to
+	// the result's Errors slice. The partial result (pages written so far) is
+	// returned without an error — callers can check result.Errors for the warning.
+	// Zero means unlimited (no budget guard applied).
+	IngestTokenBudget int
 	// OutputDir, if non-empty, causes each page to be written as <slug>.md.
 	OutputDir string
 	// ProgressFn is called with status updates. Nil-safe.
 	ProgressFn func(OnboardingProgress)
+	// SaveAssetProposals is called after page generation with proposed assets.
+	// Nil-safe — if nil, asset proposals are skipped.
+	SaveAssetProposals func([]AssetProposal) error
 }
 
 // OnboardingResult summarises the outcome of a RunOnboarding call.
@@ -42,6 +52,7 @@ type OnboardingResult struct {
 	TokensUsed     int           `json:"tokens_used"`
 	Errors         []string      `json:"errors"`
 	PageIDs        []string      `json:"page_ids"`
+	AssetProposals int           `json:"asset_proposals"`
 }
 
 // OnboardingProgress is delivered to OnboardingOpts.ProgressFn.
@@ -181,6 +192,33 @@ func RunOnboarding(
 		// Write standalone output file.
 		if opts.OutputDir != "" {
 			writeStandaloneFile(opts.OutputDir, page)
+		}
+
+		// Token-budget guard: abort further generation if budget exceeded.
+		// 0 means unlimited — no guard applied.
+		if opts.IngestTokenBudget > 0 && result.TokensUsed > opts.IngestTokenBudget {
+			slog.Warn("run onboarding: token budget exceeded, stopping early",
+				"budget", opts.IngestTokenBudget,
+				"tokens_used", result.TokensUsed,
+				"pages_generated", result.PagesGenerated,
+			)
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("token budget exceeded: used %d tokens (budget %d); partial result with %d pages",
+					result.TokensUsed, opts.IngestTokenBudget, result.PagesGenerated),
+			)
+			break
+		}
+	}
+
+	// Asset proposals (deterministic, no LLM).
+	if opts.SaveAssetProposals != nil {
+		assetProposals := GenerateAssetProposals(profile, profile.RootPath, nil)
+		if len(assetProposals) > 0 {
+			if saveErr := opts.SaveAssetProposals(assetProposals); saveErr != nil {
+				slog.Warn("run onboarding: save asset proposals", "err", saveErr)
+			} else {
+				result.AssetProposals = len(assetProposals)
+			}
 		}
 	}
 

@@ -21,27 +21,32 @@ func defaultEvolutionConfig() config.EvolutionConfig {
 	}
 }
 
-func TestEvaluate_AutoApplied(t *testing.T) {
+// TestEvaluate_AutoApplied_NeverTriggered verifies that auto_applied is never
+// returned after T9 removed all internal categories. Any high-confidence
+// experiment now results in proposal_created, not auto_applied.
+func TestEvaluate_AutoApplied_NeverTriggered(t *testing.T) {
 	cfg := defaultEvolutionConfig()
 	evaluator := evolution_loop.NewEvaluator(func() config.EvolutionConfig { return cfg })
 
 	// baseline=0.50, experiment=1.00 → effectRatio=1.0, sampleFactor=1.0, confidence=1.0
+	// Even with confidence=1.0, internalCategories is empty so auto_applied cannot fire.
 	h := &db.EvolutionHypothesis{
-		Category:       "threshold_adjustment",
+		Category:       "prompt_tuning",
 		BaselineMetric: 0.50,
 	}
 	result := &evolution_loop.ExperimentResult{
 		Metric:     1.00,
-		SampleSize: 20, // >= MinSampleSize(10)
+		SampleSize: 20,
 	}
 
-	decision, reason, confidence := evaluator.Evaluate(h, result, cfg)
+	decision, _, confidence := evaluator.Evaluate(h, result, cfg)
 
-	if decision != "auto_applied" {
-		t.Errorf("expected auto_applied, got %q (confidence=%.4f, reason=%s)", decision, confidence, reason)
+	if decision == "auto_applied" {
+		t.Errorf("auto_applied must never be returned after T9 (confidence=%.4f)", confidence)
 	}
-	if confidence < cfg.AutoApplyThreshold {
-		t.Errorf("confidence %.4f should be >= AutoApplyThreshold %.4f", confidence, cfg.AutoApplyThreshold)
+	// High confidence → should be proposal_created.
+	if decision != "proposal_created" {
+		t.Errorf("expected proposal_created, got %q (confidence=%.4f)", decision, confidence)
 	}
 }
 
@@ -49,9 +54,8 @@ func TestEvaluate_ProposalCreated(t *testing.T) {
 	cfg := defaultEvolutionConfig()
 	evaluator := evolution_loop.NewEvaluator(func() config.EvolutionConfig { return cfg })
 
-	// Use a user-visible category so auto_apply is not triggered even at high confidence.
 	// baseline=0.50, experiment=0.90 → effectRatio=0.80, sampleFactor=1.0, confidence=0.80
-	// 0.80 >= ProposalThreshold(0.65) but category is prompt_tuning (not internal).
+	// 0.80 >= ProposalThreshold(0.65).
 	h := &db.EvolutionHypothesis{
 		Category:       "prompt_tuning",
 		BaselineMetric: 0.50,
@@ -100,7 +104,7 @@ func TestEvaluate_Inconclusive(t *testing.T) {
 	evaluator := evolution_loop.NewEvaluator(func() config.EvolutionConfig { return cfg })
 
 	h := &db.EvolutionHypothesis{
-		Category:       "threshold_adjustment",
+		Category:       "prompt_tuning",
 		BaselineMetric: 0.50,
 	}
 	// SampleSize < MinSampleSize(10)
@@ -119,23 +123,33 @@ func TestEvaluate_Inconclusive(t *testing.T) {
 	}
 }
 
-func TestEvaluate_AutoApply_BlockedForExternalCategory(t *testing.T) {
+// TestEvaluate_AutoApply_BlockedForAllCategories verifies that auto_applied is
+// never produced for any category now that internalCategories is empty (T9).
+func TestEvaluate_AutoApply_BlockedForAllCategories(t *testing.T) {
 	cfg := defaultEvolutionConfig()
 	evaluator := evolution_loop.NewEvaluator(func() config.EvolutionConfig { return cfg })
 
-	// Very high confidence but prompt_tuning is not an internal category.
-	h := &db.EvolutionHypothesis{
-		Category:       "prompt_tuning",
-		BaselineMetric: 0.10,
-	}
-	result := &evolution_loop.ExperimentResult{
-		Metric:     1.00,
-		SampleSize: 100,
+	categories := []string{
+		"prompt_tuning",
+		"workflow_routing",    // legacy
+		"agent_selection",     // legacy
+		"threshold_adjustment", // legacy
 	}
 
-	decision, _, _ := evaluator.Evaluate(h, result, cfg)
+	for _, cat := range categories {
+		h := &db.EvolutionHypothesis{
+			Category:       cat,
+			BaselineMetric: 0.10,
+		}
+		result := &evolution_loop.ExperimentResult{
+			Metric:     1.00,
+			SampleSize: 100,
+		}
 
-	if decision == "auto_applied" {
-		t.Error("auto_applied must not be used for prompt_tuning category")
+		decision, _, _ := evaluator.Evaluate(h, result, cfg)
+
+		if decision == "auto_applied" {
+			t.Errorf("[%s] auto_applied must not be returned after T9", cat)
+		}
 	}
 }

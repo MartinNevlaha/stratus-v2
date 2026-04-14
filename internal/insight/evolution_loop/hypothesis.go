@@ -11,72 +11,63 @@ import (
 	"github.com/google/uuid"
 )
 
-// allCategories is the full set of hypothesis categories the generator knows about.
+// allCategories is the set of hypothesis categories the legacy generator knows about.
+// NOTE: workflow_routing, agent_selection, and threshold_adjustment were removed in T9.
+// Rows with those categories already persisted in insight_proposals remain readable
+// but no new code path emits them. Only prompt_tuning is retained here because
+// execute() in loop.go still drives the legacy HypothesisGenerator for the Run()
+// code path; RunCycle() uses the generators/ sub-package instead.
 var allCategories = []string{
-	"workflow_routing",
-	"agent_selection",
-	"threshold_adjustment",
 	"prompt_tuning",
 }
 
-// seedHypotheses is a catalogue of simple MVP hypotheses indexed by category.
-var seedHypotheses = map[string][]struct {
-	desc          string
-	baselineValue string
-	proposedValue string
-	metric        string
-	baselineMetric float64
-}{
-	"workflow_routing": {
-		{
-			desc:           "Lower routing confidence threshold from 0.80 to 0.75 to reduce fallbacks",
-			baselineValue:  "0.80",
-			proposedValue:  "0.75",
-			metric:         "routing_accuracy",
-			baselineMetric: 0.80,
-		},
-		{
-			desc:           "Raise routing confidence threshold from 0.80 to 0.85 to improve precision",
-			baselineValue:  "0.80",
-			proposedValue:  "0.85",
-			metric:         "routing_accuracy",
-			baselineMetric: 0.80,
-		},
-	},
-	"agent_selection": {
-		{
-			desc:           "Prefer specialist agents for tasks with >3 files touched",
-			baselineValue:  "generalist",
-			proposedValue:  "specialist_above_3_files",
-			metric:         "task_success_rate",
-			baselineMetric: 0.72,
+// SeedHypothesis holds the data for a single seed hypothesis entry.
+// Exported so that tests can inspect fields without reflection.
+type SeedHypothesis struct {
+	Desc          string
+	BaselineValue string
+	ProposedValue string
+	Metric        string
+	BaselineMetric float64
+}
+
+// seedHypothesesByLang is a catalogue of seed hypotheses per language, indexed
+// first by language code then by category.
+// NOTE: workflow_routing, agent_selection, and threshold_adjustment seeds were
+// removed in T9. Only prompt_tuning seeds remain for the legacy Run() path.
+var seedHypothesesByLang = map[string]map[string][]SeedHypothesis{
+	"en": {
+		"prompt_tuning": {
+			{
+				Desc:           "Add chain-of-thought prefix to planning prompts",
+				BaselineValue:  "standard",
+				ProposedValue:  "chain_of_thought",
+				Metric:         "plan_quality_score",
+				BaselineMetric: 0.68,
+			},
 		},
 	},
-	"threshold_adjustment": {
-		{
-			desc:           "Reduce auto-apply confidence threshold from 0.85 to 0.80",
-			baselineValue:  "0.85",
-			proposedValue:  "0.80",
-			metric:         "auto_apply_accuracy",
-			baselineMetric: 0.85,
-		},
-		{
-			desc:           "Increase min sample size from 10 to 15 for higher statistical confidence",
-			baselineValue:  "10",
-			proposedValue:  "15",
-			metric:         "decision_reliability",
-			baselineMetric: 0.78,
+	"sk": {
+		"prompt_tuning": {
+			{
+				Desc:           "Pridať predponu reťazca myšlienok do plánovacích výziev",
+				BaselineValue:  "standard",
+				ProposedValue:  "chain_of_thought",
+				Metric:         "plan_quality_score",
+				BaselineMetric: 0.68,
+			},
 		},
 	},
-	"prompt_tuning": {
-		{
-			desc:           "Add chain-of-thought prefix to planning prompts",
-			baselineValue:  "standard",
-			proposedValue:  "chain_of_thought",
-			metric:         "plan_quality_score",
-			baselineMetric: 0.68,
-		},
-	},
+}
+
+// SeedsFor returns the seed hypothesis map for the given language code.
+// If lang is not a known language, it logs a warning and falls back to "en".
+func SeedsFor(lang string) map[string][]SeedHypothesis {
+	if seeds, ok := seedHypothesesByLang[lang]; ok {
+		return seeds
+	}
+	slog.Warn("evolution hypothesis: unknown language, falling back to English", "lang", lang)
+	return seedHypothesesByLang["en"]
 }
 
 // HypothesisGenerator creates candidate hypotheses for an evolution run.
@@ -94,11 +85,23 @@ func NewHypothesisGenerator(store EvolutionStore, llmClient llm.Client) *Hypothe
 // Generate returns up to maxCount hypotheses, optionally filtered by categories.
 // When categories is empty all known categories are used.
 // It tries LLM-powered generation first and falls back to static seeds on error.
+// lang controls the language of descriptions and the LLM system prompt.
 func (g *HypothesisGenerator) Generate(
 	ctx context.Context,
 	runID string,
 	categories []string,
 	maxCount int,
+) ([]db.EvolutionHypothesis, error) {
+	return g.GenerateWithLang(ctx, runID, categories, maxCount, "en")
+}
+
+// GenerateWithLang is like Generate but accepts an explicit language code.
+func (g *HypothesisGenerator) GenerateWithLang(
+	ctx context.Context,
+	runID string,
+	categories []string,
+	maxCount int,
+	lang string,
 ) ([]db.EvolutionHypothesis, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("evolution hypothesis generator: context cancelled: %w", err)
@@ -106,7 +109,7 @@ func (g *HypothesisGenerator) Generate(
 
 	// Try LLM-powered generation first.
 	if g.llmClient != nil {
-		hypotheses, err := g.generateWithLLM(ctx, runID, categories, maxCount)
+		hypotheses, err := g.generateWithLLM(ctx, runID, categories, maxCount, lang)
 		if err != nil {
 			slog.Warn("evolution hypothesis generator: LLM generation failed, falling back to seeds", "err", err)
 		} else if len(hypotheses) > 0 {
@@ -114,23 +117,24 @@ func (g *HypothesisGenerator) Generate(
 		}
 	}
 
-	// Fall back to seed hypotheses.
+	// Fall back to seed hypotheses in the requested language.
 	active := categories
 	if len(active) == 0 {
 		active = allCategories
 	}
 
+	seeds := SeedsFor(lang)
 	var result []db.EvolutionHypothesis
 
 	for _, cat := range active {
 		if len(result) >= maxCount {
 			break
 		}
-		seeds, ok := seedHypotheses[cat]
+		catSeeds, ok := seeds[cat]
 		if !ok {
 			continue
 		}
-		for _, s := range seeds {
+		for _, s := range catSeeds {
 			if len(result) >= maxCount {
 				break
 			}
@@ -138,11 +142,11 @@ func (g *HypothesisGenerator) Generate(
 				ID:             uuid.NewString(),
 				RunID:          runID,
 				Category:       cat,
-				Description:    s.desc,
-				BaselineValue:  s.baselineValue,
-				ProposedValue:  s.proposedValue,
-				Metric:         s.metric,
-				BaselineMetric: s.baselineMetric,
+				Description:    s.Desc,
+				BaselineValue:  s.BaselineValue,
+				ProposedValue:  s.ProposedValue,
+				Metric:         s.Metric,
+				BaselineMetric: s.BaselineMetric,
 				Evidence:       map[string]any{},
 			})
 		}
@@ -157,6 +161,7 @@ func (g *HypothesisGenerator) generateWithLLM(
 	runID string,
 	categories []string,
 	maxCount int,
+	lang string,
 ) ([]db.EvolutionHypothesis, error) {
 	active := categories
 	if len(active) == 0 {
@@ -171,7 +176,7 @@ Generate up to %d hypotheses as a JSON array:
 [{"category": "...", "description": "...", "baseline_value": "...", "proposed_value": "...", "metric": "...", "baseline_metric": 0.0, "rationale": "..."}]`, active, maxCount, maxCount)
 
 	resp, err := g.llmClient.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: prompts.HypothesisGeneration,
+		SystemPrompt: prompts.WithLanguage(prompts.HypothesisGeneration, lang),
 		Messages:     []llm.Message{{Role: "user", Content: userPrompt}},
 		MaxTokens:    2048,
 		Temperature:  0.7,

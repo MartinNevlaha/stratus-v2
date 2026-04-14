@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"testing"
 )
 
@@ -818,5 +819,213 @@ func TestFindPagesBySourceFiles_NoMatches(t *testing.T) {
 	}
 	if len(ids) != 0 {
 		t.Errorf("expected empty result, got %v", ids)
+	}
+}
+
+// --- UpsertWikiPageByWorkflow ---
+
+func TestUpsertWikiPageByWorkflow_Insert(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+
+	page := &WikiPage{
+		PageType:    "concept",
+		Title:       "Auth Service",
+		Content:     "Initial content",
+		Status:      "draft",
+		GeneratedBy: "ingest",
+		Tags:        []string{"auth"},
+		Metadata:    map[string]any{"priority": "high"},
+	}
+
+	got, err := database.UpsertWikiPageByWorkflow(ctx, "wf-123", "auth-service", page)
+	if err != nil {
+		t.Fatalf("UpsertWikiPageByWorkflow insert: %v", err)
+	}
+	if got.ID == "" {
+		t.Fatal("expected ID to be set after insert")
+	}
+	if got.WorkflowID != "wf-123" {
+		t.Errorf("WorkflowID: got %q, want %q", got.WorkflowID, "wf-123")
+	}
+	if got.FeatureSlug != "auth-service" {
+		t.Errorf("FeatureSlug: got %q, want %q", got.FeatureSlug, "auth-service")
+	}
+	if got.Version != 1 {
+		t.Errorf("Version: got %d, want 1", got.Version)
+	}
+	if got.Content != "Initial content" {
+		t.Errorf("Content: got %q, want %q", got.Content, "Initial content")
+	}
+	if got.CreatedAt == "" {
+		t.Error("expected CreatedAt to be set")
+	}
+}
+
+func TestUpsertWikiPageByWorkflow_UpdateSameKey_SingleRow(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+
+	first := &WikiPage{
+		PageType:    "concept",
+		Title:       "Auth Service",
+		Content:     "First content",
+		Status:      "draft",
+		GeneratedBy: "ingest",
+	}
+	inserted, err := database.UpsertWikiPageByWorkflow(ctx, "wf-abc", "auth-service", first)
+	if err != nil {
+		t.Fatalf("UpsertWikiPageByWorkflow first: %v", err)
+	}
+	createdAt := inserted.CreatedAt
+
+	// Second call with same (workflow_id, feature_slug) — should update.
+	second := &WikiPage{
+		PageType:    "concept",
+		Title:       "Auth Service v2",
+		Content:     "Updated content",
+		Status:      "published",
+		GeneratedBy: "evolution",
+	}
+	updated, err := database.UpsertWikiPageByWorkflow(ctx, "wf-abc", "auth-service", second)
+	if err != nil {
+		t.Fatalf("UpsertWikiPageByWorkflow second: %v", err)
+	}
+
+	// Must be same row ID.
+	if updated.ID != inserted.ID {
+		t.Errorf("expected same ID after upsert: got %q, want %q", updated.ID, inserted.ID)
+	}
+	// Version must be incremented.
+	if updated.Version != 2 {
+		t.Errorf("Version after upsert: got %d, want 2", updated.Version)
+	}
+	// Content must be updated.
+	if updated.Content != "Updated content" {
+		t.Errorf("Content: got %q, want %q", updated.Content, "Updated content")
+	}
+	// created_at must be preserved.
+	if updated.CreatedAt != createdAt {
+		t.Errorf("CreatedAt changed: got %q, want %q", updated.CreatedAt, createdAt)
+	}
+
+	// Confirm single row in DB.
+	pages, total, err := database.ListWikiPages(WikiPageFilters{})
+	if err != nil {
+		t.Fatalf("ListWikiPages: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 row in DB, got %d", total)
+	}
+	if len(pages) != 1 {
+		t.Errorf("expected 1 page returned, got %d", len(pages))
+	}
+}
+
+func TestUpsertWikiPageByWorkflow_DifferentFeatureSlug_NewRow(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+
+	base := &WikiPage{
+		PageType:    "summary",
+		Title:       "Feature A",
+		Content:     "Content A",
+		Status:      "draft",
+		GeneratedBy: "ingest",
+	}
+	_, err := database.UpsertWikiPageByWorkflow(ctx, "wf-xyz", "feature-a", base)
+	if err != nil {
+		t.Fatalf("UpsertWikiPageByWorkflow feature-a: %v", err)
+	}
+
+	other := &WikiPage{
+		PageType:    "summary",
+		Title:       "Feature B",
+		Content:     "Content B",
+		Status:      "draft",
+		GeneratedBy: "ingest",
+	}
+	_, err = database.UpsertWikiPageByWorkflow(ctx, "wf-xyz", "feature-b", other)
+	if err != nil {
+		t.Fatalf("UpsertWikiPageByWorkflow feature-b: %v", err)
+	}
+
+	pages, total, err := database.ListWikiPages(WikiPageFilters{})
+	if err != nil {
+		t.Fatalf("ListWikiPages: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected 2 rows for different feature slugs, got %d", total)
+	}
+	if len(pages) != 2 {
+		t.Errorf("expected 2 pages, got %d", len(pages))
+	}
+}
+
+func TestUpsertWikiPageByWorkflow_MissingWorkflowID_Error(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+
+	page := &WikiPage{Title: "X", PageType: "summary", Status: "draft", GeneratedBy: "ingest"}
+	_, err := database.UpsertWikiPageByWorkflow(ctx, "", "slug", page)
+	if err == nil {
+		t.Fatal("expected error for empty workflow_id, got nil")
+	}
+}
+
+func TestUpsertWikiPageByWorkflow_MissingFeatureSlug_Error(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+
+	page := &WikiPage{Title: "X", PageType: "summary", Status: "draft", GeneratedBy: "ingest"}
+	_, err := database.UpsertWikiPageByWorkflow(ctx, "wf-1", "", page)
+	if err == nil {
+		t.Fatal("expected error for empty feature_slug, got nil")
+	}
+}
+
+func TestUpsertWikiPageByWorkflow_MultipleUpserts_VersionIncrementsCorrectly(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+
+	page := &WikiPage{
+		PageType:    "answer",
+		Title:       "Auth Flow",
+		Content:     "v1",
+		Status:      "draft",
+		GeneratedBy: "ingest",
+	}
+	r1, err := database.UpsertWikiPageByWorkflow(ctx, "wf-multi", "auth-flow", page)
+	if err != nil {
+		t.Fatalf("upsert v1: %v", err)
+	}
+	if r1.Version != 1 {
+		t.Errorf("v1 Version: got %d, want 1", r1.Version)
+	}
+
+	page.Content = "v2"
+	r2, err := database.UpsertWikiPageByWorkflow(ctx, "wf-multi", "auth-flow", page)
+	if err != nil {
+		t.Fatalf("upsert v2: %v", err)
+	}
+	if r2.Version != 2 {
+		t.Errorf("v2 Version: got %d, want 2", r2.Version)
+	}
+
+	page.Content = "v3"
+	r3, err := database.UpsertWikiPageByWorkflow(ctx, "wf-multi", "auth-flow", page)
+	if err != nil {
+		t.Fatalf("upsert v3: %v", err)
+	}
+	if r3.Version != 3 {
+		t.Errorf("v3 Version: got %d, want 3", r3.Version)
+	}
+
+	// created_at must never change across upserts.
+	if r2.CreatedAt != r1.CreatedAt {
+		t.Errorf("CreatedAt changed between v1 and v2: %q vs %q", r1.CreatedAt, r2.CreatedAt)
+	}
+	if r3.CreatedAt != r1.CreatedAt {
+		t.Errorf("CreatedAt changed between v1 and v3: %q vs %q", r1.CreatedAt, r3.CreatedAt)
 	}
 }

@@ -16,6 +16,8 @@ BASE=http://127.0.0.1:$(stratus port)
 
 ## Phase 1: Analyze
 
+> 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
+
 Start the bug workflow:
 
 ```bash
@@ -112,6 +114,8 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
 
 ## Phase 2: Fix
 
+> 🎯 **Karpathy — Simplicity First + Surgical Changes:** Minimum code that solves the problem. Touch only what the task requires. No speculative abstractions, no "improvements" to adjacent code. See `.claude/rules/karpathy-principles.md`.
+
 Route to the appropriate delivery agent via `@mention` based on the bug type:
 
 | Bug Type | Agent |
@@ -139,6 +143,8 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
 ---
 
 ## Phase 3: Review
+
+> 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
 - **Delegate to `@delivery-code-reviewer`** — verify fix quality, no regressions, and test coverage.
 - Record delegation:

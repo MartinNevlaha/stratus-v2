@@ -380,3 +380,101 @@ func TestRunOnboarding_ShallowDepth(t *testing.T) {
 			totalPlanned, result.PagesGenerated, result.PagesFailed, result.PagesSkipped)
 	}
 }
+
+// TestRunOnboarding_TokenBudgetExceeded verifies that when cumulative LLM tokens
+// exceed the configured budget after N pages, RunOnboarding returns a
+// partial-success result (pages written so far) with a budget-exceeded warning,
+// and no error.
+func TestRunOnboarding_TokenBudgetExceeded(t *testing.T) {
+	store := &mockStore{}
+
+	// Each response costs 300 tokens (100 in + 200 out).
+	// Set budget to 350 so only 1 page can be generated before the guard fires.
+	client := &mockLLM{responses: makeGoodResponse(20)}
+	linker := wiki_engine.NewLinker(store)
+	profile := minimalProfile()
+
+	// Budget=350 tokens. Each page costs 300 tokens (100 in + 200 out).
+	// After page 1: total=300, not yet exceeded. Page 2 generated: total=600 > 350 → guard fires.
+	// So we expect exactly 2 pages generated (the one that crossed the threshold stops further generation).
+	opts := OnboardingOpts{
+		Depth:             "standard",
+		MaxPages:          10,
+		IngestTokenBudget: 350,
+	}
+
+	result, err := RunOnboarding(context.Background(), store, client, linker, nil, profile, opts)
+	if err != nil {
+		t.Fatalf("expected no error on budget-exceeded partial result, got: %v", err)
+	}
+
+	// Budget is exceeded after the 2nd page (cumulative 600 > 350), so exactly 2 pages generated.
+	// No further pages are processed after the guard fires.
+	if result.PagesGenerated != 2 {
+		t.Errorf("PagesGenerated = %d, want 2 (budget fires after page that crosses threshold)", result.PagesGenerated)
+	}
+
+	// Standard depth with a minimal profile produces at most a few pages total;
+	// ensure we stopped before all pages (guard was effective).
+	if result.PagesGenerated+result.PagesFailed+result.PagesSkipped >= 5 {
+		t.Errorf("expected fewer than 5 total pages due to budget guard, got generated=%d failed=%d skipped=%d",
+			result.PagesGenerated, result.PagesFailed, result.PagesSkipped)
+	}
+
+	// A budget-warning must be present in the errors slice.
+	hasBudgetWarning := false
+	for _, e := range result.Errors {
+		if len(e) > 0 && containsSubstr(e, "token budget") {
+			hasBudgetWarning = true
+			break
+		}
+	}
+	if !hasBudgetWarning {
+		t.Errorf("expected a 'token budget' warning in result.Errors, got: %v", result.Errors)
+	}
+}
+
+// TestRunOnboarding_TokenBudgetZero_Unlimited verifies that IngestTokenBudget=0
+// means no budget guard — all pages are generated normally.
+func TestRunOnboarding_TokenBudgetZero_Unlimited(t *testing.T) {
+	store := &mockStore{}
+	client := &mockLLM{responses: makeGoodResponse(20)}
+	linker := wiki_engine.NewLinker(store)
+	profile := minimalProfile()
+
+	opts := OnboardingOpts{
+		Depth:            "shallow",
+		MaxPages:         10,
+		IngestTokenBudget: 0, // unlimited
+	}
+
+	result, err := RunOnboarding(context.Background(), store, client, linker, nil, profile, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// shallow = 3 pages; all should be generated since budget is unlimited.
+	if result.PagesGenerated < 3 {
+		t.Errorf("PagesGenerated = %d, want >= 3 with unlimited budget", result.PagesGenerated)
+	}
+
+	// No budget warning expected.
+	for _, e := range result.Errors {
+		if containsSubstr(e, "token budget") {
+			t.Errorf("unexpected budget warning with IngestTokenBudget=0: %v", result.Errors)
+			break
+		}
+	}
+}
+
+// containsSubstr is a helper to avoid importing strings in the test file.
+func containsSubstr(s, sub string) bool {
+	return len(s) >= len(sub) && func() bool {
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+		return false
+	}()
+}

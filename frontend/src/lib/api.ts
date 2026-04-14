@@ -19,6 +19,7 @@ import type {
   GuardianAlert,
   GuardianConfig,
   InsightConfig,
+  LLMConfig,
   SwarmSignal,
   SwarmEvidence,
   AgentScorecard,
@@ -36,8 +37,13 @@ import type {
   EvolutionHypothesis,
   WikiConfig,
   EvolutionConfig,
+  EvolutionStatus,
+  InsightProposal,
   OnboardingProgress,
-  OnboardingResult,
+  CodeAnalysisRun,
+  CodeFinding,
+  CodeQualityMetric,
+  CodeAnalysisConfig,
 } from './types'
 
 const BASE = '/api'
@@ -245,8 +251,12 @@ export const getGuardianConfig = () => get<GuardianConfig>('/guardian/config')
 export const updateGuardianConfig = (cfg: GuardianConfig) =>
   put<GuardianConfig>('/guardian/config', cfg)
 export const runGuardianScan = () => post<{ ok: boolean }>('/guardian/run', {})
-export const testGuardianLLM = (cfg: Partial<GuardianConfig>) =>
-  post<{ ok: boolean }>('/guardian/test-llm', cfg)
+export const testGuardianLLM = (llm: LLMConfig) =>
+  post<{ ok: boolean }>('/guardian/test-llm', { llm })
+
+export const getLLMConfig = () => get<LLMConfig>('/llm/config')
+export const updateLLMConfig = (cfg: LLMConfig) =>
+  put<LLMConfig>('/llm/config', cfg)
 
 export const getInsightConfig = () => get<InsightConfig>('/insight/config')
 export const updateInsightConfig = (cfg: InsightConfig) =>
@@ -342,16 +352,68 @@ export const getEvolutionConfig = () => get<EvolutionConfig>('/evolution/config'
 export const updateEvolutionConfig = (cfg: EvolutionConfig) =>
   post<EvolutionConfig>('/evolution/config', cfg)
 
+export const getEvolutionStatus = () => get<EvolutionStatus>('/evolution/status')
+
+export const getInsightProposals = (params?: { type?: string; status?: string; limit?: number; offset?: number }) => {
+  const q = new URLSearchParams()
+  if (params?.type) q.set('type', params.type)
+  if (params?.status) q.set('status', params.status)
+  if (params?.limit) q.set('limit', String(params.limit))
+  if (params?.offset) q.set('offset', String(params.offset))
+  return get<{ proposals: InsightProposal[]; count: number }>(`/insight/proposals${q.toString() ? '?' + q : ''}`)
+}
+
+export const createInsightProposal = (body: {
+  type: string
+  title: string
+  description: string
+  signal_refs?: string[]
+  wiki_page_id?: string
+}) => post<InsightProposal>('/insight/proposals', body)
+
 export const getWikiConfig = () => get<WikiConfig>('/wiki/config')
 
 export const updateWikiConfig = (cfg: WikiConfig) =>
-  post<WikiConfig>('/wiki/config', cfg)
+  put<WikiConfig>('/wiki/config', cfg)
 
 // Onboarding
 export async function triggerOnboarding(opts: { depth?: string; output_dir?: string; max_pages?: number }): Promise<{ job_id: string; status: string; message: string }> {
   return post('/onboard', opts)
 }
 
-export async function getOnboardingStatus(): Promise<OnboardingProgress & { result?: OnboardingResult }> {
+export async function getOnboardingStatus(): Promise<OnboardingProgress> {
   return get('/onboard/status')
 }
+
+// --- Code Quality ---
+
+export const getCodeAnalysisRuns = (limit = 20) =>
+  get<{ runs: CodeAnalysisRun[]; count: number }>('/code-analysis/runs', { limit: String(limit) })
+
+export const getCodeAnalysisRun = (id: string) =>
+  get<{ run: CodeAnalysisRun; findings: CodeFinding[] }>(`/code-analysis/runs/${id}`)
+
+export const getCodeFindings = (params: Record<string, string>) =>
+  get<{ findings: CodeFinding[]; count: number }>('/code-analysis/findings', params)
+
+export const updateFindingStatus = (id: string, status: 'rejected' | 'applied') =>
+  put<{ ok: boolean; id: string; status: string }>(`/code-analysis/findings/${id}/status`, { status })
+
+export const triggerCodeAnalysis = (categories?: string[]) =>
+  post<{ status: string }>('/code-analysis/trigger', {
+    ...(categories?.length ? { categories } : {}),
+  })
+
+export const getCodeMetrics = (days = 30) =>
+  get<{ metrics: CodeQualityMetric[] }>('/code-analysis/metrics', { days: String(days) })
+
+export const getCodeAnalysisConfig = () =>
+  get<CodeAnalysisConfig>('/code-analysis/config')
+
+export const updateCodeAnalysisConfig = (cfg: CodeAnalysisConfig) =>
+  post<CodeAnalysisConfig>('/code-analysis/config', cfg)
+
+// Language
+export const getLanguage = () => get<{ language: string }>('/config/language')
+export const setLanguage = (lang: 'sk' | 'en') =>
+  put<{ language: string }>('/config/language', { language: lang })

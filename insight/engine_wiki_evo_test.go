@@ -101,6 +101,24 @@ func TestEngine_SynthesizeWikiAnswer_NilSynthReturnsError(t *testing.T) {
 	}
 }
 
+// TestNewEngineWithConfig_WikiDisabled_SynthesizerStillInitialized verifies that
+// passing wiki.enabled=false to NewEngineWithConfig still constructs wikiSynth so
+// that SynthesizeWikiAnswer would not return "wiki synthesizer not initialized".
+// This is the regression guard for the bug where NewEngine (no wiki config) was
+// used unconditionally when wiki.enabled=false, leaving wikiSynth nil.
+func TestNewEngineWithConfig_WikiDisabled_SynthesizerStillInitialized(t *testing.T) {
+	database := setupTestDB(t)
+	insightCfg := config.InsightConfig{Enabled: true, Interval: 1}
+	wikiCfg := config.WikiConfig{Enabled: false}
+	evoCfg := config.EvolutionConfig{Enabled: false}
+
+	e := NewEngineWithConfig(database, insightCfg, wikiCfg, evoCfg)
+
+	if e.WikiSynthesizer() == nil {
+		t.Fatal("wikiSynth must not be nil even when wiki.enabled=false; SynthesizeWikiAnswer would return 'wiki synthesizer not initialized'")
+	}
+}
+
 func TestEngine_RunWikiIngest_WithWikiEngine(t *testing.T) {
 	e := makeEngineWithWikiEvo(t)
 	ctx := context.Background()

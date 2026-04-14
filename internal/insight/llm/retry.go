@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -46,10 +47,18 @@ func (c *ClientWithRetry) Complete(ctx context.Context, req CompletionRequest) (
 		lastErr = err
 
 		if i < c.config.MaxRetries {
+			sleepFor := wait
+			var rle *RateLimitedError
+			if errors.As(err, &rle) && rle.RetryAfter > 0 {
+				if rle.RetryAfter > sleepFor {
+					sleepFor = rle.RetryAfter
+				}
+			}
+
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(wait):
+			case <-time.After(sleepFor):
 			}
 			wait = time.Duration(float64(wait) * c.config.Multiplier)
 			if wait > c.config.MaxWait {

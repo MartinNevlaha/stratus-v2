@@ -213,7 +213,9 @@ make install     # builds frontend + Go binary → GOPATH/bin
 |-------------|-------------|
 | `make install` | Build frontend + Go binary, install to `GOPATH/bin` |
 | `make build` | Build frontend + Go binary, output `./stratus` |
-| `make dev` | Run Vite dev server on `:5173` (hot-reload UI) |
+| `make dev` | Start full dev loop: Go (air) + Vite with hot reload. Open `http://localhost:5173` |
+| `make dev-backend` | Go backend only with air hot reload (no Vite) |
+| `make dev-frontend` | Vite dev server only (no backend) |
 | `make clean` | Remove `./stratus` build artifact |
 
 ---
@@ -597,11 +599,39 @@ git push origin main --tags
 
 ## Development
 
-```bash
-# Frontend dev server with hot-reload (proxies API to :41777)
-cd frontend && npm run dev
+### Dev loop (hot reload on backend + frontend)
 
-# Build frontend (must do before go build)
+One-time setup — install [air](https://github.com/air-verse/air) for Go hot reload:
+
+```bash
+go install github.com/air-verse/air@latest
+```
+
+Then start the full dev loop with a single command:
+
+```bash
+make dev
+```
+
+This starts both:
+- **Go backend** on `:41777` via `air` — rebuilds + restarts on any `.go` change (~500ms)
+- **Vite dev server** on `:5173` with HMR — hot reloads Svelte/TS/CSS instantly
+
+**Open `http://localhost:5173`** — Vite proxies `/api/*` (including WebSockets) to the Go backend, so edits on either side reflect immediately. A single `Ctrl+C` stops both processes.
+
+> Note: backend runs with `STRATUS_DEV=1`, which makes `http://localhost:41777` return 404 for non-API paths. This is intentional — it prevents accidentally viewing stale embedded UI. In dev mode, always open `:5173`.
+
+For partial loops:
+
+```bash
+make dev-backend   # Go + air only
+make dev-frontend  # Vite only
+```
+
+### Other commands
+
+```bash
+# Build frontend (must do before go build for a production binary)
 cd frontend && npm run build
 
 # Build Go binary
@@ -617,6 +647,14 @@ cd frontend && npm run check
 GOOS=linux  GOARCH=amd64 go build -o stratus-linux-amd64  ./cmd/stratus
 GOOS=darwin GOARCH=arm64 go build -o stratus-darwin-arm64 ./cmd/stratus
 ```
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `STRATUS_PORT` | Override HTTP port (default `41777`). When unset, `stratus serve` auto-increments on collision. |
+| `STRATUS_DATA_DIR` | Override data directory (default `.stratus/`). |
+| `STRATUS_DEV` | Set to `1` or `true` to enable dev mode: SPA handler returns 404 for non-API paths so Vite on `:5173` is the only frontend entry point. Set automatically by `make dev`. |
 
 ---
 

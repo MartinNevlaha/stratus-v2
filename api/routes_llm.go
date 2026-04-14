@@ -5,11 +5,43 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
+	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 )
+
+// GET /api/llm/config — returns the global LLM config with APIKey masked.
+func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
+	masked := maskLLMConfig(s.cfg.LLM)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(masked)
+}
+
+// PUT /api/llm/config — updates the global LLM config. Bounds-checks input,
+// restores the stored API key when incoming is empty or the "***" sentinel,
+// persists to .stratus.json, and returns the masked updated config.
+func (s *Server) handleUpdateLLMConfig(w http.ResponseWriter, r *http.Request) {
+	var incoming config.LLMConfig
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+		http.Error(w, fmt.Sprintf("decode llm config: %v", err), http.StatusBadRequest)
+		return
+	}
+	restoreLLMAPIKey(&incoming, s.cfg.LLM)
+	if err := validateLLMConfig(incoming, true); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.cfg.LLM = incoming
+	if err := s.cfg.Save(filepath.Join(s.projectRoot, ".stratus.json")); err != nil {
+		http.Error(w, fmt.Sprintf("save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(maskLLMConfig(s.cfg.LLM))
+}
 
 func (s *Server) handleGetLLMStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.LLM
@@ -104,6 +136,7 @@ func (s *Server) handleTestLLM(w http.ResponseWriter, r *http.Request) {
 		MaxTokens:   cfg.MaxTokens,
 		Temperature: cfg.Temperature,
 		MaxRetries:  cfg.MaxRetries,
+		Concurrency: cfg.Concurrency,
 	}
 	llmCfg = llmCfg.WithEnv()
 

@@ -22,6 +22,8 @@ You MUST follow the phases in strict order. Each phase has mandatory MCP tool ca
 
 ## Phase 1: Analyze
 
+> 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
+
 ### STEP 1 — MANDATORY: Register Workflow
 
 **This is the FIRST thing you MUST do. Do NOT delegate to any agent, do NOT read any files, do NOT do anything else until this is complete.**
@@ -113,6 +115,8 @@ phase: "fix"
 
 ## Phase 2: Fix
 
+> 🎯 **Karpathy — Simplicity First + Surgical Changes:** Minimum code that solves the problem. Touch only what the task requires. No speculative abstractions, no "improvements" to adjacent code. See `.claude/rules/karpathy-principles.md`.
+
 Route to the appropriate delivery agent:
 
 | Bug Type | Agent |
@@ -142,6 +146,8 @@ phase: "review"
 ---
 
 ## Phase 3: Review
+
+> 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
 - Delegate to `delivery-code-reviewer` (Task tool) — verify fix quality and no regressions.
 - **MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:

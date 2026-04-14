@@ -551,6 +551,270 @@ func TestHandleWikiQuery_WithInsightEngine_CallsSynthesize(t *testing.T) {
 	}
 }
 
+// --- POST /api/wiki/pages (workflow-sourced write) ---
+
+func TestHandleCreateWikiPageFromWorkflow_HappyPath_Insert(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	body := map[string]any{
+		"workflow_id":  "wf-happy-1",
+		"feature_slug": "auth-service",
+		"title":        "Auth Service Overview",
+		"content":      "# Auth Service\n\nHandles authentication.",
+		"page_type":    "feature",
+		"tags":         []string{"auth", "backend"},
+		"confidence":   0.9,
+		"source_files": []string{"auth/handler.go", "auth/service.go"},
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/wiki/pages", bytes.NewReader(bodyBytes))
+	w := httptest.NewRecorder()
+
+	server.handleCreateWikiPageFromWorkflow(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp["id"] == nil || resp["id"] == "" {
+		t.Error("expected non-empty 'id' in response")
+	}
+	version, ok := resp["version"].(float64)
+	if !ok {
+		t.Fatal("expected 'version' numeric in response")
+	}
+	if int(version) != 1 {
+		t.Errorf("expected version=1 on insert, got %v", version)
+	}
+	if resp["created_at"] == nil {
+		t.Error("expected 'created_at' in response")
+	}
+	if resp["updated_at"] == nil {
+		t.Error("expected 'updated_at' in response")
+	}
+	if resp["action"] != "inserted" {
+		t.Errorf("expected action='inserted', got %v", resp["action"])
+	}
+}
+
+func TestHandleCreateWikiPageFromWorkflow_HappyPath_Update_VersionIncrements(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	doRequest := func(content string) map[string]any {
+		body := map[string]any{
+			"workflow_id":  "wf-update-1",
+			"feature_slug": "payment-service",
+			"title":        "Payment Service",
+			"content":      content,
+		}
+		bodyBytes, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/api/wiki/pages", bytes.NewReader(bodyBytes))
+		w := httptest.NewRecorder()
+		server.handleCreateWikiPageFromWorkflow(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp
+	}
+
+	first := doRequest("Initial content.")
+	if first["action"] != "inserted" {
+		t.Errorf("first call: expected action='inserted', got %v", first["action"])
+	}
+	if int(first["version"].(float64)) != 1 {
+		t.Errorf("first call: expected version=1, got %v", first["version"])
+	}
+
+	second := doRequest("Updated content.")
+	if second["action"] != "updated" {
+		t.Errorf("second call: expected action='updated', got %v", second["action"])
+	}
+	if int(second["version"].(float64)) != 2 {
+		t.Errorf("second call: expected version=2, got %v", second["version"])
+	}
+
+	// IDs must be the same (same row was upserted)
+	if first["id"] != second["id"] {
+		t.Errorf("expected same id across upsert, got %v vs %v", first["id"], second["id"])
+	}
+}
+
+func TestHandleCreateWikiPageFromWorkflow_Validation(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	type tc struct {
+		name string
+		body map[string]any
+	}
+
+	tests := []tc{
+		{
+			name: "missing workflow_id",
+			body: map[string]any{
+				"feature_slug": "my-slug",
+				"title":        "Title",
+				"content":      "Content",
+			},
+		},
+		{
+			name: "empty workflow_id",
+			body: map[string]any{
+				"workflow_id":  "",
+				"feature_slug": "my-slug",
+				"title":        "Title",
+				"content":      "Content",
+			},
+		},
+		{
+			name: "missing feature_slug",
+			body: map[string]any{
+				"workflow_id": "wf-1",
+				"title":       "Title",
+				"content":     "Content",
+			},
+		},
+		{
+			name: "empty feature_slug",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "",
+				"title":        "Title",
+				"content":      "Content",
+			},
+		},
+		{
+			name: "invalid feature_slug (spaces)",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "not valid slug",
+				"title":        "Title",
+				"content":      "Content",
+			},
+		},
+		{
+			name: "invalid feature_slug (uppercase)",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "NotKebabCase",
+				"title":        "Title",
+				"content":      "Content",
+			},
+		},
+		{
+			name: "missing title",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "my-slug",
+				"content":      "Content",
+			},
+		},
+		{
+			name: "empty title",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "my-slug",
+				"title":        "",
+				"content":      "Content",
+			},
+		},
+		{
+			name: "missing content",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "my-slug",
+				"title":        "Title",
+			},
+		},
+		{
+			name: "empty content",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "my-slug",
+				"title":        "Title",
+				"content":      "",
+			},
+		},
+		{
+			name: "confidence below 0",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "my-slug",
+				"title":        "Title",
+				"content":      "Content",
+				"confidence":   -0.1,
+			},
+		},
+		{
+			name: "confidence above 1",
+			body: map[string]any{
+				"workflow_id":  "wf-1",
+				"feature_slug": "my-slug",
+				"title":        "Title",
+				"content":      "Content",
+				"confidence":   1.1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bodyBytes, _ := json.Marshal(tt.body)
+			req := httptest.NewRequest(http.MethodPost, "/api/wiki/pages", bytes.NewReader(bodyBytes))
+			w := httptest.NewRecorder()
+
+			server.handleCreateWikiPageFromWorkflow(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleCreateWikiPageFromWorkflow_DefaultPageType(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	body := map[string]any{
+		"workflow_id":  "wf-default-type",
+		"feature_slug": "some-feature",
+		"title":        "Some Feature",
+		"content":      "Content here.",
+		// page_type omitted → should default to "feature"
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/wiki/pages", bytes.NewReader(bodyBytes))
+	w := httptest.NewRecorder()
+
+	server.handleCreateWikiPageFromWorkflow(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleGetWikiGraph(t *testing.T) {
 	database := setupTestDB(t)
 	defer database.Close()

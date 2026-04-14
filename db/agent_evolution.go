@@ -16,9 +16,9 @@ type AgentCandidate struct {
 	Specialization  string                 `json:"specialization"`
 	Reason          string                 `json:"reason"`
 	Confidence      float64                `json:"confidence"`
-	PromptDiff      map[string]interface{} `json:"prompt_diff"`
-	Status          string                 `json:"status"`
-	Evidence        map[string]interface{} `json:"evidence"`
+	PromptDiff      map[string]any `json:"prompt_diff"`
+	Status          string         `json:"status"`
+	Evidence        map[string]any `json:"evidence"`
 	OpportunityType string                 `json:"opportunity_type"`
 	CreatedAt       string                 `json:"created_at"`
 	UpdatedAt       string                 `json:"updated_at"`
@@ -442,6 +442,10 @@ func (d *DB) GetAgentExperimentMetrics(experimentID string) (candidate, baseline
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		return candidate, baseline, fmt.Errorf("iterate agent experiment results: %w", err)
+	}
+
 	if candCount > 0 {
 		candidate.SampleSize = candCount
 		candidate.SuccessRate = float64(candSuccess) / float64(candCount)
@@ -519,6 +523,10 @@ func scanAgentCandidates(rows *sql.Rows) ([]AgentCandidate, error) {
 		}
 
 		candidates = append(candidates, c)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate agent candidates: %w", err)
 	}
 
 	if candidates == nil {
@@ -615,6 +623,10 @@ func scanAgentExperiments(rows *sql.Rows) ([]AgentExperiment, error) {
 		experiments = append(experiments, e)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate agent experiments: %w", err)
+	}
+
 	if experiments == nil {
 		experiments = []AgentExperiment{}
 	}
@@ -640,6 +652,10 @@ func scanAgentExperimentResults(rows *sql.Rows) ([]AgentExperimentResult, error)
 		r.Success = success == 1
 		r.ReviewPassed = reviewPassed == 1
 		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate agent experiment results: %w", err)
 	}
 
 	if results == nil {

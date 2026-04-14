@@ -15,7 +15,7 @@ import (
 )
 
 // guardianLLM is the interface used by all guardian checks for LLM operations.
-// Both *llmClient and *llmAdapter satisfy this interface.
+// Satisfied by *llmAdapter, which wraps the shared internal/insight/llm client.
 type guardianLLM interface {
 	Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 	configured() bool
@@ -31,6 +31,7 @@ type Guardian struct {
 	db          *db.DB
 	coord       *orchestration.Coordinator
 	cfg         func() config.GuardianConfig
+	langFn      func() string  // optional; returns active UI language code ("en", "sk", …)
 	hub         hubBroadcaster
 	projRoot    string
 	injectedLLM llm.Client // optional: if set, used instead of creating llmClient from config each tick
@@ -55,6 +56,13 @@ func (g *Guardian) SetLLMClient(c llm.Client) {
 	g.injectedLLM = c
 }
 
+// SetLangFn sets the callback used to retrieve the active UI language code at
+// check time. When not set (or set to nil) the Guardian defaults to "en". Call
+// this before g.Run() to propagate language changes without a restart.
+func (g *Guardian) SetLangFn(fn func() string) {
+	g.langFn = fn
+}
+
 // Run starts the guardian ticker loop. It blocks until ctx is cancelled.
 func (g *Guardian) Run(ctx context.Context) {
 	cfg := g.cfg()
@@ -69,8 +77,6 @@ func (g *Guardian) Run(ctx context.Context) {
 	}
 
 	log.Printf("guardian: starting, interval=%v", interval)
-	// Run immediately on start, then on ticker.
-	g.runChecks(ctx)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -104,38 +110,41 @@ func (g *Guardian) RunOnce(ctx context.Context) {
 
 func (g *Guardian) runChecks(ctx context.Context) {
 	cfg := g.cfg()
-	var llmCli guardianLLM
-	if g.injectedLLM != nil {
-		llmCli = newLLMAdapter(g.injectedLLM)
-	} else {
-		llmCli = newLLMClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMTemperature, cfg.LLMMaxTokens)
+	// The adapter is nil-safe: when g.injectedLLM is nil, configured() returns
+	// false and LLM-dependent checks fall back to their FTS-only path.
+	var llmCli guardianLLM = newLLMAdapter(g.injectedLLM)
+
+	// Resolve active language — read once per check run so UI changes take effect.
+	lang := "en"
+	if g.langFn != nil {
+		lang = g.langFn()
 	}
 
 	var candidates []alertInput
 
 	// 1. Stale workflows
-	candidates = append(candidates, checkStaleWorkflows(g.coord, cfg)...)
+	candidates = append(candidates, checkStaleWorkflows(g.coord, cfg, lang)...)
 
 	// 1b. Stale swarm workers
-	candidates = append(candidates, checkStaleWorkers(g.db, cfg)...)
+	candidates = append(candidates, checkStaleWorkers(g.db, cfg, lang)...)
 
 	// 1c. Reviewer timeout (mission stuck in verifying)
-	candidates = append(candidates, checkStaleVerifying(g.db, cfg)...)
+	candidates = append(candidates, checkStaleVerifying(g.db, cfg, lang)...)
 
 	// 1d. Overdue tickets (in_progress too long)
-	candidates = append(candidates, checkOverdueTickets(g.db, cfg)...)
+	candidates = append(candidates, checkOverdueTickets(g.db, cfg, lang)...)
 
 	// 2. Memory health
-	candidates = append(candidates, checkMemoryHealth(g.db, cfg)...)
+	candidates = append(candidates, checkMemoryHealth(g.db, cfg, lang)...)
 
 	// 3. Tech debt
-	candidates = append(candidates, checkTechDebt(g.db, g.projRoot, cfg)...)
+	candidates = append(candidates, checkTechDebt(g.db, g.projRoot, cfg, lang)...)
 
 	// 4. Coverage drift
-	candidates = append(candidates, checkCoverageDrift(g.db, g.projRoot, cfg)...)
+	candidates = append(candidates, checkCoverageDrift(g.db, g.projRoot, cfg, lang)...)
 
 	// 5. Governance violations
-	candidates = append(candidates, checkGovernanceViolations(ctx, g.db, llmCli, g.projRoot)...)
+	candidates = append(candidates, checkGovernanceViolations(ctx, g.db, llmCli, g.projRoot, lang)...)
 
 	for _, c := range candidates {
 		g.maybeEmit(c)

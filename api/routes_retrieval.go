@@ -6,33 +6,25 @@ import (
 	"net/http"
 )
 
-func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
-	query := queryStr(r, "q")
-	corpus := queryStr(r, "corpus") // "code" | "governance" | "wiki" | "" (auto)
-	topK := queryInt(r, "top_k", 10)
+// retrieveResult is a single hit returned by runRetrieve, shared between the
+// HTTP handler and internal callers (e.g. the phase-transition prefetcher).
+type retrieveResult struct {
+	Source         string  `json:"source"`
+	FilePath       string  `json:"file_path"`
+	Title          string  `json:"title"`
+	Excerpt        string  `json:"excerpt"`
+	Score          float64 `json:"score"`
+	DocType        string  `json:"doc_type,omitempty"`
+	PageType       string  `json:"page_type,omitempty"`
+	StalenessScore float64 `json:"staleness_score,omitempty"`
+}
 
-	if query == "" {
-		jsonErr(w, http.StatusBadRequest, "q is required")
-		return
-	}
-
-	if corpus != "" && corpus != "code" && corpus != "governance" && corpus != "wiki" {
-		jsonErr(w, http.StatusBadRequest, "invalid corpus value, must be: code, governance, wiki, or empty")
-		return
-	}
-
-	type result struct {
-		Source         string  `json:"source"`
-		FilePath       string  `json:"file_path"`
-		Title          string  `json:"title"`
-		Excerpt        string  `json:"excerpt"`
-		Score          float64 `json:"score"`
-		DocType        string  `json:"doc_type,omitempty"`
-		PageType       string  `json:"page_type,omitempty"`
-		StalenessScore float64 `json:"staleness_score,omitempty"`
-	}
-
-	var results []result
+// runRetrieve is the core search logic shared by handleRetrieve and internal
+// callers. corpus is one of "code" | "governance" | "wiki" | "" (auto = all).
+// In auto mode, wiki results are capped at topK/3 so they don't drown out code
+// and governance hits.
+func (s *Server) runRetrieve(query, corpus string, topK int) []retrieveResult {
+	var results []retrieveResult
 
 	useCode := corpus == "" || corpus == "code"
 	useGov := corpus == "" || corpus == "governance"
@@ -43,7 +35,7 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			log.Printf("[vexor search] query=%q results=%d", query, len(hits))
 			for _, h := range hits {
-				results = append(results, result{
+				results = append(results, retrieveResult{
 					Source:   "code",
 					FilePath: h.FilePath,
 					Title:    h.Heading,
@@ -61,7 +53,7 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			log.Printf("[governance search] query=%q results=%d", query, len(docs))
 			for _, d := range docs {
-				results = append(results, result{
+				results = append(results, retrieveResult{
 					Source:   "governance",
 					FilePath: d.FilePath,
 					Title:    d.Title,
@@ -76,7 +68,6 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if useWiki {
-		// In auto mode, cap wiki results to avoid drowning code/governance.
 		wikiLimit := topK
 		if corpus == "" {
 			wikiLimit = topK / 3
@@ -89,16 +80,19 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			log.Printf("[wiki search] query=%q results=%d", query, len(wikiPages))
 			for i, p := range wikiPages {
-				// Synthetic score based on result position (FTS5 already orders by rank).
 				score := 1.0 - float64(i)*0.1
 				if score < 0.1 {
 					score = 0.1
 				}
-				// Penalize stale pages by 50%.
 				if p.StalenessScore > 0.7 {
 					score *= 0.5
 				}
-				results = append(results, result{
+				// Evolution findings boost — validated system-generated insights
+				// rank slightly higher than user-written pages.
+				if p.GeneratedBy == "evolution" {
+					score *= 1.2
+				}
+				results = append(results, retrieveResult{
 					Source:         "wiki",
 					Title:          p.Title,
 					Excerpt:        truncate(p.Content, 500),
@@ -112,8 +106,27 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	return results
+}
+
+func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
+	query := queryStr(r, "q")
+	corpus := queryStr(r, "corpus") // "code" | "governance" | "wiki" | "" (auto)
+	topK := queryInt(r, "top_k", 10)
+
+	if query == "" {
+		jsonErr(w, http.StatusBadRequest, "q is required")
+		return
+	}
+
+	if corpus != "" && corpus != "code" && corpus != "governance" && corpus != "wiki" {
+		jsonErr(w, http.StatusBadRequest, "invalid corpus value, must be: code, governance, wiki, or empty")
+		return
+	}
+
+	results := s.runRetrieve(query, corpus, topK)
 	if results == nil {
-		results = []result{}
+		results = []retrieveResult{}
 	}
 	json200(w, map[string]any{
 		"results": results,

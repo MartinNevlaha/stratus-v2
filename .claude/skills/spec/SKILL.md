@@ -22,6 +22,8 @@ You MUST follow the phases in strict order. Each phase has mandatory MCP tool ca
 
 ## Phase 1: Plan
 
+> 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
+
 ### STEP 1 — MANDATORY: Register Workflow
 
 **This is the FIRST thing you MUST do. Do NOT delegate to any agent, do NOT read any files, do NOT do anything else until this is complete.**
@@ -89,6 +91,8 @@ phase: "implement"
 
 ## Phase 2: Implement
 
+> 🎯 **Karpathy — Simplicity First + Surgical Changes:** Minimum code that solves the problem. Touch only what the task requires. No speculative abstractions, no "improvements" to adjacent code. See `.claude/rules/karpathy-principles.md`.
+
 Route tasks to appropriate delivery agents:
 
 | Task Type | Agent |
@@ -132,6 +136,8 @@ phase: "verify"
 ---
 
 ## Phase 3: Verify
+
+> 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria from the plan, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
 - Delegate to `delivery-code-reviewer` (Task tool) for spec compliance, code quality, and test adequacy.
 - **MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
@@ -200,7 +206,29 @@ curl -sS -X POST http://localhost:$(stratus port)/api/learning/proposals \
 
 Create a proposal for every insight worth preserving. The user will review proposals in the Learning tab. **Do not write governance files directly** — proposals are the gate.
 
-**Step 3 — MANDATORY: Complete workflow** using `mcp__stratus__transition_phase`:
+**Step 3 — Wiki auto-doc (optional enrichment):**
+
+On the `learn → complete` transition below, the coordinator automatically writes a wiki page for this workflow (status=`auto-generated`, upsert by `(workflow_id, feature_slug)`). The auto-generated content is a minimal summary of plan + tasks + delegations.
+
+If you want richer wiki content (architecture notes, diagrams, usage examples), POST directly before transitioning:
+
+```bash
+curl -sS -X POST http://localhost:$(stratus port)/api/wiki/pages \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "workflow_id": "<slug>",
+    "feature_slug": "<kebab-feature-name>",
+    "title": "<human title>",
+    "content": "<markdown body — architecture, API shape, examples>",
+    "tags": ["feature", "<area>"],
+    "confidence": 0.9,
+    "source_files": ["path/to/file1.go", "path/to/file2.ts"]
+  }'
+```
+
+This upserts by `(workflow_id, feature_slug)`. The subsequent auto-write will update the same row. Wiki write failures MUST NOT block the complete transition (fail-open).
+
+**Step 4 — MANDATORY: Complete workflow** using `mcp__stratus__transition_phase`:
 
 ```
 workflow_id: "<slug>"

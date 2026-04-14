@@ -11,12 +11,33 @@ import (
 	"github.com/google/uuid"
 )
 
-// allowedEvolutionCategories is the set of valid hypothesis categories.
+// allowedEvolutionCategories is the set of valid hypothesis categories accepted
+// by the API. Legacy categories (workflow_routing, agent_selection,
+// threshold_adjustment) were removed in T9 — new runs may no longer request them.
+// Existing rows in the DB with those categories remain readable.
 var allowedEvolutionCategories = map[string]struct{}{
 	"prompt_tuning":        {},
-	"workflow_routing":     {},
-	"agent_selection":      {},
-	"threshold_adjustment": {},
+	"refactor_opportunity": {},
+	"test_gap":             {},
+	"architecture_drift":   {},
+	"feature_idea":         {},
+	"dx_improvement":       {},
+	"doc_drift":            {},
+}
+
+// GET /api/evolution/status
+func (s *Server) handleGetEvolutionStatus(w http.ResponseWriter, r *http.Request) {
+	breakdown, err := s.db.CountInsightProposalsByType()
+	if err != nil {
+		slog.Error("failed to count insight proposals by type", "error", err)
+		breakdown = map[string]int{}
+	}
+
+	enabled := s.cfg != nil && s.cfg.Evolution.Enabled
+	json200(w, map[string]any{
+		"enabled":            enabled,
+		"category_breakdown": breakdown,
+	})
 }
 
 // GET /api/evolution/runs

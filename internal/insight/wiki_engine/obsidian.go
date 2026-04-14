@@ -85,6 +85,10 @@ func PageToVaultPath(page *db.WikiPage) string {
 		return "answers/" + slug + ".md"
 	case "index":
 		return "_index.md"
+	case "raw":
+		return "01-Raw-Sources/" + slug + ".md"
+	case "topic":
+		return "topics/" + slug + ".md"
 	default:
 		return slug + ".md"
 	}

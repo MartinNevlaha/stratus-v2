@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { listEvolutionRuns, getEvolutionRun, triggerEvolution, getEvolutionConfig, updateEvolutionConfig } from '$lib/api'
-  import type { EvolutionRun, EvolutionHypothesis, EvolutionConfig } from '$lib/types'
+  import { listEvolutionRuns, getEvolutionRun, triggerEvolution, getEvolutionConfig, updateEvolutionConfig, getEvolutionStatus } from '$lib/api'
+  import type { EvolutionRun, EvolutionHypothesis, EvolutionConfig, EvolutionStatus } from '$lib/types'
+  import { buildEvolutionCommand } from '$lib/evolutionFlow'
+  import { requestTerminalPrefill, setActiveTab, appState } from '$lib/store.svelte'
+  import { KNOWN_CATEGORY_DEFS, IDEA_CATEGORIES, getCategoryLabel, isKnownCategory } from '$lib/evolutionCategories'
 
   let runs = $state<EvolutionRun[]>([])
   let totalCount = $state(0)
@@ -8,7 +11,7 @@
   let hypotheses = $state<EvolutionHypothesis[]>([])
   let config = $state<EvolutionConfig | null>(null)
   let triggering = $state(false)
-  let activeView = $state<'runs' | 'config'>('runs')
+  let activeView = $state<'runs' | 'proposals' | 'config'>('runs')
   let loading = $state(true)
   let error = $state<string | null>(null)
   let configSaving = $state(false)
@@ -16,12 +19,23 @@
   let configSuccess = $state(false)
   let timeoutInput = $state('')
   let statusFilter = $state('')
+  let categoryFilter = $state<string>('')
   let loadingRun = $state(false)
   let triggerSuccess = $state<string | null>(null)
+  let evolutionStatus = $state<EvolutionStatus | null>(null)
 
   $effect(() => {
     loadRuns()
+    loadStatus()
   })
+
+  async function loadStatus() {
+    try {
+      evolutionStatus = await getEvolutionStatus()
+    } catch {
+      // status is non-critical — fail silently
+    }
+  }
 
   async function loadRuns() {
     loading = true
@@ -76,6 +90,7 @@
       triggerSuccess = result.message ?? 'Evolution cycle triggered'
       timeoutInput = ''
       await loadRuns()
+      await loadStatus()
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to trigger evolution'
     } finally {
@@ -138,16 +153,6 @@
     }
   }
 
-  function getCategoryLabel(cat: string): string {
-    switch (cat) {
-      case 'prompt_tuning': return 'Prompt Tuning'
-      case 'workflow_routing': return 'Workflow Routing'
-      case 'agent_selection': return 'Agent Selection'
-      case 'threshold_adjustment': return 'Threshold Adjustment'
-      default: return cat
-    }
-  }
-
   function getConfidenceColor(confidence: number): string {
     if (confidence >= 0.8) return '#3fb950'
     if (confidence >= 0.6) return '#d29922'
@@ -164,13 +169,31 @@
     const delta = h.experiment_metric - h.baseline_metric
     return delta > 0 ? '#3fb950' : delta < 0 ? '#f85149' : '#8b949e'
   }
+
+  /** Ideas created = count of feature_idea + idea proposals from the status breakdown. */
+  function ideasCreatedCount(): number {
+    if (!evolutionStatus?.category_breakdown) return 0
+    const bd = evolutionStatus.category_breakdown
+    return (bd['feature_idea'] ?? 0) + (bd['idea'] ?? 0)
+  }
+
+  /** Filter hypotheses by active category chip. */
+  function filteredHypotheses(): EvolutionHypothesis[] {
+    if (!categoryFilter) return hypotheses
+    if (categoryFilter === '__legacy__') {
+      return hypotheses.filter(h => !isKnownCategory(h.category))
+    }
+    return hypotheses.filter(h => h.category === categoryFilter)
+  }
+
+  const lang = $derived(appState.language as 'en' | 'sk')
 </script>
 
 <div class="evolution">
   <header>
     <div class="header-left">
       <h1>Evolution</h1>
-      <p class="subtitle">Self-improvement cycles — hypothesis testing &amp; auto-application</p>
+      <p class="subtitle">Self-improvement cycles — hypothesis testing &amp; proposal generation</p>
     </div>
     <div class="controls">
       <button
@@ -218,6 +241,22 @@
   {/if}
 
   {#if activeView === 'runs'}
+    <!-- Summary tiles -->
+    {#if evolutionStatus}
+      <section class="summary-tiles">
+        <div class="summary-tile">
+          <span class="tile-value">{ideasCreatedCount()}</span>
+          <span class="tile-label">Ideas created</span>
+        </div>
+        {#each KNOWN_CATEGORY_DEFS as def}
+          <div class="summary-tile">
+            <span class="tile-value">{evolutionStatus.category_breakdown[def.key] ?? 0}</span>
+            <span class="tile-label">{def.label[lang]}</span>
+          </div>
+        {/each}
+      </section>
+    {/if}
+
     <!-- Trigger panel -->
     <section class="trigger-section">
       <div class="trigger-row">
@@ -252,7 +291,6 @@
                 <th>Status</th>
                 <th>Trigger</th>
                 <th>Hypotheses</th>
-                <th>Auto-Applied</th>
                 <th>Proposals</th>
                 <th>Duration</th>
                 <th>Started</th>
@@ -275,7 +313,6 @@
                   </td>
                   <td class="muted">{run.trigger_type}</td>
                   <td>{run.hypotheses_count}</td>
-                  <td>{run.auto_applied}</td>
                   <td>{run.proposals_created}</td>
                   <td class="muted">{formatDuration(run.duration_ms)}</td>
                   <td class="muted">{formatDate(run.started_at)}</td>
@@ -283,7 +320,7 @@
 
                 {#if selectedRun?.id === run.id}
                   <tr class="detail-row">
-                    <td colspan="7">
+                    <td colspan="6">
                       {#if loadingRun}
                         <div class="loading-inline">Loading hypotheses…</div>
                       {:else}
@@ -309,6 +346,39 @@
                             {/if}
                           </div>
 
+                          <!-- Category filter chips -->
+                          {#if hypotheses.length > 0}
+                            <div class="category-chips">
+                              <button
+                                class="chip"
+                                class:chip-active={categoryFilter === ''}
+                                onclick={() => { categoryFilter = '' }}
+                              >
+                                All
+                              </button>
+                              {#each KNOWN_CATEGORY_DEFS as def}
+                                {#if hypotheses.some(h => h.category === def.key)}
+                                  <button
+                                    class="chip"
+                                    class:chip-active={categoryFilter === def.key}
+                                    onclick={() => { categoryFilter = def.key }}
+                                  >
+                                    {def.label[lang]}
+                                  </button>
+                                {/if}
+                              {/each}
+                              {#if hypotheses.some(h => !isKnownCategory(h.category))}
+                                <button
+                                  class="chip chip-legacy"
+                                  class:chip-active={categoryFilter === '__legacy__'}
+                                  onclick={() => { categoryFilter = '__legacy__' }}
+                                >
+                                  Legacy
+                                </button>
+                              {/if}
+                            </div>
+                          {/if}
+
                           {#if hypotheses.length === 0}
                             <p class="empty-sub">No hypotheses recorded for this run.</p>
                           {:else}
@@ -323,15 +393,25 @@
                                   <th>Delta</th>
                                   <th>Confidence</th>
                                   <th>Decision</th>
+                                  <th>Actions</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {#each hypotheses as h}
+                                {#each filteredHypotheses() as h}
                                   <tr>
                                     <td>
-                                      <span class="cat-badge">{getCategoryLabel(h.category)}</span>
+                                      <span class="cat-badge">{getCategoryLabel(h.category, lang)}</span>
                                     </td>
-                                    <td class="desc-cell">{h.description}</td>
+                                    <td class="desc-cell">
+                                      <span>{h.description}</span>
+                                      {#if h.wiki_page_id}
+                                        <a
+                                          class="wiki-link"
+                                          href="/wiki/{h.wiki_page_id}"
+                                          onclick={(e) => { e.stopPropagation() }}
+                                        >Wiki ↗</a>
+                                      {/if}
+                                    </td>
                                     <td class="muted mono">{h.metric}</td>
                                     <td class="mono">{h.baseline_metric.toFixed(3)}</td>
                                     <td class="mono">{h.experiment_metric.toFixed(3)}</td>
@@ -353,6 +433,19 @@
                                       <span class="decision-badge" style="color: {getDecisionColor(h.decision)}; border-color: {getDecisionColor(h.decision)};">
                                         {h.decision.replace(/_/g, ' ')}
                                       </span>
+                                    </td>
+                                    <td class="actions-cell">
+                                      {#if h.decision === 'proposal_created'}
+                                        <button
+                                          class="review-terminal-btn"
+                                          onclick={() => {
+                                            requestTerminalPrefill(buildEvolutionCommand(h))
+                                            setActiveTab('overview')
+                                          }}
+                                        >Review in Terminal</button>
+                                      {:else}
+                                        <span class="muted">—</span>
+                                      {/if}
                                     </td>
                                   </tr>
                                 {/each}
@@ -461,13 +554,41 @@
 
           <div class="config-group">
             <label for="cfg-budget">Daily Token Budget</label>
-            <input
-              id="cfg-budget"
-              type="number"
-              bind:value={config.daily_token_budget}
-              min="0"
-              step="1000"
-            />
+            <div class="budget-row">
+              <input
+                id="cfg-budget"
+                type="number"
+                bind:value={config.daily_token_budget}
+                min="0"
+                step="1000"
+                disabled={config.daily_token_budget === 0}
+              />
+              <label class="unlimited-toggle">
+                <input
+                  type="checkbox"
+                  checked={config.daily_token_budget === 0}
+                  onchange={(e) => {
+                    const target = e.currentTarget as HTMLInputElement
+                    if (config) {
+                      config.daily_token_budget = target.checked ? 0 : 2000000
+                    }
+                  }}
+                />
+                Unlimited
+              </label>
+            </div>
+            <p class="config-hint">Set to 0 (Unlimited) to disable the daily cap entirely. Otherwise, tokens spent per UTC day across all subsystems.</p>
+          </div>
+
+          <div class="config-group">
+            <label class="toggle-label" for="cfg-stratus-self">
+              <span class="toggle-label-text">
+                Allow Stratus-self evolution (prompt_tuning)
+                <span class="config-hint-inline" title="When enabled, the evolution loop may also generate prompt_tuning hypotheses that tune Stratus's own agent prompts. This is a low-priority opt-in category. Requires a completed evolution run to take effect.">ⓘ</span>
+              </span>
+              <input id="cfg-stratus-self" type="checkbox" bind:checked={config.stratus_self_enabled} />
+            </label>
+            <p class="config-hint">Enables LLM self-tuning — evolution targets Stratus's own prompts in addition to project code. Low-priority category.</p>
           </div>
 
           <div class="config-actions">
@@ -609,6 +730,81 @@
     cursor: pointer;
     font-size: 14px;
     padding: 0 4px;
+  }
+
+  /* Summary tiles */
+  .summary-tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .summary-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: #161b22;
+    border: 1px solid #21262d;
+    min-width: 90px;
+  }
+
+  .tile-value {
+    font-size: 20px;
+    font-weight: 600;
+    color: #e6edf3;
+    font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  }
+
+  .tile-label {
+    font-size: 11px;
+    color: #8b949e;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  /* Category filter chips */
+  .category-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .chip {
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid #30363d;
+    background: transparent;
+    color: #8b949e;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+
+  .chip:hover:not(.chip-active) {
+    color: #c9d1d9;
+    border-color: #484f58;
+  }
+
+  .chip-active {
+    background: #21262d;
+    color: #e6edf3;
+    border-color: #388bfd;
+  }
+
+  .chip-legacy {
+    color: #6e7681;
+    border-style: dashed;
+  }
+
+  .chip-legacy.chip-active {
+    color: #8b949e;
+    border-color: #484f58;
+    border-style: solid;
   }
 
   /* Trigger */
@@ -757,6 +953,43 @@
     color: #8b949e;
     font-size: 11px;
     white-space: nowrap;
+  }
+
+  .wiki-link {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 11px;
+    color: #388bfd;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .wiki-link:hover {
+    text-decoration: underline;
+    color: #79c0ff;
+  }
+
+  .actions-cell {
+    white-space: nowrap;
+  }
+
+  .review-terminal-btn {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid #388bfd;
+    background: transparent;
+    color: #58a6ff;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .review-terminal-btn:hover {
+    background: #388bfd22;
+    color: #79c0ff;
   }
 
   /* Detail row */
@@ -916,6 +1149,19 @@
     align-items: center;
   }
 
+  .toggle-label-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .config-hint-inline {
+    font-size: 12px;
+    color: #8b949e;
+    cursor: help;
+    font-weight: 400;
+  }
+
   .config-group input[type='number'] {
     padding: 7px 10px;
     border-radius: 6px;
@@ -935,6 +1181,33 @@
     height: 16px;
     accent-color: #388bfd;
     cursor: pointer;
+  }
+
+  .budget-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .budget-row input[type='number']:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .unlimited-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #c9d1d9;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .config-hint {
+    font-size: 12px;
+    color: #8b949e;
+    margin: 6px 0 0;
   }
 
   .slider-val {

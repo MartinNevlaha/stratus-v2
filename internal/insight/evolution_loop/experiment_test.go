@@ -34,8 +34,8 @@ func (m *mockLLMClient) Model() string    { return "mock" }
 func TestExecute_ReturnsResult(t *testing.T) {
 	runner := evolution_loop.NewExperimentRunner(nil)
 	h := &db.EvolutionHypothesis{
-		Category:       "workflow_routing",
-		BaselineMetric: 0.80,
+		Category:       "prompt_tuning",
+		BaselineMetric: 0.68,
 	}
 
 	result := runner.Execute(context.Background(), h)
@@ -54,8 +54,8 @@ func TestExecute_ReturnsResult(t *testing.T) {
 func TestExecute_RespectsContextCancellation(t *testing.T) {
 	runner := evolution_loop.NewExperimentRunner(nil)
 	h := &db.EvolutionHypothesis{
-		Category:       "threshold_adjustment",
-		BaselineMetric: 0.85,
+		Category:       "prompt_tuning",
+		BaselineMetric: 0.68,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -140,18 +140,30 @@ func TestExperimentRunner_PromptTuning_LLMError_FallsBack(t *testing.T) {
 	}
 }
 
-func TestExperimentRunner_NonPromptTuning_IgnoresLLM(t *testing.T) {
-	mock := &mockLLMClient{err: errors.New("should not be called")}
-	runner := evolution_loop.NewExperimentRunner(mock)
-	h := &db.EvolutionHypothesis{
-		Category:       "workflow_routing",
-		BaselineMetric: 0.80,
-	}
-	result := runner.Execute(context.Background(), h)
-	if result.Error != nil {
-		t.Fatal(result.Error)
-	}
-	if result.Metric != 0.92 {
-		t.Errorf("metric = %f, want 0.92", result.Metric)
+// TestExecute_LegacyCategories_UsesFallbackMetric verifies that the three
+// categories removed in T9 (workflow_routing, agent_selection,
+// threshold_adjustment) are no longer in categoryBaselines and therefore hit
+// the neutral-fallback path (BaselineMetric * 1.05 → above baseline, below 1.0).
+func TestExecute_LegacyCategories_UsesFallbackMetric(t *testing.T) {
+	runner := evolution_loop.NewExperimentRunner(nil)
+
+	for _, cat := range []string{"workflow_routing", "agent_selection", "threshold_adjustment"} {
+		h := &db.EvolutionHypothesis{
+			Category:       cat,
+			BaselineMetric: 0.80,
+		}
+		result := runner.Execute(context.Background(), h)
+		if result.Error != nil {
+			t.Fatalf("[%s] unexpected error: %v", cat, result.Error)
+		}
+		// Neutral fallback: metric > baseline and < 1.0 (not one of the removed hard-coded values).
+		if result.Metric <= h.BaselineMetric {
+			t.Errorf("[%s] metric %f should be above baseline %f (neutral fallback)", cat, result.Metric, h.BaselineMetric)
+		}
+		// The removed hard-coded values were 0.92, 0.88, 0.95 — none of them should appear.
+		hardcoded := map[float64]bool{0.92: true, 0.88: true, 0.95: true}
+		if hardcoded[result.Metric] {
+			t.Errorf("[%s] metric %f matches a removed hard-coded baseline value — category was not cleaned up", cat, result.Metric)
+		}
 	}
 }

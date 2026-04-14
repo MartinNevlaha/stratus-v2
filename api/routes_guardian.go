@@ -5,10 +5,11 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/guardian"
+	insightllm "github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 )
 
 // GET /api/guardian/alerts
@@ -68,9 +69,7 @@ func (s *Server) handleGetGuardianConfig(w http.ResponseWriter, r *http.Request)
 	cfg := s.cfg.Guardian
 	// Mask API key — only show whether it's set.
 	masked := cfg
-	if masked.LLMAPIKey != "" {
-		masked.LLMAPIKey = "***"
-	}
+	masked.LLM = maskLLMConfig(masked.LLM)
 	json200(w, masked)
 }
 
@@ -82,9 +81,12 @@ func (s *Server) handleUpdateGuardianConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// If the masked sentinel is sent back, keep the existing key.
-	if incoming.LLMAPIKey == "***" {
-		incoming.LLMAPIKey = s.cfg.Guardian.LLMAPIKey
+	// If the masked sentinel or empty string is sent back, keep the existing key.
+	restoreLLMAPIKey(&incoming.LLM, s.cfg.Guardian.LLM)
+
+	if err := validateLLMConfig(incoming.LLM, true); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	s.cfg.Guardian = incoming
@@ -94,9 +96,7 @@ func (s *Server) handleUpdateGuardianConfig(w http.ResponseWriter, r *http.Reque
 	}
 
 	masked := incoming
-	if masked.LLMAPIKey != "" {
-		masked.LLMAPIKey = "***"
-	}
+	masked.LLM = maskLLMConfig(masked.LLM)
 	json200(w, masked)
 }
 
@@ -110,39 +110,55 @@ func (s *Server) handleRunGuardianScan(w http.ResponseWriter, r *http.Request) {
 	json200(w, map[string]bool{"ok": true})
 }
 
-// POST /api/guardian/test-llm — tests the configured LLM endpoint
+// POST /api/guardian/test-llm — tests the configured LLM endpoint with an optional override body
 func (s *Server) handleTestGuardianLLM(w http.ResponseWriter, r *http.Request) {
-	cfg := s.cfg.Guardian
-	// Allow overriding with body for "test before save" UX
-	var override struct {
-		Endpoint    string  `json:"llm_endpoint"`
-		APIKey      string  `json:"llm_api_key"`
-		Model       string  `json:"llm_model"`
-		Temperature float64 `json:"llm_temperature"`
-		MaxTokens   int     `json:"llm_max_tokens"`
+	var body struct {
+		LLM config.LLMConfig `json:"llm"`
 	}
-	_ = decodeBody(r, &override)
-	if override.Endpoint != "" {
-		cfg.LLMEndpoint = override.Endpoint
-	}
-	if override.APIKey != "" && override.APIKey != "***" {
-		cfg.LLMAPIKey = override.APIKey
-	}
-	if override.Model != "" {
-		cfg.LLMModel = override.Model
-	}
-	if override.Temperature > 0 {
-		cfg.LLMTemperature = override.Temperature
-	}
-	if override.MaxTokens > 0 {
-		cfg.LLMMaxTokens = override.MaxTokens
-	}
+	_ = decodeBody(r, &body)
 
-	// Use the exported test helper via a package-level function.
-	if err := guardian.TestLLMEndpoint(r.Context(), cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMTemperature, cfg.LLMMaxTokens); err != nil {
-		jsonErr(w, http.StatusBadGateway, "llm test failed: "+err.Error())
+	// Allow testing with stored key when body sends sentinel or empty.
+	restoreLLMAPIKey(&body.LLM, s.cfg.Guardian.LLM)
+
+	// Resolve: merge with top-level LLM config.
+	resolved := config.ResolveLLMConfig(s.cfg.LLM, body.LLM)
+
+	// For a live test call, provider and model must be present.
+	if err := validateLLMConfig(resolved, false); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	json200(w, map[string]bool{"ok": true})
-}
 
+	client, err := insightllm.NewClient(insightllm.Config{
+		Provider:    resolved.Provider,
+		Model:       resolved.Model,
+		APIKey:      resolved.APIKey,
+		BaseURL:     resolved.BaseURL,
+		Timeout:     resolved.Timeout,
+		MaxTokens:   resolved.MaxTokens,
+		Temperature: resolved.Temperature,
+		MaxRetries:  resolved.MaxRetries,
+		Concurrency: resolved.Concurrency,
+	})
+	if err != nil {
+		http.Error(w, "llm init failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	start := time.Now()
+	_, err = client.Complete(r.Context(), insightllm.CompletionRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		Messages:     []insightllm.Message{insightllm.UserMessage("Say 'OK'.")},
+		MaxTokens:    10,
+	})
+	if err != nil {
+		http.Error(w, "llm test failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json200(w, map[string]interface{}{
+		"ok":         true,
+		"latency_ms": time.Since(start).Milliseconds(),
+		"model":      resolved.Model,
+	})
+}

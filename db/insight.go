@@ -1,11 +1,15 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type InsightState struct {
@@ -590,8 +594,13 @@ func (d *DB) ListInsightProposals(proposalType string, status string, riskLevel 
 	args := []interface{}{minConfidence}
 
 	if proposalType != "" {
-		query += " AND type = ?"
-		args = append(args, proposalType)
+		if strings.HasSuffix(proposalType, "*") {
+			query += " AND type LIKE ?"
+			args = append(args, strings.TrimSuffix(proposalType, "*")+"%")
+		} else {
+			query += " AND type = ?"
+			args = append(args, proposalType)
+		}
 	}
 	if status != "" {
 		query += " AND status = ?"
@@ -690,6 +699,129 @@ func (d *DB) FindSimilarInsightProposal(proposalType string, sourcePatternID str
 	}
 
 	return &p, nil
+}
+
+// CountInsightProposalsByType returns a map of proposal type → count for all
+// proposals in the database (no time filter applied, so callers can decide).
+func (d *DB) CountInsightProposalsByType() (map[string]int, error) {
+	rows, err := d.sql.Query(`
+		SELECT type, COUNT(*) AS cnt
+		FROM insight_proposals
+		GROUP BY type
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("count insight proposals by type: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var t string
+		var cnt int
+		if err := rows.Scan(&t, &cnt); err != nil {
+			return nil, fmt.Errorf("scan proposal type count: %w", err)
+		}
+		result[t] = cnt
+	}
+	return result, rows.Err()
+}
+
+// CreateInsightProposalFull inserts a new proposal row with the extended columns
+// (wiki_page_id, idempotency_hash, last_seen_at, signal_refs) added in T1.
+// If a row with the same idempotency_hash already exists, last_seen_at and
+// updated_at are bumped and the existing ID is returned (idempotent upsert).
+// The idempotency_hash MUST be pre-computed by the caller (server-authoritative).
+func (d *DB) CreateInsightProposalFull(p *InsightProposal, idempotencyHash string, signalRefs []string, wikiPageID *string) (string, bool, error) {
+	signalRefsJSON, err := json.Marshal(signalRefs)
+	if err != nil {
+		return "", false, fmt.Errorf("create insight proposal full: marshal signal_refs: %w", err)
+	}
+
+	now := time.Now().UTC()
+	nowISO := now.Format(time.RFC3339Nano)
+	nowUnix := now.Unix()
+
+	conn, err := d.sql.Conn(context.Background())
+	if err != nil {
+		return "", false, fmt.Errorf("create insight proposal full: acquire conn: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		return "", false, fmt.Errorf("create insight proposal full: begin immediate: %w", err)
+	}
+
+	var existingID string
+	scanErr := conn.QueryRowContext(context.Background(),
+		`SELECT id FROM insight_proposals WHERE idempotency_hash = ? LIMIT 1`,
+		idempotencyHash,
+	).Scan(&existingID)
+
+	var resultID string
+	var inserted bool
+
+	switch {
+	case scanErr == nil:
+		// Row exists — bump last_seen_at.
+		if _, err := conn.ExecContext(context.Background(),
+			`UPDATE insight_proposals SET last_seen_at = ?, updated_at = ? WHERE id = ?`,
+			nowUnix, nowISO, existingID,
+		); err != nil {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			return "", false, fmt.Errorf("create insight proposal full: update existing: %w", err)
+		}
+		resultID = existingID
+		inserted = false
+
+	case scanErr == sql.ErrNoRows:
+		if p.ID == "" {
+			p.ID = uuid.NewString()
+		}
+		evidenceBytes, _ := json.Marshal(p.Evidence)
+		if p.Evidence == nil {
+			evidenceBytes = []byte("{}")
+		}
+		recommendationBytes, _ := json.Marshal(p.Recommendation)
+		if p.Recommendation == nil {
+			recommendationBytes = []byte("{}")
+		}
+
+		var wikiID interface{}
+		if wikiPageID != nil {
+			wikiID = *wikiPageID
+		}
+
+		if _, err := conn.ExecContext(context.Background(), `
+INSERT INTO insight_proposals (
+  id, type, status, title, description,
+  confidence, risk_level, source_pattern_id, evidence, recommendation,
+  created_at, updated_at,
+  wiki_page_id, idempotency_hash, last_seen_at, signal_refs
+)
+VALUES (?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?,
+        ?, ?, ?, ?)`,
+			p.ID, p.Type, p.Status, p.Title, p.Description,
+			p.Confidence, p.RiskLevel, p.SourcePatternID, string(evidenceBytes), string(recommendationBytes),
+			nowISO, nowISO,
+			wikiID, idempotencyHash, nowUnix, string(signalRefsJSON),
+		); err != nil {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			return "", false, fmt.Errorf("create insight proposal full: insert: %w", err)
+		}
+		resultID = p.ID
+		inserted = true
+
+	default:
+		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		return "", false, fmt.Errorf("create insight proposal full: check existing: %w", scanErr)
+	}
+
+	if _, err := conn.ExecContext(context.Background(), "COMMIT"); err != nil {
+		return "", false, fmt.Errorf("create insight proposal full: commit: %w", err)
+	}
+	return resultID, inserted, nil
 }
 
 func (d *DB) UpdateInsightProposalStatus(id string, status string) error {
@@ -1320,4 +1452,30 @@ func (d *DB) GetRoutingRecommendationByID(id string) (*RoutingRecommendation, er
 	}
 
 	return &rec, nil
+}
+
+// ListAssetProposalPaths returns the proposed_path values from all asset.* proposals
+// that are in detected, drafted, or approved status.
+func (d *DB) ListAssetProposalPaths() ([]string, error) {
+	rows, err := d.sql.Query(`
+		SELECT json_extract(recommendation, '$.proposed_path')
+		FROM insight_proposals
+		WHERE type LIKE 'asset.%'
+		  AND status IN ('detected', 'drafted', 'approved')
+		  AND json_extract(recommendation, '$.proposed_path') IS NOT NULL
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list asset proposal paths: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("list asset proposal paths: scan: %w", err)
+		}
+		paths = append(paths, path)
+	}
+	return paths, rows.Err()
 }

@@ -122,6 +122,10 @@ func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (
 		return nil, fmt.Errorf("llm: failed to read response: %w", err)
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, &RateLimitedError{RetryAfter: parseRetryAfter(resp.Header)}
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		var apiErr anthropicError
 		_ = json.Unmarshal(respBody, &apiErr)

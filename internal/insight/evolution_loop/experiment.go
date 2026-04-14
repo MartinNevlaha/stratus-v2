@@ -30,11 +30,10 @@ func NewExperimentRunner(llmClient llm.Client) *ExperimentRunner {
 
 // categoryBaselines maps hypothesis categories to simulated baseline improvements.
 // Values represent the simulated metric uplift factor used in MVP mode.
+// NOTE: workflow_routing, agent_selection, and threshold_adjustment were removed
+// in T9. Only prompt_tuning remains for the legacy Run() fallback path.
 var categoryBaselines = map[string]float64{
-	"workflow_routing":     0.92,
-	"agent_selection":      0.88,
-	"threshold_adjustment": 0.95,
-	"prompt_tuning":        0.75,
+	"prompt_tuning": 0.75,
 }
 
 // Execute runs an experiment for the given hypothesis.
@@ -79,8 +78,55 @@ func (r *ExperimentRunner) Execute(ctx context.Context, hypothesis *db.Evolution
 	}
 }
 
+// ExecuteWithLang is like Execute but forwards a language code to the LLM
+// system prompt via prompts.WithLanguage.
+func (r *ExperimentRunner) ExecuteWithLang(ctx context.Context, hypothesis *db.EvolutionHypothesis, lang string) *ExperimentResult {
+	// Honour cancellation before doing any work.
+	select {
+	case <-ctx.Done():
+		return &ExperimentResult{Error: ctx.Err()}
+	default:
+	}
+
+	// For prompt_tuning with LLM available, run real A/B comparison.
+	if hypothesis.Category == "prompt_tuning" && r.llmClient != nil {
+		result := r.executePromptTuningWithLang(ctx, hypothesis, lang)
+		if result.Error == nil {
+			return result
+		}
+		// Fall back to simulated on LLM error.
+		slog.Warn("experiment runner: LLM prompt_tuning failed, falling back to simulated",
+			"hypothesis_id", hypothesis.ID, "err", result.Error)
+	}
+
+	// Simulated execution for all other categories (and fallback).
+	metric, ok := categoryBaselines[hypothesis.Category]
+	if !ok {
+		// Unknown category: return a neutral metric slightly above baseline.
+		metric = hypothesis.BaselineMetric * 1.05
+	}
+
+	// Check again after the (simulated) computation.
+	select {
+	case <-ctx.Done():
+		return &ExperimentResult{Error: ctx.Err()}
+	default:
+	}
+
+	return &ExperimentResult{
+		Metric:     metric,
+		SampleSize: 20, // fixed simulated sample size for MVP
+	}
+}
+
 // executePromptTuning performs a real A/B prompt comparison using the LLM client.
 func (r *ExperimentRunner) executePromptTuning(ctx context.Context, hypothesis *db.EvolutionHypothesis) *ExperimentResult {
+	return r.executePromptTuningWithLang(ctx, hypothesis, "en")
+}
+
+// executePromptTuningWithLang performs a real A/B prompt comparison using the
+// LLM client, with the evaluation system prompt localised via lang.
+func (r *ExperimentRunner) executePromptTuningWithLang(ctx context.Context, hypothesis *db.EvolutionHypothesis, lang string) *ExperimentResult {
 	testScenario := "Analyze the following code change and provide a structured implementation plan with clear steps."
 
 	// Run baseline prompt.
@@ -119,7 +165,7 @@ Return a JSON object: {"baseline_score": 0.0-1.0, "proposed_score": 0.0-1.0, "re
 		len(proposedResp.Content), truncate(proposedResp.Content, 2000))
 
 	evalResp, err := r.llmClient.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: prompts.ExperimentEvaluation,
+		SystemPrompt: prompts.WithLanguage(prompts.ExperimentEvaluation, lang),
 		Messages:     []llm.Message{{Role: "user", Content: evalPrompt}},
 		MaxTokens:    512,
 		Temperature:  0.2,

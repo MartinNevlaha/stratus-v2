@@ -129,6 +129,10 @@ func (c *ZAIClient) Complete(ctx context.Context, req CompletionRequest) (*Compl
 		return nil, fmt.Errorf("llm: failed to read response: %w", err)
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, &RateLimitedError{RetryAfter: parseRetryAfter(resp.Header)}
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		var apiErr zaiError
 		_ = json.Unmarshal(respBody, &apiErr)

@@ -15,7 +15,11 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/artifacts"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/code_analyst"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/ingest"
+	evolution_baseline "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/baseline"
+	evolution_scoring "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/scoring"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/knowledge_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/patterns"
@@ -28,6 +32,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
 	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/google/uuid"
 )
 
 type Engine struct {
@@ -35,6 +40,7 @@ type Engine struct {
 	config              config.InsightConfig
 	wikiCfg             config.WikiConfig
 	evoCfg              config.EvolutionConfig
+	lang                string
 	scheduler           *Scheduler
 	eventBus            events.EventBus
 	eventStore          events.Store
@@ -55,6 +61,12 @@ type Engine struct {
 	evolutionLoop       *evolution_loop.EvolutionLoop
 	wikiSynth           *wiki_engine.Synthesizer
 	wikiLinker          *wiki_engine.Linker
+	wikiLinkSuggester   *wiki_engine.LinkSuggester
+	wikiCluster         *wiki_engine.ClusterSynthesizer
+	ingester            *ingest.Ingester
+	inboxWatcherCancel  context.CancelFunc
+	codeAnalyst         *code_analyst.Engine
+	codeAnalystCfg      config.CodeAnalysisConfig
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -85,14 +97,27 @@ func NewEngine(database *db.DB, cfg config.InsightConfig) *Engine {
 	return e
 }
 
-// NewEngineWithConfig creates an Engine with explicit WikiConfig and
-// EvolutionConfig, enabling the WikiEngine and EvolutionLoop subsystems.
+// NewEngineWithConfig creates an Engine with explicit WikiConfig,
+// EvolutionConfig, and CodeAnalysisConfig, enabling the WikiEngine,
+// EvolutionLoop, and CodeAnalyst subsystems.
+// Language defaults to "en". Use NewEngineWithFullConfig to specify a language.
 func NewEngineWithConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig) *Engine {
+	return NewEngineWithFullConfig(database, cfg, wikiCfg, evoCfg, config.CodeAnalysisConfig{}, "en")
+}
+
+// NewEngineWithFullConfig creates an Engine with all subsystem configs.
+// lang is the UI language code ("en", "sk"); pass an empty string to default to "en".
+func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig, codeAnalystCfg config.CodeAnalysisConfig, lang string) *Engine {
+	if lang == "" {
+		lang = "en"
+	}
 	e := &Engine{
-		database: database,
-		config:   cfg,
-		wikiCfg:  wikiCfg,
-		evoCfg:   evoCfg,
+		database:       database,
+		config:         cfg,
+		wikiCfg:        wikiCfg,
+		evoCfg:         evoCfg,
+		codeAnalystCfg: codeAnalystCfg,
+		lang:           lang,
 	}
 	e.initLLMClient()
 	e.scheduler = newScheduler(e)
@@ -108,6 +133,7 @@ func NewEngineWithConfig(database *db.DB, cfg config.InsightConfig, wikiCfg conf
 	e.initProductIntelligence()
 	e.initWikiEngine()
 	e.initEvolutionLoop()
+	e.initCodeAnalyst()
 	return e
 }
 
@@ -142,6 +168,8 @@ func (e *Engine) initLLMClient() {
 		Timeout:     e.config.LLM.Timeout,
 		MaxTokens:   e.config.LLM.MaxTokens,
 		Temperature: e.config.LLM.Temperature,
+		MaxRetries:  e.config.LLM.MaxRetries,
+		Concurrency: e.config.LLM.Concurrency,
 	}
 	if llmCfg.Provider == "" {
 		llmCfg = llm.DefaultConfig()
@@ -227,16 +255,232 @@ func (e *Engine) initProductIntelligence() {
 
 func (e *Engine) initWikiEngine() {
 	wikiStore := wiki_engine.NewDBWikiStore(e.database)
-	wikiCfg := e.wikiCfg
-	e.wikiEngine = wiki_engine.NewWikiEngine(wikiStore, e.llmClient, func() config.WikiConfig { return wikiCfg })
+	wikiCfgFn := func() config.WikiConfig { return e.wikiCfg }
+	e.wikiEngine = wiki_engine.NewWikiEngine(wikiStore, e.llmClient, wikiCfgFn)
 	e.wikiSynth = wiki_engine.NewSynthesizer(wikiStore, e.llmClient)
 	e.wikiLinker = wiki_engine.NewLinker(wikiStore)
+	e.wikiLinkSuggester = wiki_engine.NewLinkSuggester(wikiStore, e.llmClient)
+	e.wikiCluster = wiki_engine.NewClusterSynthesizer(wikiStore, e.llmClient, wiki_engine.ClusterConfig{
+		MinSources: e.wikiCfg.ClusterMinSources,
+	})
+	e.ingester = ingest.New(wikiStore, e.wikiEngine, wikiCfgFn, e.wikiLinkSuggester)
 }
+
+// Ingester exposes the ingest pipeline.
+func (e *Engine) Ingester() *ingest.Ingester { return e.ingester }
+
+// ClusterSynthesizer exposes the cluster subsystem.
+func (e *Engine) ClusterSynthesizer() *wiki_engine.ClusterSynthesizer { return e.wikiCluster }
+
+// LinkSuggester exposes the link suggester subsystem.
+func (e *Engine) LinkSuggester() *wiki_engine.LinkSuggester { return e.wikiLinkSuggester }
 
 func (e *Engine) initEvolutionLoop() {
 	evoStore := evolution_loop.NewDBEvolutionStore(e.database)
-	evoCfg := e.evoCfg
-	e.evolutionLoop = evolution_loop.NewEvolutionLoop(evoStore, func() config.EvolutionConfig { return evoCfg }, e.llmClient)
+
+	wikiStore := wiki_engine.NewDBWikiStore(e.database)
+	wikiFn := func(_ context.Context, h *db.EvolutionHypothesis) (string, error) {
+		content := formatHypothesisForWiki(h)
+		page := &db.WikiPage{
+			ID:          uuid.NewString(),
+			PageType:    "concept",
+			Title:       fmt.Sprintf("Evolution Finding: %s", h.Description),
+			Content:     content,
+			Status:      "published",
+			Tags:        []string{"evolution", h.Category},
+			GeneratedBy: "evolution",
+			Version:     1,
+		}
+		if err := wikiStore.SavePage(page); err != nil {
+			return "", fmt.Errorf("save wiki page: %w", err)
+		}
+		slog.Info("evolution: created wiki proposal page",
+			"page_id", page.ID, "category", h.Category)
+		return page.ID, nil
+	}
+
+	// Wire new target-project analysis dependencies.
+	// TODO: wire real Vexor client once VexorClient adapter is implemented.
+	bldr := evolution_baseline.New(evolution_baseline.Dependencies{
+		DB: e.database,
+		// Vexor: nil — resilient; vexor hits will be skipped until wired.
+	})
+	staticScorer := evolution_scoring.NewStaticScorer()
+	proposalWriter := evolution_loop.NewProposalWriter(e.database)
+
+	// TODO: wire LLM judge via adapter from insight LLM client once interface
+	// alignment is confirmed (scoring.LLMClient vs llm.Client).
+	// For now, LLM judge is disabled (nil) — static-only scoring is used.
+	slog.Info("evolution: LLM judge disabled — using static-only scoring for RunCycle")
+
+	root := e.projectRoot
+	if root == "" {
+		root = "."
+	}
+
+	initLang := e.lang
+	e.evolutionLoop = evolution_loop.NewEvolutionLoop(
+		evoStore,
+		func() config.EvolutionConfig { return e.evoCfg },
+		e.llmClient,
+		evolution_loop.WithWikiFn(wikiFn),
+		evolution_loop.WithLangFn(func() string {
+			if l := config.Load().Language; l != "" {
+				return l
+			}
+			return initLang
+		}),
+		// RunCycle dependencies.
+		evolution_loop.WithBaselineBuilder(bldr),
+		evolution_loop.WithStaticScorer(staticScorer),
+		evolution_loop.WithProposalWriter(proposalWriter),
+		evolution_loop.WithProjectRoot(root),
+	)
+}
+
+func (e *Engine) initCodeAnalyst() {
+	store := code_analyst.NewDBCodeAnalystStore(e.database)
+
+	// Build a per-subsystem LLM client. CodeAnalysis may have its own LLM
+	// override in the config; fall back to the shared insight LLM client when
+	// the subsystem override is not configured.
+	caLLMCfg := config.ResolveLLMConfig(e.config.LLM, e.codeAnalystCfg.LLM)
+	var caLLMClient llm.Client
+	if caLLMCfg.Provider != "" && caLLMCfg.Model != "" {
+		llmCfg := llm.Config{
+			Provider:    caLLMCfg.Provider,
+			Model:       caLLMCfg.Model,
+			APIKey:      caLLMCfg.APIKey,
+			BaseURL:     caLLMCfg.BaseURL,
+			Timeout:     caLLMCfg.Timeout,
+			MaxTokens:   caLLMCfg.MaxTokens,
+			Temperature: caLLMCfg.Temperature,
+			MaxRetries:  caLLMCfg.MaxRetries,
+			Concurrency: caLLMCfg.Concurrency,
+		}
+		llmCfg = llmCfg.WithEnv()
+		client, err := llm.NewClient(llmCfg)
+		if err != nil {
+			slog.Warn("insight: code analyst: failed to initialize dedicated LLM client, falling back to shared", "error", err)
+			caLLMClient = e.llmClient
+		} else {
+			caLLMClient = client
+		}
+	} else {
+		caLLMClient = e.llmClient
+	}
+
+	configFn := func() code_analyst.CodeAnalysisConfig {
+		cfg := config.Load()
+		return code_analyst.CodeAnalysisConfig{
+			Enabled:             cfg.CodeAnalysis.Enabled,
+			MaxFilesPerRun:      cfg.CodeAnalysis.MaxFilesPerRun,
+			TokenBudgetPerRun:   cfg.CodeAnalysis.TokenBudgetPerRun,
+			MinChurnScore:       cfg.CodeAnalysis.MinChurnScore,
+			ConfidenceThreshold: cfg.CodeAnalysis.ConfidenceThreshold,
+			ScanInterval:        cfg.CodeAnalysis.ScanInterval,
+			IncludeGitHistory:   cfg.CodeAnalysis.IncludeGitHistory,
+			GitHistoryDepth:     cfg.CodeAnalysis.GitHistoryDepth,
+			Categories:          cfg.CodeAnalysis.Categories,
+		}
+	}
+
+	wikiStore := wiki_engine.NewDBWikiStore(e.database)
+	wikiFn := func(ctx context.Context, filePath string, findings []db.CodeFinding) (string, error) {
+		// Deterministic page ID based on file path so re-runs update the same page.
+		sanitized := strings.NewReplacer("/", "-", "\\", "-", ".", "-", " ", "-").Replace(filePath)
+		pageID := "ca-" + sanitized
+
+		// Build markdown content from findings.
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("# Code Analysis: %s\n\n", filePath))
+		sb.WriteString(fmt.Sprintf("**File:** `%s`\n\n", filePath))
+		sb.WriteString(fmt.Sprintf("**Findings:** %d\n\n", len(findings)))
+		sb.WriteString("## Findings\n\n")
+		for i, f := range findings {
+			sb.WriteString(fmt.Sprintf("### %d. [%s] %s\n\n", i+1, strings.ToUpper(f.Severity), f.Title))
+			sb.WriteString(fmt.Sprintf("**Category:** %s  \n", f.Category))
+			if f.LineStart > 0 {
+				sb.WriteString(fmt.Sprintf("**Lines:** %d–%d  \n", f.LineStart, f.LineEnd))
+			}
+			sb.WriteString(fmt.Sprintf("**Confidence:** %.0f%%  \n\n", f.Confidence*100))
+			sb.WriteString(f.Description + "\n\n")
+			if f.Suggestion != "" {
+				sb.WriteString("**Suggestion:** " + f.Suggestion + "\n\n")
+			}
+		}
+
+		content := sb.String()
+
+		// Try to update an existing page; create a new one if not found.
+		existing, err := wikiStore.GetPage(pageID)
+		if err == nil && existing != nil {
+			existing.Content = content
+			existing.Status = "published"
+			existing.StalenessScore = 0
+			existing.Version++
+			existing.Tags = []string{"code_analysis", "automated"}
+			if updateErr := wikiStore.UpdatePage(existing); updateErr != nil {
+				return "", fmt.Errorf("update wiki page: %w", updateErr)
+			}
+			slog.Info("insight: code analyst: updated wiki page", "page_id", pageID, "file", filePath)
+			return pageID, nil
+		}
+
+		page := &db.WikiPage{
+			ID:          pageID,
+			PageType:    "code_analysis",
+			Title:       fmt.Sprintf("Code Analysis: %s", filePath),
+			Content:     content,
+			Status:      "published",
+			Tags:        []string{"code_analysis", "automated"},
+			GeneratedBy: "code_analyst",
+			Version:     1,
+		}
+		if saveErr := wikiStore.SavePage(page); saveErr != nil {
+			return "", fmt.Errorf("save wiki page: %w", saveErr)
+		}
+		slog.Info("insight: code analyst: created wiki page", "page_id", pageID, "file", filePath)
+		return pageID, nil
+	}
+
+	projRoot := e.projectRoot
+	if projRoot == "" {
+		projRoot = "."
+	}
+
+	e.codeAnalyst = code_analyst.NewEngine(store, caLLMClient, projRoot, configFn, wikiFn)
+	// Wire language function so LLM prompts are returned in the user's language.
+	initCaLang := e.lang
+	e.codeAnalyst.SetLangFn(func() string {
+		if l := config.Load().Language; l != "" {
+			return l
+		}
+		return initCaLang
+	})
+}
+
+// RunCodeAnalysis executes a full code analysis cycle. triggerType should be
+// "manual" for user-initiated runs or "scheduled" for automatic runs.
+// categories may be empty to run all configured categories.
+func (e *Engine) RunCodeAnalysis(ctx context.Context, triggerType string, categories []string) (*code_analyst.RunResult, error) {
+	if e.codeAnalyst == nil {
+		return nil, nil
+	}
+	result, err := e.codeAnalyst.Run(ctx, triggerType, categories)
+	if err != nil {
+		return nil, fmt.Errorf("run code analysis: %w", err)
+	}
+	return result, nil
+}
+
+// IsCodeAnalysisRunning reports whether a code analysis run is currently in
+// progress.
+func (e *Engine) IsCodeAnalysisRunning() bool {
+	if e.codeAnalyst == nil {
+		return false
+	}
+	return e.codeAnalyst.IsRunning()
 }
 
 func (e *Engine) Start(ctx context.Context) error {
@@ -297,8 +541,56 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 	}
 
+	e.startInboxWatcher()
+	e.startClusterTicker()
+
 	slog.Info("insight: engine started")
 	return nil
+}
+
+// startClusterTicker runs ClusterSynthesizer periodically if configured.
+func (e *Engine) startClusterTicker() {
+	if !e.wikiCfg.ClusterSynthesisEnabled || e.wikiCluster == nil {
+		return
+	}
+	interval := time.Duration(e.wikiCfg.ClusterIntervalMinutes) * time.Minute
+	if interval < 5*time.Minute {
+		interval = 6 * time.Hour
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-e.ctx.Done():
+				return
+			case <-t.C:
+				if _, err := e.wikiCluster.SynthesizeClusters(e.ctx); err != nil {
+					slog.Warn("insight: cluster synthesis tick failed", "err", err)
+				}
+			}
+		}
+	}()
+}
+
+// startInboxWatcher spins up the Obsidian-inbox file watcher if config allows.
+// It is a best-effort subsystem; errors are logged and do not fail Start.
+func (e *Engine) startInboxWatcher() {
+	if e.wikiCfg.VaultPath == "" || !e.wikiCfg.InboxWatcherEnabled || e.ingester == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(e.ctx)
+	e.inboxWatcherCancel = cancel
+	w := wiki_engine.NewInboxWatcher(wiki_engine.InboxWatcherConfig{
+		VaultPath: e.wikiCfg.VaultPath,
+		InboxDir:  e.wikiCfg.InboxDir,
+		Ingester:  e.ingester,
+	})
+	go func() {
+		if err := w.Run(ctx); err != nil && err != context.Canceled {
+			slog.Warn("insight: inbox watcher stopped", "err", err)
+		}
+	}()
 }
 
 func (e *Engine) Stop() {
@@ -311,6 +603,11 @@ func (e *Engine) Stop() {
 
 	if e.trajectoryRecorder != nil {
 		e.trajectoryRecorder.Stop()
+	}
+
+	if e.inboxWatcherCancel != nil {
+		e.inboxWatcherCancel()
+		e.inboxWatcherCancel = nil
 	}
 
 	if e.eventBus != nil && e.subscriptionID != 0 {
@@ -1143,6 +1440,32 @@ func (e *Engine) RunWikiIngest(ctx context.Context) (*wiki_engine.IngestResult, 
 		return nil, fmt.Errorf("wiki ingest: %w", err)
 	}
 	return result, nil
+}
+
+// Ingest runs a single ingest pass via the ingester. Returns ErrNotConfigured
+// when the wiki engine was not initialised.
+func (e *Engine) Ingest(ctx context.Context, source string, opts ingest.Options) (*ingest.Result, error) {
+	if e.ingester == nil {
+		return nil, fmt.Errorf("insight: ingester not initialized")
+	}
+	return e.ingester.Ingest(ctx, source, opts)
+}
+
+// RunClusterSynthesis triggers the cluster job on demand.
+func (e *Engine) RunClusterSynthesis(ctx context.Context) (*wiki_engine.ClusterResult, error) {
+	if e.wikiCluster == nil {
+		return nil, fmt.Errorf("insight: cluster synthesizer not initialized")
+	}
+	return e.wikiCluster.SynthesizeClusters(ctx)
+}
+
+// RunVaultPull pulls externally-edited vault files back into the DB. Returns
+// nil, nil if vault sync is not configured on the server layer.
+func (e *Engine) RunVaultPull(ctx context.Context, vs *wiki_engine.VaultSync) (*wiki_engine.PullStatus, error) {
+	if vs == nil {
+		return nil, fmt.Errorf("insight: vault sync not configured")
+	}
+	return vs.PullAll(ctx)
 }
 
 // RunWikiMaintenance runs a wiki maintenance cycle. It returns nil, nil when

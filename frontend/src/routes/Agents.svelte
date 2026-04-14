@@ -645,32 +645,32 @@
 <!-- Create Agent Modal -->
 {#if showCreateAgent}
   <div class="modal-overlay" onclick={() => (showCreateAgent = false)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Create New Agent</h3>
       <div class="form-group">
-        <label>Name</label>
-        <input type="text" bind:value={newAgentName} placeholder="e.g. delivery-data-analyst" />
+        <label for="agent-name">Name</label>
+        <input id="agent-name" type="text" bind:value={newAgentName} placeholder="e.g. delivery-data-analyst" />
       </div>
       <div class="form-group">
-        <label>Description</label>
-        <input type="text" bind:value={newAgentDesc} placeholder="What does this agent do?" />
+        <label for="agent-desc">Description</label>
+        <input id="agent-desc" type="text" bind:value={newAgentDesc} placeholder="What does this agent do?" />
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Model</label>
-          <select bind:value={newAgentModel}>
+          <label for="agent-model">Model</label>
+          <select id="agent-model" bind:value={newAgentModel}>
             <option value="sonnet">Sonnet</option>
             <option value="opus">Opus</option>
           </select>
         </div>
       </div>
       <div class="form-group">
-        <label>Tools (comma-separated)</label>
-        <input type="text" bind:value={newAgentTools} />
+        <label for="agent-tools">Tools (comma-separated)</label>
+        <input id="agent-tools" type="text" bind:value={newAgentTools} />
       </div>
       <div class="form-group">
-        <label>Body (markdown)</label>
-        <textarea bind:value={newAgentBody} rows="6" placeholder="Agent instructions in markdown..."></textarea>
+        <label for="agent-body">Body (markdown)</label>
+        <textarea id="agent-body" bind:value={newAgentBody} rows="6" placeholder="Agent instructions in markdown..."></textarea>
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" onclick={() => (showCreateAgent = false)}>Cancel</button>
@@ -683,7 +683,7 @@
 <!-- Skill Creation Picker -->
 {#if showSkillPicker}
   <div class="modal-overlay" onclick={() => (showSkillPicker = false)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Create New Skill</h3>
       <div class="skill-create-options">
         <button class="create-option" onclick={() => { showSkillPicker = false; showSkillCreatorLauncher = true }}>
@@ -707,7 +707,7 @@
 <!-- Skill Creator Launcher -->
 {#if showSkillCreatorLauncher}
   <div class="modal-overlay" onclick={() => (showSkillCreatorLauncher = false)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Launch skill-creator</h3>
       <p class="launcher-desc">Run the command below in your project directory. The <code>skill-creator</code> skill will guide you through the process interactively.</p>
       <div class="target-toggle">
@@ -736,19 +736,19 @@
 <!-- Create Skill Modal -->
 {#if showCreateSkill}
   <div class="modal-overlay" onclick={() => (showCreateSkill = false)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Create New Skill</h3>
       <div class="form-group">
-        <label>Name</label>
-        <input type="text" bind:value={newSkillName} placeholder="e.g. my-custom-workflow" />
+        <label for="skill-name">Name</label>
+        <input id="skill-name" type="text" bind:value={newSkillName} placeholder="e.g. my-custom-workflow" />
       </div>
       <div class="form-group">
-        <label>Description</label>
-        <input type="text" bind:value={newSkillDesc} placeholder="When to trigger and what this skill does" />
+        <label for="skill-desc">Description</label>
+        <input id="skill-desc" type="text" bind:value={newSkillDesc} placeholder="When to trigger and what this skill does" />
       </div>
       <div class="form-group">
-        <label>Body (markdown)</label>
-        <textarea bind:value={newSkillBody} rows="8" placeholder="Skill instructions in markdown..."></textarea>
+        <label for="skill-body">Body (markdown)</label>
+        <textarea id="skill-body" bind:value={newSkillBody} rows="8" placeholder="Skill instructions in markdown..."></textarea>
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" onclick={() => (showCreateSkill = false)}>Cancel</button>
@@ -761,24 +761,24 @@
 <!-- Edit Agent Modal -->
 {#if editAgent}
   <div class="modal-overlay" onclick={() => (editAgent = null)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Edit Agent: {editAgent.name}</h3>
       <div class="form-group">
-        <label>Description</label>
-        <input type="text" bind:value={editAgent.description} />
+        <label for="edit-agent-desc">Description</label>
+        <input id="edit-agent-desc" type="text" bind:value={editAgent.description} />
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Model</label>
-          <select bind:value={editAgent.model}>
+          <label for="edit-agent-model">Model</label>
+          <select id="edit-agent-model" bind:value={editAgent.model}>
             <option value="sonnet">Sonnet</option>
             <option value="opus">Opus</option>
           </select>
         </div>
       </div>
       <div class="form-group">
-        <label>Body (markdown)</label>
-        <textarea bind:value={editAgent.body} rows="10"></textarea>
+        <label for="edit-agent-body">Body (markdown)</label>
+        <textarea id="edit-agent-body" bind:value={editAgent.body} rows="10"></textarea>
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" onclick={() => (editAgent = null)}>Cancel</button>
@@ -791,11 +791,11 @@
 <!-- Edit Skill Modal -->
 {#if editSkill}
   <div class="modal-overlay" onclick={() => (editSkill = null)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Edit Skill: {editSkill.name}</h3>
       <div class="form-group">
-        <label>Description</label>
-        <textarea bind:value={editSkill.description} rows="3"></textarea>
+        <label for="edit-skill-desc">Description</label>
+        <textarea id="edit-skill-desc" bind:value={editSkill.description} rows="3"></textarea>
       </div>
       <div class="form-group">
         <label>
@@ -804,12 +804,12 @@
         </label>
       </div>
       <div class="form-group">
-        <label>Argument hint</label>
-        <input type="text" bind:value={editSkill.argument_hint} />
+        <label for="edit-skill-arg">Argument hint</label>
+        <input id="edit-skill-arg" type="text" bind:value={editSkill.argument_hint} />
       </div>
       <div class="form-group">
-        <label>Body (markdown)</label>
-        <textarea bind:value={editSkill.body} rows="12"></textarea>
+        <label for="edit-skill-body">Body (markdown)</label>
+        <textarea id="edit-skill-body" bind:value={editSkill.body} rows="12"></textarea>
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" onclick={() => (editSkill = null)}>Cancel</button>
@@ -822,7 +822,7 @@
 <!-- Skill Assignment Modal -->
 {#if showSkillAssignment}
   <div class="modal-overlay" onclick={() => (showSkillAssignment = false)} role="presentation">
-    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()}>
+    <div class="modal modal-wide" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Assign Skills to {selectedAgent}</h3>
       <div class="skill-list">
         {#each skills as skill}
@@ -853,19 +853,19 @@
 <!-- Create Rule Modal -->
 {#if showCreateRule}
   <div class="modal-overlay" onclick={() => (showCreateRule = false)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Create New Rule</h3>
       <div class="form-group">
-        <label>Name (filename)</label>
-        <input type="text" bind:value={newRuleName} placeholder="e.g. coding-standards" />
+        <label for="rule-name">Name (filename)</label>
+        <input id="rule-name" type="text" bind:value={newRuleName} placeholder="e.g. coding-standards" />
       </div>
       <div class="form-group">
-        <label>Title</label>
-        <input type="text" bind:value={newRuleTitle} placeholder="e.g. Coding Standards" />
+        <label for="rule-title">Title</label>
+        <input id="rule-title" type="text" bind:value={newRuleTitle} placeholder="e.g. Coding Standards" />
       </div>
       <div class="form-group">
-        <label>Body (markdown)</label>
-        <textarea bind:value={newRuleBody} rows="10" placeholder="# Rule Title&#10;&#10;Rule content in markdown..."></textarea>
+        <label for="rule-body">Body (markdown)</label>
+        <textarea id="rule-body" bind:value={newRuleBody} rows="10" placeholder="# Rule Title&#10;&#10;Rule content in markdown..."></textarea>
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" onclick={() => (showCreateRule = false)}>Cancel</button>
@@ -878,15 +878,15 @@
 <!-- Edit Rule Modal -->
 {#if editRule}
   <div class="modal-overlay" onclick={() => (editRule = null)} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
+    <div class="modal" role="document" onclick={(e) => e.stopPropagation()}>
       <h3>Edit Rule: {editRule.name}</h3>
       <div class="form-group">
-        <label>Title</label>
-        <input type="text" bind:value={editRule.title} />
+        <label for="edit-rule-title">Title</label>
+        <input id="edit-rule-title" type="text" bind:value={editRule.title} />
       </div>
       <div class="form-group">
-        <label>Body (markdown)</label>
-        <textarea bind:value={editRule.body} rows="14"></textarea>
+        <label for="edit-rule-body">Body (markdown)</label>
+        <textarea id="edit-rule-body" bind:value={editRule.body} rows="14"></textarea>
       </div>
       <div class="modal-actions">
         <button class="btn-secondary" onclick={() => (editRule = null)}>Cancel</button>

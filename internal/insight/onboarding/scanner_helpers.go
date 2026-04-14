@@ -54,7 +54,7 @@ func depthLimit(depth string) int {
 	switch depth {
 	case "shallow":
 		return 3
-	case "deep":
+	case "deep", "auto":
 		return 5
 	default: // "standard"
 		return 4

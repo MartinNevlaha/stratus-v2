@@ -261,21 +261,7 @@ export interface GuardianAlert {
   created_at: string
 }
 
-export interface GuardianConfig {
-  enabled: boolean
-  interval_minutes: number
-  coverage_drift_pct: number
-  stale_workflow_hours: number
-  memory_threshold: number
-  tech_debt_threshold: number
-  llm_endpoint: string
-  llm_api_key: string
-  llm_model: string
-  llm_temperature: number
-  llm_max_tokens: number
-}
-
-export interface InsightLLMConfig {
+export interface LLMConfig {
   provider: string
   model: string
   api_key: string
@@ -283,6 +269,20 @@ export interface InsightLLMConfig {
   timeout: number
   max_tokens: number
   temperature: number
+  max_retries: number
+  concurrency: number
+}
+
+export interface GuardianConfig {
+  enabled: boolean
+  interval_minutes: number
+  coverage_drift_pct: number
+  stale_workflow_hours: number
+  memory_threshold: number
+  tech_debt_threshold: number
+  reviewer_timeout_minutes: number
+  ticket_timeout_minutes: number
+  llm: LLMConfig
 }
 
 export interface InsightConfig {
@@ -290,7 +290,7 @@ export interface InsightConfig {
   interval: number
   max_proposals: number
   min_confidence: number
-  llm: InsightLLMConfig
+  llm: LLMConfig
 }
 
 export interface SwarmEvidence {
@@ -397,7 +397,7 @@ export interface WikiPageRef {
 
 export interface WikiGraphData {
   nodes: { id: string; title: string; page_type: string; status: string; staleness_score: number }[]
-  edges: { from: string; to: string; link_type: string; strength: number }[]
+  edges: { from_page_id: string; to_page_id: string; link_type: string; strength: number }[]
 }
 
 export interface WikiQueryResult {
@@ -432,10 +432,24 @@ export interface EvolutionRun {
   created_at: string
 }
 
+export type EvolutionCategory =
+  | 'refactor_opportunity'
+  | 'test_gap'
+  | 'architecture_drift'
+  | 'feature_idea'
+  | 'dx_improvement'
+  | 'doc_drift'
+  | 'idea'
+  | 'prompt_tuning'
+  // Legacy categories — may appear in historical rows
+  | 'workflow_routing'
+  | 'agent_selection'
+  | 'threshold_adjustment'
+
 export interface EvolutionHypothesis {
   id: string
   run_id: string
-  category: 'prompt_tuning' | 'workflow_routing' | 'agent_selection' | 'threshold_adjustment'
+  category: EvolutionCategory
   description: string
   baseline_value: string
   proposed_value: string
@@ -450,6 +464,28 @@ export interface EvolutionHypothesis {
   created_at: string
 }
 
+export interface InsightProposal {
+  id: string
+  type: string
+  title: string
+  description: string
+  status: string
+  risk_level: string
+  confidence: number
+  impact_score: number
+  effort_score: number
+  idempotency_hash: string
+  wiki_page_id?: string
+  signal_refs?: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface EvolutionStatus {
+  enabled: boolean
+  category_breakdown: Record<string, number>
+}
+
 export interface WikiConfig {
   enabled: boolean
   ingest_on_event: boolean
@@ -458,6 +494,8 @@ export interface WikiConfig {
   max_page_size_tokens: number
   vault_path: string
   vault_sync_on_save: boolean
+  onboarding_depth: string
+  onboarding_max_pages: number
 }
 
 export interface EvolutionConfig {
@@ -469,6 +507,7 @@ export interface EvolutionConfig {
   min_sample_size: number
   daily_token_budget: number
   categories: string[]
+  stratus_self_enabled: boolean
 }
 
 export interface OnboardingProgress {
@@ -478,6 +517,7 @@ export interface OnboardingProgress {
   generated: number
   total: number
   errors: string[]
+  result?: OnboardingResult
 }
 
 export interface OnboardingResult {
@@ -491,4 +531,66 @@ export interface OnboardingResult {
   tokens_used: number
   errors: string[]
   page_ids: string[]
+  asset_proposals: number
+}
+
+// Language
+export type Language = 'sk' | 'en'
+
+// Code Quality types
+
+export interface CodeAnalysisRun {
+  id: string
+  status: string
+  files_scanned: number
+  files_analyzed: number
+  findings_count: number
+  wiki_pages_created: number
+  wiki_pages_updated: number
+  duration_ms: number
+  tokens_used: number
+  git_commit_hash: string
+  error_message?: string
+  started_at: string
+  completed_at?: string
+}
+
+export interface CodeFinding {
+  id: string
+  run_id: string
+  file_path: string
+  category: string
+  severity: string
+  title: string
+  description: string
+  line_start: number
+  line_end: number
+  confidence: number
+  suggestion: string
+  wiki_page_id?: string
+  status: 'pending' | 'rejected' | 'applied'
+}
+
+export interface CodeQualityMetric {
+  metric_date: string
+  total_files: number
+  files_analyzed: number
+  findings_total: number
+  findings_by_severity: Record<string, number>
+  findings_by_category: Record<string, number>
+  avg_churn_score: number
+  avg_coverage: number
+}
+
+export interface CodeAnalysisConfig {
+  enabled: boolean
+  max_files_per_run: number
+  token_budget_per_run: number
+  min_churn_score: number
+  confidence_threshold: number
+  scan_interval: number
+  include_git_history: boolean
+  git_history_depth: number
+  categories: string[]
+  llm: LLMConfig
 }

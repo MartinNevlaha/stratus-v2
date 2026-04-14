@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
@@ -47,14 +50,14 @@ func TestHandleOnboard_InvalidDepth(t *testing.T) {
 	}
 }
 
-// TestHandleOnboard_MaxPagesBounds verifies that max_pages outside [0, 50] returns 400.
+// TestHandleOnboard_MaxPagesBounds verifies that max_pages outside [0, 500] returns 400.
 func TestHandleOnboard_MaxPagesBounds(t *testing.T) {
 	tests := []struct {
 		name     string
 		maxPages int
 	}{
 		{"negative max_pages", -1},
-		{"max_pages above limit", 51},
+		{"max_pages above limit", 501},
 	}
 
 	for _, tt := range tests {
@@ -163,6 +166,22 @@ func TestHandleOnboard_AcceptsValidRequest(t *testing.T) {
 	}
 	if resp["status"] != "scanning" {
 		t.Errorf("expected status 'scanning', got %v", resp["status"])
+	}
+}
+
+// TestHandleOnboard_AutoDepthAccepted verifies that depth "auto" is accepted.
+func TestHandleOnboard_AutoDepthAccepted(t *testing.T) {
+	s := newOnboardingServer(t, t.TempDir())
+	s.cfg.LLM.Provider = "openai"
+
+	body := bytes.NewBufferString(`{"depth":"auto"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/onboard", body)
+	w := httptest.NewRecorder()
+
+	s.handleOnboard(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("expected 202 for auto depth, got %d (body: %s)", w.Code, w.Body.String())
 	}
 }
 
@@ -291,5 +310,63 @@ func TestHandleOnboardStatus_Complete(t *testing.T) {
 	}
 	if resp["result"] == nil {
 		t.Error("expected non-nil result for completed job")
+	}
+}
+
+// TestHandleProposeAssets_Success verifies that POST /api/onboarding/propose-assets
+// returns 200 with a proposals array when pointed at a Go project.
+func TestHandleProposeAssets_Success(t *testing.T) {
+	// Create a temp dir with a minimal Go project structure.
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "go.mod"), []byte("module example.com/test\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+
+	s := newOnboardingServer(t, projectRoot)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/onboarding/propose-assets", nil)
+	w := httptest.NewRecorder()
+
+	s.handleProposeAssets(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	proposals, ok := resp["proposals"].([]any)
+	if !ok {
+		t.Fatalf("expected 'proposals' array in response, got %T: %v", resp["proposals"], resp["proposals"])
+	}
+
+	count, ok := resp["count"].(float64)
+	if !ok {
+		t.Fatalf("expected 'count' number in response, got %T", resp["count"])
+	}
+	if int(count) != len(proposals) {
+		t.Errorf("count=%d does not match len(proposals)=%d", int(count), len(proposals))
+	}
+
+	// Verify at least one proposal has type starting with "asset."
+	found := false
+	for _, p := range proposals {
+		pm, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		if typ, ok := pm["type"].(string); ok && strings.HasPrefix(typ, "asset.") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected at least one proposal with type starting with 'asset.'")
 	}
 }

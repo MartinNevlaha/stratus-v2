@@ -1,7 +1,7 @@
 BINARY := stratus
 INSTALL_DIR := $(shell go env GOPATH)/bin
 
-.PHONY: build install dev clean release
+.PHONY: build install dev dev-frontend dev-backend clean release
 
 ## build: build frontend + Go binary (output: ./stratus)
 build:
@@ -14,8 +14,20 @@ install:
 	go build -o $(INSTALL_DIR)/$(BINARY) ./cmd/stratus
 	@echo "Installed to $(INSTALL_DIR)/$(BINARY)"
 
-## dev: build frontend only (for iterating on UI without Go rebuild)
+## dev: start Go (air) + Vite dev server with hot reload; open http://localhost:5173
 dev:
+	@command -v air >/dev/null 2>&1 || { echo "ERROR: 'air' not installed. Run: go install github.com/air-verse/air@latest"; exit 1; }
+	@echo "==> Starting Stratus dev loop (backend :41777, frontend :5173)"
+	@echo "==> Open http://localhost:5173 — edits to .go or .svelte files hot reload automatically"
+	@STRATUS_DEV=1 STRATUS_PORT=41777 bash -c 'trap "kill 0" INT TERM EXIT; air & (cd frontend && npm run dev) & wait'
+
+## dev-backend: run only Go backend with air hot reload (no Vite)
+dev-backend:
+	@command -v air >/dev/null 2>&1 || { echo "ERROR: 'air' not installed. Run: go install github.com/air-verse/air@latest"; exit 1; }
+	STRATUS_DEV=1 STRATUS_PORT=41777 air
+
+## dev-frontend: run only Vite dev server (frontend iteration without backend)
+dev-frontend:
 	cd frontend && npm run dev
 
 ## clean: remove build artifacts
