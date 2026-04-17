@@ -320,6 +320,10 @@ func sttStart(model string) bool {
 	switch strings.TrimSpace(string(out)) {
 	case "true":
 		log.Printf("STT: container %q already running", sttContainerName)
+		// Ensure the model is installed even if the container was started by a
+		// prior run that died mid-install. sttInstallModel treats 409 Conflict as
+		// success (line 380), so this is idempotent for already-installed models.
+		go sttInstallModel(sttHost, model)
 		return false // not owned by us
 	case "false":
 		// Stale stopped container — remove so we can recreate with current config.
