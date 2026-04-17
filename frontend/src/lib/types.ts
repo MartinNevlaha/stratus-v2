@@ -271,6 +271,7 @@ export interface LLMConfig {
   temperature: number
   max_retries: number
   concurrency: number
+  min_request_interval_ms?: number
 }
 
 export interface GuardianConfig {

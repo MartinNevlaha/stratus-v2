@@ -216,15 +216,16 @@ func cmdServe() {
 	// Wire shared LLM client into guardian if configured.
 	if cfg.Guardian.LLM.Provider != "" && cfg.Guardian.LLM.Model != "" {
 		llmCfg := llm.Config{
-			Provider:    cfg.Guardian.LLM.Provider,
-			Model:       cfg.Guardian.LLM.Model,
-			APIKey:      cfg.Guardian.LLM.APIKey,
-			BaseURL:     cfg.Guardian.LLM.BaseURL,
-			Timeout:     cfg.Guardian.LLM.Timeout,
-			MaxTokens:   cfg.Guardian.LLM.MaxTokens,
-			Temperature: cfg.Guardian.LLM.Temperature,
-			MaxRetries:  cfg.Guardian.LLM.MaxRetries,
-			Concurrency: cfg.Guardian.LLM.Concurrency,
+			Provider:             cfg.Guardian.LLM.Provider,
+			Model:                cfg.Guardian.LLM.Model,
+			APIKey:               cfg.Guardian.LLM.APIKey,
+			BaseURL:              cfg.Guardian.LLM.BaseURL,
+			Timeout:              cfg.Guardian.LLM.Timeout,
+			MaxTokens:            cfg.Guardian.LLM.MaxTokens,
+			Temperature:          cfg.Guardian.LLM.Temperature,
+			MaxRetries:           cfg.Guardian.LLM.MaxRetries,
+			Concurrency:          cfg.Guardian.LLM.Concurrency,
+			MinRequestIntervalMs: cfg.Guardian.LLM.MinRequestIntervalMs,
 		}
 		llmCfg = llmCfg.WithEnv()
 		if guardianClient, err := llm.NewClient(llmCfg); err == nil {
@@ -1490,15 +1491,16 @@ func cmdOnboard() {
 
 	// Create LLM client
 	llmCfg := llm.Config{
-		Provider:    cfg.LLM.Provider,
-		Model:       cfg.LLM.Model,
-		APIKey:      cfg.LLM.APIKey,
-		BaseURL:     cfg.LLM.BaseURL,
-		Timeout:     cfg.LLM.Timeout,
-		MaxTokens:   cfg.LLM.MaxTokens,
-		Temperature: cfg.LLM.Temperature,
-		MaxRetries:  cfg.LLM.MaxRetries,
-		Concurrency: cfg.LLM.Concurrency,
+		Provider:             cfg.LLM.Provider,
+		Model:                cfg.LLM.Model,
+		APIKey:               cfg.LLM.APIKey,
+		BaseURL:              cfg.LLM.BaseURL,
+		Timeout:              cfg.LLM.Timeout,
+		MaxTokens:            cfg.LLM.MaxTokens,
+		Temperature:          cfg.LLM.Temperature,
+		MaxRetries:           cfg.LLM.MaxRetries,
+		Concurrency:          cfg.LLM.Concurrency,
+		MinRequestIntervalMs: cfg.LLM.MinRequestIntervalMs,
 	}.WithEnv()
 
 	if llmCfg.Provider == "" {

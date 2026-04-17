@@ -128,15 +128,16 @@ func (s *Server) handleTestLLM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	llmCfg := llm.Config{
-		Provider:    cfg.Provider,
-		Model:       cfg.Model,
-		APIKey:      cfg.APIKey,
-		BaseURL:     cfg.BaseURL,
-		Timeout:     cfg.Timeout,
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
-		MaxRetries:  cfg.MaxRetries,
-		Concurrency: cfg.Concurrency,
+		Provider:             cfg.Provider,
+		Model:                cfg.Model,
+		APIKey:               cfg.APIKey,
+		BaseURL:              cfg.BaseURL,
+		Timeout:              cfg.Timeout,
+		MaxTokens:            cfg.MaxTokens,
+		Temperature:          cfg.Temperature,
+		MaxRetries:           cfg.MaxRetries,
+		Concurrency:          cfg.Concurrency,
+		MinRequestIntervalMs: cfg.MinRequestIntervalMs,
 	}
 	llmCfg = llmCfg.WithEnv()
 

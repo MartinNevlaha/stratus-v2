@@ -130,15 +130,16 @@ func (s *Server) handleTestGuardianLLM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client, err := insightllm.NewClient(insightllm.Config{
-		Provider:    resolved.Provider,
-		Model:       resolved.Model,
-		APIKey:      resolved.APIKey,
-		BaseURL:     resolved.BaseURL,
-		Timeout:     resolved.Timeout,
-		MaxTokens:   resolved.MaxTokens,
-		Temperature: resolved.Temperature,
-		MaxRetries:  resolved.MaxRetries,
-		Concurrency: resolved.Concurrency,
+		Provider:             resolved.Provider,
+		Model:                resolved.Model,
+		APIKey:               resolved.APIKey,
+		BaseURL:              resolved.BaseURL,
+		Timeout:              resolved.Timeout,
+		MaxTokens:            resolved.MaxTokens,
+		Temperature:          resolved.Temperature,
+		MaxRetries:           resolved.MaxRetries,
+		Concurrency:          resolved.Concurrency,
+		MinRequestIntervalMs: resolved.MinRequestIntervalMs,
 	})
 	if err != nil {
 		http.Error(w, "llm init failed: "+err.Error(), http.StatusBadRequest)

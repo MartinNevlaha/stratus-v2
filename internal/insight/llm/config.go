@@ -18,6 +18,9 @@ type Config struct {
 	// Concurrency limits simultaneous in-flight requests to this provider.
 	// 0 = unlimited; 1 = serialized (required for z.ai free tier); >1 = bounded.
 	Concurrency int `json:"concurrency,omitempty"`
+	// MinRequestIntervalMs enforces a minimum delay between consecutive requests.
+	// 0 = disabled; use to stay under provider fair-usage rate limits.
+	MinRequestIntervalMs int `json:"min_request_interval_ms,omitempty"`
 }
 
 func DefaultConfig() Config {

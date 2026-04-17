@@ -161,15 +161,16 @@ func NewEngineWithEvents(database *db.DB, cfg config.InsightConfig, eventBus eve
 
 func (e *Engine) initLLMClient() {
 	llmCfg := llm.Config{
-		Provider:    e.config.LLM.Provider,
-		Model:       e.config.LLM.Model,
-		APIKey:      e.config.LLM.APIKey,
-		BaseURL:     e.config.LLM.BaseURL,
-		Timeout:     e.config.LLM.Timeout,
-		MaxTokens:   e.config.LLM.MaxTokens,
-		Temperature: e.config.LLM.Temperature,
-		MaxRetries:  e.config.LLM.MaxRetries,
-		Concurrency: e.config.LLM.Concurrency,
+		Provider:             e.config.LLM.Provider,
+		Model:                e.config.LLM.Model,
+		APIKey:               e.config.LLM.APIKey,
+		BaseURL:              e.config.LLM.BaseURL,
+		Timeout:              e.config.LLM.Timeout,
+		MaxTokens:            e.config.LLM.MaxTokens,
+		Temperature:          e.config.LLM.Temperature,
+		MaxRetries:           e.config.LLM.MaxRetries,
+		Concurrency:          e.config.LLM.Concurrency,
+		MinRequestIntervalMs: e.config.LLM.MinRequestIntervalMs,
 	}
 	if llmCfg.Provider == "" {
 		llmCfg = llm.DefaultConfig()
@@ -348,15 +349,16 @@ func (e *Engine) initCodeAnalyst() {
 	var caLLMClient llm.Client
 	if caLLMCfg.Provider != "" && caLLMCfg.Model != "" {
 		llmCfg := llm.Config{
-			Provider:    caLLMCfg.Provider,
-			Model:       caLLMCfg.Model,
-			APIKey:      caLLMCfg.APIKey,
-			BaseURL:     caLLMCfg.BaseURL,
-			Timeout:     caLLMCfg.Timeout,
-			MaxTokens:   caLLMCfg.MaxTokens,
-			Temperature: caLLMCfg.Temperature,
-			MaxRetries:  caLLMCfg.MaxRetries,
-			Concurrency: caLLMCfg.Concurrency,
+			Provider:             caLLMCfg.Provider,
+			Model:                caLLMCfg.Model,
+			APIKey:               caLLMCfg.APIKey,
+			BaseURL:              caLLMCfg.BaseURL,
+			Timeout:              caLLMCfg.Timeout,
+			MaxTokens:            caLLMCfg.MaxTokens,
+			Temperature:          caLLMCfg.Temperature,
+			MaxRetries:           caLLMCfg.MaxRetries,
+			Concurrency:          caLLMCfg.Concurrency,
+			MinRequestIntervalMs: caLLMCfg.MinRequestIntervalMs,
 		}
 		llmCfg = llmCfg.WithEnv()
 		client, err := llm.NewClient(llmCfg)

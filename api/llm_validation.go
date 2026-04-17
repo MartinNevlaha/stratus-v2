@@ -12,7 +12,8 @@ import (
 func validateLLMConfig(c config.LLMConfig, allowEmpty bool) error {
 	isZero := c.Provider == "" && c.Model == "" && c.BaseURL == "" &&
 		c.APIKey == "" && c.Timeout == 0 && c.MaxTokens == 0 &&
-		c.Temperature == 0 && c.MaxRetries == 0
+		c.Temperature == 0 && c.MaxRetries == 0 &&
+		c.Concurrency == 0 && c.MinRequestIntervalMs == 0
 	if isZero {
 		if allowEmpty {
 			return nil
@@ -45,6 +46,11 @@ func validateLLMConfig(c config.LLMConfig, allowEmpty bool) error {
 	// MaxRetries ∈ [0, 10]
 	if c.MaxRetries < 0 || c.MaxRetries > 10 {
 		return fmt.Errorf("llm.max_retries: %d out of range [0, 10]", c.MaxRetries)
+	}
+
+	// MinRequestIntervalMs ∈ [0, 60000] (0 = disabled; max 60s)
+	if c.MinRequestIntervalMs < 0 || c.MinRequestIntervalMs > 60000 {
+		return fmt.Errorf("llm.min_request_interval_ms: %d out of range [0, 60000]", c.MinRequestIntervalMs)
 	}
 
 	return nil

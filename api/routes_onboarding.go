@@ -131,15 +131,16 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 
 		// Build LLM config from server config, resolving API key from env if not set.
 		llmCfg := llm.Config{
-			Provider:    s.cfg.LLM.Provider,
-			Model:       s.cfg.LLM.Model,
-			APIKey:      s.cfg.LLM.APIKey,
-			BaseURL:     s.cfg.LLM.BaseURL,
-			Timeout:     s.cfg.LLM.Timeout,
-			MaxTokens:   s.cfg.LLM.MaxTokens,
-			Temperature: s.cfg.LLM.Temperature,
-			MaxRetries:  s.cfg.LLM.MaxRetries,
-			Concurrency: s.cfg.LLM.Concurrency,
+			Provider:             s.cfg.LLM.Provider,
+			Model:                s.cfg.LLM.Model,
+			APIKey:               s.cfg.LLM.APIKey,
+			BaseURL:              s.cfg.LLM.BaseURL,
+			Timeout:              s.cfg.LLM.Timeout,
+			MaxTokens:            s.cfg.LLM.MaxTokens,
+			Temperature:          s.cfg.LLM.Temperature,
+			MaxRetries:           s.cfg.LLM.MaxRetries,
+			Concurrency:          s.cfg.LLM.Concurrency,
+			MinRequestIntervalMs: s.cfg.LLM.MinRequestIntervalMs,
 		}.WithEnv()
 
 		bareClient, err := llm.NewClient(llmCfg)

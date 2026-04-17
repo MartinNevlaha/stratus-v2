@@ -336,6 +336,11 @@
           <label for="global-concurrency">Concurrency</label>
           <input id="global-concurrency" type="number" min="0" max="100" bind:value={globalLLM.concurrency} />
         </div>
+        <div class="form-group">
+          <label for="global-min-interval">Min request interval (ms)</label>
+          <input id="global-min-interval" type="number" min="0" max="60000" step="500" bind:value={globalLLM.min_request_interval_ms} />
+          <small>0 = disabled. Use to stay under provider rate limits (e.g. 3000 = max ~20 req/min).</small>
+        </div>
       </div>
 
       <div class="actions">
@@ -539,6 +544,11 @@
               <label for="insight-concurrency">Concurrency</label>
               <input id="insight-concurrency" type="number" min="0" max="100" bind:value={insightCfg.llm.concurrency} />
             </div>
+            <div class="form-group">
+              <label for="insight-min-interval">Min request interval (ms)</label>
+              <input id="insight-min-interval" type="number" min="0" max="60000" step="500" bind:value={insightCfg.llm.min_request_interval_ms} />
+              <small>0 = disabled. Use to stay under provider rate limits (e.g. 3000 = max ~20 req/min).</small>
+            </div>
           </div>
         {/if}
       </div>
@@ -665,6 +675,11 @@
             <div class="form-group">
               <label for="guardian-concurrency">Concurrency</label>
               <input id="guardian-concurrency" type="number" min="0" max="100" bind:value={cfg.llm.concurrency} />
+            </div>
+            <div class="form-group">
+              <label for="guardian-min-interval">Min request interval (ms)</label>
+              <input id="guardian-min-interval" type="number" min="0" max="60000" step="500" bind:value={cfg.llm.min_request_interval_ms} />
+              <small>0 = disabled. Use to stay under provider rate limits (e.g. 3000 = max ~20 req/min).</small>
             </div>
           </div>
 

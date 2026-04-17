@@ -14,10 +14,10 @@ import (
 
 // blockingClient blocks until unblockCh is closed, tracking in-flight count.
 type blockingClient struct {
-	unblockCh  chan struct{}
-	inFlight   atomic.Int32
-	maxSeen    atomic.Int32
-	callCount  atomic.Int32
+	unblockCh chan struct{}
+	inFlight  atomic.Int32
+	maxSeen   atomic.Int32
+	callCount atomic.Int32
 }
 
 func (c *blockingClient) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
@@ -47,12 +47,29 @@ func (c *blockingClient) Complete(ctx context.Context, req CompletionRequest) (*
 func (c *blockingClient) Provider() string { return "zai" }
 func (c *blockingClient) Model() string    { return "glm-5" }
 
-func TestSemaphoreClient_Concurrency1_Serializes(t *testing.T) {
-	// Reset global semaphore map between tests.
-	providerSemaphores.Range(func(k, v any) bool {
-		providerSemaphores.Delete(k)
+// instantClient returns immediately without blocking.
+type instantClient struct {
+	callCount atomic.Int32
+}
+
+func (c *instantClient) Complete(_ context.Context, _ CompletionRequest) (*CompletionResponse, error) {
+	c.callCount.Add(1)
+	return &CompletionResponse{Content: "ok"}, nil
+}
+
+func (c *instantClient) Provider() string { return "zai" }
+func (c *instantClient) Model() string    { return "glm-5" }
+
+// resetProviderGates clears the global gate map between tests.
+func resetProviderGates() {
+	providerGates.Range(func(k, v any) bool {
+		providerGates.Delete(k)
 		return true
 	})
+}
+
+func TestSemaphoreClient_Concurrency1_Serializes(t *testing.T) {
+	resetProviderGates()
 
 	unblock := make(chan struct{})
 	inner := &blockingClient{unblockCh: unblock}
@@ -97,10 +114,7 @@ func TestSemaphoreClient_Concurrency1_Serializes(t *testing.T) {
 }
 
 func TestSemaphoreClient_DifferentBaseURL_RunsParallel(t *testing.T) {
-	providerSemaphores.Range(func(k, v any) bool {
-		providerSemaphores.Delete(k)
-		return true
-	})
+	resetProviderGates()
 
 	unblock := make(chan struct{})
 	inner := &blockingClient{unblockCh: unblock}
@@ -136,10 +150,7 @@ func TestSemaphoreClient_DifferentBaseURL_RunsParallel(t *testing.T) {
 }
 
 func TestSemaphoreClient_ContextCancelled_BeforeAcquire(t *testing.T) {
-	providerSemaphores.Range(func(k, v any) bool {
-		providerSemaphores.Delete(k)
-		return true
-	})
+	resetProviderGates()
 
 	unblock := make(chan struct{}) // never closed — first call blocks forever
 	inner := &blockingClient{unblockCh: unblock}
@@ -183,10 +194,7 @@ func TestSemaphoreClient_ContextCancelled_BeforeAcquire(t *testing.T) {
 }
 
 func TestSemaphoreClient_Unlimited_RunsParallel(t *testing.T) {
-	providerSemaphores.Range(func(k, v any) bool {
-		providerSemaphores.Delete(k)
-		return true
-	})
+	resetProviderGates()
 
 	unblock := make(chan struct{})
 	inner := &blockingClient{unblockCh: unblock}
@@ -215,4 +223,137 @@ func TestSemaphoreClient_Unlimited_RunsParallel(t *testing.T) {
 
 	close(unblock)
 	wg.Wait()
+}
+
+// ---------------------------------------------------------------------------
+// Spacing (MinRequestIntervalMs) tests
+// ---------------------------------------------------------------------------
+
+func TestSpacing_Zero_NoDelay(t *testing.T) {
+	resetProviderGates()
+
+	inner := &instantClient{}
+	cfg := Config{
+		Provider:             "zai",
+		Model:                "glm-5",
+		APIKey:               "k",
+		BaseURL:              "http://spacing-zero.example.com",
+		MinRequestIntervalMs: 0,
+	}
+	wrapped := newSemaphoreClient(inner, cfg)
+
+	start := time.Now()
+	for i := 0; i < 5; i++ {
+		if _, err := wrapped.Complete(context.Background(), CompletionRequest{}); err != nil {
+			t.Fatalf("call %d: unexpected error: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	if elapsed >= 100*time.Millisecond {
+		t.Errorf("5 calls with MinRequestIntervalMs=0 took %v, want < 100ms", elapsed)
+	}
+	if got := inner.callCount.Load(); got != 5 {
+		t.Errorf("callCount = %d, want 5", got)
+	}
+}
+
+func TestSpacing_EnforcesMinInterval(t *testing.T) {
+	resetProviderGates()
+
+	inner := &instantClient{}
+	cfg := Config{
+		Provider:             "zai",
+		Model:                "glm-5",
+		APIKey:               "k",
+		BaseURL:              "http://spacing-enforce.example.com",
+		MinRequestIntervalMs: 200,
+	}
+	wrapped := newSemaphoreClient(inner, cfg)
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		if _, err := wrapped.Complete(context.Background(), CompletionRequest{}); err != nil {
+			t.Fatalf("call %d: unexpected error: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	// First call is immediate; calls 2 and 3 each wait ≥200ms → total ≥400ms.
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("3 calls with MinRequestIntervalMs=200 took %v, want >= 400ms", elapsed)
+	}
+	if got := inner.callCount.Load(); got != 3 {
+		t.Errorf("callCount = %d, want 3", got)
+	}
+}
+
+func TestSpacing_SharedAcrossClients(t *testing.T) {
+	resetProviderGates()
+
+	inner := &instantClient{}
+	cfg := Config{
+		Provider:             "zai",
+		Model:                "glm-5",
+		APIKey:               "k",
+		BaseURL:              "http://spacing-shared.example.com",
+		MinRequestIntervalMs: 200,
+	}
+	// Two distinct wrappers sharing the same (provider, baseURL) key.
+	wrapped1 := newSemaphoreClient(inner, cfg)
+	wrapped2 := newSemaphoreClient(inner, cfg)
+
+	start := time.Now()
+	// Interleave: 3 calls on wrapped1, 2 calls on wrapped2.
+	clients := []*semaphoreClient{wrapped1, wrapped2, wrapped1, wrapped2, wrapped1}
+	for i, c := range clients {
+		if _, err := c.Complete(context.Background(), CompletionRequest{}); err != nil {
+			t.Fatalf("call %d: unexpected error: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	// First call immediate; 4 subsequent each wait ≥200ms → total ≥800ms.
+	if elapsed < 800*time.Millisecond {
+		t.Errorf("5 interleaved calls with shared spacing took %v, want >= 800ms", elapsed)
+	}
+	if got := inner.callCount.Load(); got != 5 {
+		t.Errorf("callCount = %d, want 5", got)
+	}
+}
+
+func TestSpacing_ContextCancelled_DuringWait(t *testing.T) {
+	resetProviderGates()
+
+	inner := &instantClient{}
+	cfg := Config{
+		Provider:             "zai",
+		Model:                "glm-5",
+		APIKey:               "k",
+		BaseURL:              "http://spacing-cancel.example.com",
+		MinRequestIntervalMs: 1000,
+	}
+	wrapped := newSemaphoreClient(inner, cfg)
+
+	// First call — sets lastCall, completes immediately.
+	if _, err := wrapped.Complete(context.Background(), CompletionRequest{}); err != nil {
+		t.Fatalf("first call failed: %v", err)
+	}
+
+	// Second call — will need to wait ~1000ms; cancel after ~200ms.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_, err := wrapped.Complete(ctx, CompletionRequest{})
+	if err == nil {
+		t.Fatal("expected context error during spacing wait, got nil")
+	}
+	if err != context.DeadlineExceeded && err != context.Canceled {
+		t.Errorf("expected context error, got: %v", err)
+	}
+
+	// Inner must not have been called a second time.
+	if got := inner.callCount.Load(); got != 1 {
+		t.Errorf("callCount = %d, want 1 (inner must not be called when ctx cancelled during wait)", got)
+	}
 }
