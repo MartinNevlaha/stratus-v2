@@ -7,6 +7,8 @@
 
   let runs = $state<EvolutionRun[]>([])
   let totalCount = $state(0)
+  let offset = $state(0)
+  let loadingMore = $state(false)
   let selectedRun = $state<EvolutionRun | null>(null)
   let hypotheses = $state<EvolutionHypothesis[]>([])
   let config = $state<EvolutionConfig | null>(null)
@@ -20,13 +22,39 @@
   let timeoutInput = $state('')
   let statusFilter = $state('')
   let categoryFilter = $state<string>('')
+  let expandedHyp = $state<string | null>(null)
   let loadingRun = $state(false)
   let triggerSuccess = $state<string | null>(null)
   let evolutionStatus = $state<EvolutionStatus | null>(null)
 
+  let hasMore = $derived(runs.length < totalCount)
+  let hasRunningRun = $derived(runs.some(r => r.status === 'running'))
+  let loadSeq = 0
+  let selectSeq = 0
+
   $effect(() => {
     loadRuns()
     loadStatus()
+  })
+
+  let _pollInterval: ReturnType<typeof setInterval> | undefined
+  $effect(() => {
+    if (hasRunningRun) {
+      _pollInterval = setInterval(() => {
+        loadRuns()
+        loadStatus()
+      }, 3000)
+    }
+    return () => {
+      if (_pollInterval) clearInterval(_pollInterval)
+      _pollInterval = undefined
+    }
+  })
+
+  $effect(() => {
+    if (!configSuccess) return
+    const t = setTimeout(() => { configSuccess = false }, 3000)
+    return () => clearTimeout(t)
   })
 
   async function loadStatus() {
@@ -37,20 +65,46 @@
     }
   }
 
-  async function loadRuns() {
-    loading = true
+  async function loadRuns(append = false) {
+    const seq = ++loadSeq
+    if (append) {
+      if (loadingMore) return
+      loadingMore = true
+    } else {
+      loading = true
+      offset = 0
+    }
     error = null
     try {
-      const params: { status?: string; limit?: number } = { limit: 50 }
+      const params: { status?: string; limit?: number; offset?: number } = { limit: 50 }
       if (statusFilter) params.status = statusFilter
+      if (append) params.offset = offset
       const data = await listEvolutionRuns(params)
-      runs = data.runs ?? []
+      if (seq !== loadSeq) return
+      if (append) {
+        runs = [...runs, ...(data.runs ?? [])]
+        offset += data.runs?.length ?? 0
+      } else {
+        runs = data.runs ?? []
+        offset = data.runs?.length ?? 0
+      }
       totalCount = data.count ?? 0
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to load evolution runs'
+      if (seq !== loadSeq) return
+      if (!append) error = e instanceof Error ? e.message : 'Failed to load evolution runs'
     } finally {
-      loading = false
+      if (seq !== loadSeq) return
+      if (append) {
+        loadingMore = false
+      } else {
+        loading = false
+      }
     }
+  }
+
+  async function loadMoreRuns() {
+    if (loadingMore || !hasMore) return
+    await loadRuns(true)
   }
 
   async function loadConfig() {
@@ -63,6 +117,7 @@
   }
 
   async function selectRun(run: EvolutionRun) {
+    const seq = ++selectSeq
     if (selectedRun?.id === run.id) {
       selectedRun = null
       hypotheses = []
@@ -71,11 +126,14 @@
     loadingRun = true
     try {
       const data = await getEvolutionRun(run.id)
+      if (seq !== selectSeq) return
       selectedRun = data.run
       hypotheses = data.hypotheses ?? []
     } catch (e) {
+      if (seq !== selectSeq) return
       error = e instanceof Error ? e.message : 'Failed to load run detail'
     } finally {
+      if (seq !== selectSeq) return
       loadingRun = false
     }
   }
@@ -113,7 +171,6 @@
     try {
       config = await updateEvolutionConfig(config)
       configSuccess = true
-      setTimeout(() => { configSuccess = false }, 3000)
     } catch (e) {
       configError = e instanceof Error ? e.message : 'Failed to save config'
     } finally {
@@ -212,14 +269,14 @@
       </button>
 
       {#if activeView === 'runs'}
-        <select bind:value={statusFilter} onchange={loadRuns} class="filter-select">
+        <select bind:value={statusFilter} onchange={() => loadRuns()} class="filter-select">
           <option value="">All statuses</option>
           <option value="running">Running</option>
           <option value="completed">Completed</option>
           <option value="failed">Failed</option>
           <option value="timeout">Timeout</option>
         </select>
-        <button class="refresh-btn" onclick={loadRuns} disabled={loading}>
+        <button class="refresh-btn" onclick={() => loadRuns()} disabled={loading}>
           {loading ? 'Loading...' : '↻ Refresh'}
         </button>
       {/if}
@@ -398,11 +455,16 @@
                               </thead>
                               <tbody>
                                 {#each filteredHypotheses() as h}
-                                  <tr>
+                                  <tr
+                                    class="hyp-row"
+                                    class:hyp-row-open={expandedHyp === h.id}
+                                    onclick={() => { expandedHyp = expandedHyp === h.id ? null : h.id }}
+                                  >
                                     <td>
                                       <span class="cat-badge">{getCategoryLabel(h.category, lang)}</span>
                                     </td>
                                     <td class="desc-cell">
+                                      <span class="desc-toggle">{expandedHyp === h.id ? '▾' : '▸'}</span>
                                       <span>{h.description}</span>
                                       {#if h.wiki_page_id}
                                         <a
@@ -434,7 +496,7 @@
                                         {h.decision.replace(/_/g, ' ')}
                                       </span>
                                     </td>
-                                    <td class="actions-cell">
+                                    <td class="actions-cell" onclick={(e) => e.stopPropagation()}>
                                       {#if h.decision === 'proposal_created'}
                                         <button
                                           class="review-terminal-btn"
@@ -448,6 +510,38 @@
                                       {/if}
                                     </td>
                                   </tr>
+                                  {#if expandedHyp === h.id}
+                                    <tr class="hyp-detail">
+                                      <td colspan="9">
+                                        <div class="hyp-detail-grid">
+                                          <div class="hyp-detail-section">
+                                            <div class="hyp-detail-label">Description</div>
+                                            <div class="hyp-detail-text">{h.description}</div>
+                                          </div>
+                                          <div class="hyp-detail-section">
+                                            <div class="hyp-detail-label">Baseline value</div>
+                                            <div class="hyp-detail-text mono">{h.baseline_value || '—'}</div>
+                                          </div>
+                                          <div class="hyp-detail-section">
+                                            <div class="hyp-detail-label">Proposed value</div>
+                                            <div class="hyp-detail-text mono">{h.proposed_value || '—'}</div>
+                                          </div>
+                                          {#if h.decision_reason}
+                                            <div class="hyp-detail-section">
+                                              <div class="hyp-detail-label">Decision reason</div>
+                                              <div class="hyp-detail-text">{h.decision_reason}</div>
+                                            </div>
+                                          {/if}
+                                          {#if h.evidence && Object.keys(h.evidence).length > 0}
+                                            <div class="hyp-detail-section">
+                                              <div class="hyp-detail-label">Evidence</div>
+                                              <pre class="hyp-detail-pre">{JSON.stringify(h.evidence, null, 2)}</pre>
+                                            </div>
+                                          {/if}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  {/if}
                                 {/each}
                               </tbody>
                             </table>
@@ -461,7 +555,14 @@
             </tbody>
           </table>
         </div>
-        <p class="count-label">Showing {runs.length} of {totalCount} run(s)</p>
+        <div class="list-footer">
+          <span class="count-label">Showing {runs.length} of {totalCount} run(s)</span>
+          {#if hasMore}
+            <button class="load-more-btn" onclick={loadMoreRuns} disabled={loadingMore}>
+              {loadingMore ? 'Loading…' : `Load more (${totalCount - runs.length} remaining)`}
+            </button>
+          {/if}
+        </div>
       {/if}
     </section>
 
@@ -1078,6 +1179,68 @@
     color: #c9d1d9;
   }
 
+  .desc-toggle {
+    color: #6e7681;
+    margin-right: 4px;
+    font-size: 10px;
+  }
+
+  .hyp-row {
+    cursor: pointer;
+  }
+
+  .hyp-row:hover {
+    background: #161b22;
+  }
+
+  .hyp-row-open {
+    background: #0d1117;
+  }
+
+  .hyp-detail td {
+    background: #0d1117;
+    padding: 12px 16px !important;
+    border-top: 1px solid #21262d;
+  }
+
+  .hyp-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 28px;
+  }
+
+  .hyp-detail-section {
+    min-width: 0;
+  }
+
+  .hyp-detail-label {
+    color: #8b949e;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+
+  .hyp-detail-text {
+    color: #c9d1d9;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .hyp-detail-pre {
+    background: #010409;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    padding: 8px 10px;
+    color: #c9d1d9;
+    font-size: 12px;
+    max-height: 300px;
+    overflow: auto;
+    margin: 0;
+  }
+
   .confidence-wrap {
     display: flex;
     align-items: center;
@@ -1106,9 +1269,37 @@
   }
 
   .count-label {
-    margin-top: 8px;
     font-size: 12px;
     color: #8b949e;
+  }
+
+  .list-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+  }
+
+  .load-more-btn {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    text-align: center;
+    transition: background 0.1s, color 0.1s;
+  }
+
+  .load-more-btn:hover:not(:disabled) {
+    background: #30363d;
+    color: #c9d1d9;
+  }
+
+  .load-more-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   /* Config */
