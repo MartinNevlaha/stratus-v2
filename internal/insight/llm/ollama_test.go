@@ -259,21 +259,30 @@ func TestOllamaClient_Complete_StringErrorIn200Body(t *testing.T) {
 	}
 }
 
-func TestOllamaClient_Complete_EmptyContent(t *testing.T) {
+func TestOllamaClient_Complete_EmptyContent_PassedThrough(t *testing.T) {
+	// Empty content must be surfaced to the caller (not converted to error) so
+	// downstream parsers/evaluators get a clear "no JSON found" rather than a
+	// generic "empty message content" that masks the offending prompt.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"model":"gemma4:e4b","done":true,"message":{"role":"assistant","content":""}}`))
+		_, _ = w.Write([]byte(`{"model":"gemma4:e4b","done":true,"message":{"role":"assistant","content":""},"prompt_eval_count":5,"eval_count":0}`))
 	}))
 	defer srv.Close()
 
 	cfg := Config{Provider: "ollama", Model: "gemma4:e4b", BaseURL: srv.URL}
 	client, _ := NewOllamaClient(cfg)
 
-	_, err := client.Complete(context.Background(), CompletionRequest{
+	resp, err := client.Complete(context.Background(), CompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
-	if err == nil {
-		t.Fatal("expected error for empty content")
+	if err != nil {
+		t.Fatalf("Complete must not error on empty content: %v", err)
+	}
+	if resp.Content != "" {
+		t.Errorf("content = %q, want \"\"", resp.Content)
+	}
+	if resp.OutputTokens != 0 {
+		t.Errorf("output_tokens = %d, want 0", resp.OutputTokens)
 	}
 }
 

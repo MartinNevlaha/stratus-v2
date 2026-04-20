@@ -160,10 +160,9 @@ func (c *OllamaClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 		return nil, fmt.Errorf("llm: api error: %s", parsed.Error)
 	}
 
-	if parsed.Message.Content == "" {
-		return nil, fmt.Errorf("llm: empty message content in response")
-	}
-
+	// An empty content is surfaced to the caller with model context so the
+	// parse/decision layer (ParseJSONResponse, evaluator fallback) can report
+	// it clearly. Erroring here masks which model/prompt combo produced it.
 	return &CompletionResponse{
 		Content:      parsed.Message.Content,
 		Model:        parsed.Model,

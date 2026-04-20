@@ -165,10 +165,11 @@ Return a JSON object: {"baseline_score": 0.0-1.0, "proposed_score": 0.0-1.0, "re
 		len(proposedResp.Content), truncate(proposedResp.Content, 2000))
 
 	evalResp, err := r.llmClient.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: prompts.WithLanguage(prompts.ExperimentEvaluation, lang),
-		Messages:     []llm.Message{{Role: "user", Content: evalPrompt}},
-		MaxTokens:    512,
-		Temperature:  0.2,
+		SystemPrompt:  prompts.WithLanguage(prompts.ExperimentEvaluation, lang),
+		Messages:      []llm.Message{{Role: "user", Content: evalPrompt}},
+		MaxTokens:     2048,
+		Temperature:   0.2,
+		ResponseFormat: "json",
 	})
 	if err != nil {
 		return &ExperimentResult{Error: fmt.Errorf("evaluation: %w", err)}
