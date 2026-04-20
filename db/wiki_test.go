@@ -984,6 +984,151 @@ func TestUpsertWikiPageByWorkflow_MissingFeatureSlug_Error(t *testing.T) {
 	}
 }
 
+// --- IsValidWikiLinkType ---
+
+func TestIsValidWikiLinkType(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		// All 6 canonical types accepted.
+		{"related", true},
+		{"parent", true},
+		{"child", true},
+		{"contradicts", true},
+		{"supersedes", true},
+		{"cites", true},
+		// Case variants accepted.
+		{"RELATED", true},
+		{"Parent", true},
+		{"CHILD", true},
+		// Whitespace variants accepted (trimmed).
+		{"  parent  ", true},
+		{"  related ", true},
+		// Invalid types rejected.
+		{"friend", false},
+		{"", false},
+		{"x", false},
+		{"links", false},
+	}
+
+	for _, tc := range cases {
+		got := IsValidWikiLinkType(tc.input)
+		if got != tc.want {
+			t.Errorf("IsValidWikiLinkType(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+// --- CountOrphanWikiPages ---
+
+func TestCountOrphanWikiPages(t *testing.T) {
+	database := openTestDB(t)
+
+	// Empty DB: 0 orphans.
+	count, err := database.CountOrphanWikiPages()
+	if err != nil {
+		t.Fatalf("CountOrphanWikiPages empty: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 orphans on empty DB, got %d", count)
+	}
+
+	// Seed 3 pages.
+	p1 := &WikiPage{PageType: "concept", Title: "A", Status: "published", GeneratedBy: "ingest"}
+	p2 := &WikiPage{PageType: "concept", Title: "B", Status: "published", GeneratedBy: "ingest"}
+	p3 := &WikiPage{PageType: "concept", Title: "C", Status: "published", GeneratedBy: "ingest"}
+	for _, p := range []*WikiPage{p1, p2, p3} {
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage: %v", err)
+		}
+	}
+
+	// No links yet: all 3 are orphans.
+	count, err = database.CountOrphanWikiPages()
+	if err != nil {
+		t.Fatalf("CountOrphanWikiPages no links: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 orphans before any links, got %d", count)
+	}
+
+	// Save 1 link: p1 -> p2. p3 remains orphan.
+	if err := database.SaveWikiLink(&WikiLink{FromPageID: p1.ID, ToPageID: p2.ID, LinkType: "related", Strength: 0.5}); err != nil {
+		t.Fatalf("SaveWikiLink: %v", err)
+	}
+
+	count, err = database.CountOrphanWikiPages()
+	if err != nil {
+		t.Fatalf("CountOrphanWikiPages with 1 link: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 orphan (p3), got %d", count)
+	}
+
+	// Link p3 as well: p3 -> p1. Now all pages are in at least one link.
+	if err := database.SaveWikiLink(&WikiLink{FromPageID: p3.ID, ToPageID: p1.ID, LinkType: "related", Strength: 0.5}); err != nil {
+		t.Fatalf("SaveWikiLink p3: %v", err)
+	}
+
+	count, err = database.CountOrphanWikiPages()
+	if err != nil {
+		t.Fatalf("CountOrphanWikiPages all linked: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 orphans when all pages are linked, got %d", count)
+	}
+}
+
+// --- DeleteWikiLinkByID ---
+
+func TestDeleteWikiLinkByID_Success(t *testing.T) {
+	database := openTestDB(t)
+
+	p1 := &WikiPage{PageType: "summary", Title: "A", Status: "published", GeneratedBy: "ingest"}
+	p2 := &WikiPage{PageType: "summary", Title: "B", Status: "published", GeneratedBy: "ingest"}
+	for _, p := range []*WikiPage{p1, p2} {
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage: %v", err)
+		}
+	}
+
+	link := &WikiLink{FromPageID: p1.ID, ToPageID: p2.ID, LinkType: "related", Strength: 0.5}
+	if err := database.SaveWikiLink(link); err != nil {
+		t.Fatalf("SaveWikiLink: %v", err)
+	}
+	linkID := link.ID
+
+	deleted, err := database.DeleteWikiLinkByID(linkID)
+	if err != nil {
+		t.Fatalf("DeleteWikiLinkByID: %v", err)
+	}
+	if !deleted {
+		t.Error("expected deleted=true, got false")
+	}
+
+	// Verify link is gone.
+	links, err := database.ListWikiLinksFrom(p1.ID)
+	if err != nil {
+		t.Fatalf("ListWikiLinksFrom after delete: %v", err)
+	}
+	if len(links) != 0 {
+		t.Errorf("expected 0 links after DeleteWikiLinkByID, got %d", len(links))
+	}
+}
+
+func TestDeleteWikiLinkByID_NotFound(t *testing.T) {
+	database := openTestDB(t)
+
+	deleted, err := database.DeleteWikiLinkByID("non-existent-uuid")
+	if err != nil {
+		t.Fatalf("DeleteWikiLinkByID non-existent: %v", err)
+	}
+	if deleted {
+		t.Error("expected deleted=false for non-existent ID, got true")
+	}
+}
+
 func TestUpsertWikiPageByWorkflow_MultipleUpserts_VersionIncrementsCorrectly(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()

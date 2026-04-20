@@ -12,6 +12,24 @@ import (
 	"github.com/google/uuid"
 )
 
+// AllowedWikiLinkTypes lists the valid edge types for wiki_links.link_type.
+// This is the single source of truth — both the API handler and the wiki_engine
+// suggester must consume this map via IsValidWikiLinkType.
+var AllowedWikiLinkTypes = map[string]struct{}{
+	"related":     {},
+	"parent":      {},
+	"child":       {},
+	"contradicts": {},
+	"supersedes":  {},
+	"cites":       {},
+}
+
+// IsValidWikiLinkType returns true if t (after trim + lowercase) is in the allowlist.
+func IsValidWikiLinkType(t string) bool {
+	_, ok := AllowedWikiLinkTypes[strings.ToLower(strings.TrimSpace(t))]
+	return ok
+}
+
 const wikiStalenessThreshold = 0.7
 
 // Page type constants. page_type in DB is a free string — these are the
@@ -306,6 +324,23 @@ func (d *DB) UpdateWikiPageStaleness(id string, score float64) error {
 	return nil
 }
 
+// CountOrphanWikiPages returns the number of wiki pages that have no links
+// (neither as source nor as target).
+func (d *DB) CountOrphanWikiPages() (int, error) {
+	var count int
+	err := d.sql.QueryRow(`
+		SELECT COUNT(*) FROM wiki_pages p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM wiki_links
+			WHERE from_page_id = p.id OR to_page_id = p.id
+		)
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count orphan wiki pages: %w", err)
+	}
+	return count, nil
+}
+
 // SaveWikiLink inserts or replaces a wiki link (upserts on the UNIQUE constraint,
 // updating strength on conflict).
 func (d *DB) SaveWikiLink(l *WikiLink) error {
@@ -465,6 +500,20 @@ func (d *DB) DeleteWikiLinks(pageID string) error {
 	return nil
 }
 
+// DeleteWikiLinkByID removes a single link by its primary key.
+// Returns (false, nil) if no row matched, (true, nil) on success.
+func (d *DB) DeleteWikiLinkByID(id string) (bool, error) {
+	result, err := d.sql.Exec(`DELETE FROM wiki_links WHERE id = ?`, id)
+	if err != nil {
+		return false, fmt.Errorf("delete wiki link by id: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete wiki link by id: rows affected: %w", err)
+	}
+	return n > 0, nil
+}
+
 // DeleteWikiPageRefs removes all source references for the given page.
 func (d *DB) DeleteWikiPageRefs(pageID string) error {
 	_, err := d.sql.Exec(`DELETE FROM wiki_page_refs WHERE page_id = ?`, pageID)
@@ -482,6 +531,20 @@ func (d *DB) WikiPageCount() (int, error) {
 		return 0, fmt.Errorf("wiki page count: %w", err)
 	}
 	return count, nil
+}
+
+// FindWikiPageByTitleNewest returns the most recently updated wiki page whose
+// title matches (case-insensitive). Returns (nil, nil) if not found.
+func (d *DB) FindWikiPageByTitleNewest(title string) (*WikiPage, error) {
+	row := d.sql.QueryRow(`
+		SELECT id, page_type, title, content, status, staleness_score,
+		       source_hashes_json, tags_json, metadata_json, generated_by, version, created_at, updated_at
+		FROM wiki_pages
+		WHERE LOWER(title) = LOWER(?)
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`, title)
+	return scanWikiPage(row)
 }
 
 // UpsertWikiPageByWorkflow inserts or updates a wiki page identified by the
