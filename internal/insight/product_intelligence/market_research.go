@@ -85,10 +85,11 @@ Respond with a JSON array:
 Only respond with the JSON array, no additional text.`, domain)
 
 	resp, err := e.llm.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: "You are an expert product researcher. Analyze market standards with high accuracy. Always respond with valid JSON.",
-		Messages:     []llm.Message{llm.UserMessage(prompt)},
-		MaxTokens:    3000,
-		Temperature:  0.3,
+		SystemPrompt:   "You are an expert product researcher. Analyze market standards with high accuracy. Always respond with valid JSON.",
+		Messages:       []llm.Message{llm.UserMessage(prompt)},
+		MaxTokens:      8192,
+		Temperature:    0.3,
+		ResponseFormat: "json",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("llm request: %w", err)

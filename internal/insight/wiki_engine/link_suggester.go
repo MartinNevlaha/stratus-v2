@@ -13,12 +13,16 @@ import (
 )
 
 // StubSuggestion is a link target proposed by the LLM that doesn't yet exist
-// as a wiki page.
+// as a wiki page. New fields (LinkType, Strength, ToTitle) extend the struct
+// without breaking existing callers — they are optional with safe defaults.
 type StubSuggestion struct {
 	Title     string   `json:"title"`
 	Rationale string   `json:"rationale"`
 	PageType  string   `json:"page_type"`
 	Tags      []string `json:"tags"`
+	LinkType  string   `json:"link_type"` // related | parent | child | cites
+	Strength  float64  `json:"strength"`  // 0..1; default 0.5 when zero
+	ToTitle   string   `json:"to_title"`  // target title for existing-page mode
 }
 
 // LinkSuggester asks the LLM which concepts in a page deserve their own wiki
@@ -46,24 +50,30 @@ func (s *LinkSuggester) Suggest(ctx context.Context, page *db.WikiPage) ([]StubS
 	user := fmt.Sprintf("Title: %s\nPage type: %s\n\nContent:\n%s", page.Title, page.PageType, content)
 
 	resp, err := s.llmClient.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: prompts.WikiLinkSuggestion,
-		Messages:     []llm.Message{{Role: "user", Content: user}},
-		MaxTokens:    512,
-		Temperature:  0.2,
+		SystemPrompt:   prompts.WikiLinkSuggestion,
+		Messages:       []llm.Message{{Role: "user", Content: user}},
+		MaxTokens:      8192,
+		Temperature:    0.2,
+		ResponseFormat: "json",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("link suggester: complete: %w", err)
 	}
 
-	var suggestions []StubSuggestion
-	if err := llm.ParseJSONResponse(resp.Content, &suggestions); err != nil {
+	var wrapper struct {
+		Links []StubSuggestion `json:"links"`
+	}
+	if err := llm.ParseJSONResponse(resp.Content, &wrapper); err != nil {
 		return nil, fmt.Errorf("link suggester: parse: %w", err)
 	}
-	return filterSuggestions(suggestions), nil
+	return filterSuggestions(wrapper.Links), nil
 }
 
-// SuggestAndCreateStubs runs Suggest and persists draft stubs for titles that
-// don't already exist. Returns the number of stubs actually created.
+// SuggestAndCreateStubs runs Suggest and persists the suggestions.
+// For each suggestion with ToTitle set, it looks up the existing page by
+// case-insensitive title and saves a typed link to it. If the page is not
+// found it falls back to stub creation. For suggestions without ToTitle a
+// new stub page is created. Returns the number of stubs actually created.
 func (s *LinkSuggester) SuggestAndCreateStubs(ctx context.Context, page *db.WikiPage) (int, error) {
 	suggestions, err := s.Suggest(ctx, page)
 	if err != nil {
@@ -72,6 +82,36 @@ func (s *LinkSuggester) SuggestAndCreateStubs(ctx context.Context, page *db.Wiki
 
 	created := 0
 	for _, sug := range suggestions {
+		linkType := normalizeLinkType(sug.LinkType)
+		strength := defaultedStrength(sug.Strength)
+
+		if sug.ToTitle != "" {
+			// Existing-page link mode.
+			target, err := s.store.FindWikiPageByTitleNewest(sug.ToTitle)
+			if err != nil {
+				slog.Warn("link suggester: lookup existing page failed", "title", sug.ToTitle, "err", err)
+				// fall through to stub creation below
+			}
+			if target != nil {
+				if err := s.store.SaveLink(&db.WikiLink{
+					ID:         uuid.NewString(),
+					FromPageID: page.ID,
+					ToPageID:   target.ID,
+					LinkType:   linkType,
+					Strength:   strength,
+				}); err != nil {
+					slog.Warn("link suggester: save link to existing failed", "from", page.ID, "to", target.ID, "err", err)
+				}
+				continue
+			}
+			// Not found — fall back to stub creation using ToTitle as the stub title.
+			sug.Title = sug.ToTitle
+		}
+
+		// Stub creation mode.
+		if sug.Title == "" {
+			continue
+		}
 		if s.pageTitleExists(sug.Title) {
 			continue
 		}
@@ -98,14 +138,33 @@ func (s *LinkSuggester) SuggestAndCreateStubs(ctx context.Context, page *db.Wiki
 			ID:         uuid.NewString(),
 			FromPageID: page.ID,
 			ToPageID:   stub.ID,
-			LinkType:   "related",
-			Strength:   0.5,
+			LinkType:   linkType,
+			Strength:   strength,
 		}); err != nil {
 			slog.Warn("link suggester: save link failed", "from", page.ID, "to", stub.ID, "err", err)
 		}
 		created++
 	}
 	return created, nil
+}
+
+// normalizeLinkType lowercases and trims t, returning it if valid or "related"
+// with a warning if not.
+func normalizeLinkType(t string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(t))
+	if db.IsValidWikiLinkType(trimmed) {
+		return trimmed
+	}
+	slog.Warn("link suggester: invalid link_type from LLM, falling back to related", "got", t)
+	return "related"
+}
+
+// defaultedStrength returns s if s > 0, otherwise 0.5.
+func defaultedStrength(s float64) float64 {
+	if s > 0 {
+		return s
+	}
+	return 0.5
 }
 
 // pageTitleExists performs a best-effort existence check via SearchPages.
@@ -135,11 +194,15 @@ func filterSuggestions(in []StubSuggestion) []StubSuggestion {
 	out := make([]StubSuggestion, 0, len(in))
 	seen := make(map[string]struct{}, len(in))
 	for _, s := range in {
-		s.Title = strings.TrimSpace(s.Title)
-		if s.Title == "" {
-			continue
+		// Deduplicate by effective title (ToTitle takes precedence, then Title).
+		key := strings.ToLower(strings.TrimSpace(s.ToTitle))
+		if key == "" {
+			s.Title = strings.TrimSpace(s.Title)
+			if s.Title == "" {
+				continue
+			}
+			key = strings.ToLower(s.Title)
 		}
-		key := strings.ToLower(s.Title)
 		if _, ok := seen[key]; ok {
 			continue
 		}

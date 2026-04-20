@@ -176,10 +176,11 @@ Generate up to %d hypotheses as a JSON array:
 [{"category": "...", "description": "...", "baseline_value": "...", "proposed_value": "...", "metric": "...", "baseline_metric": 0.0, "rationale": "..."}]`, active, maxCount, maxCount)
 
 	resp, err := g.llmClient.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: prompts.WithLanguage(prompts.HypothesisGeneration, lang),
-		Messages:     []llm.Message{{Role: "user", Content: userPrompt}},
-		MaxTokens:    2048,
-		Temperature:  0.7,
+		SystemPrompt:  prompts.WithLanguage(prompts.HypothesisGeneration, lang),
+		Messages:      []llm.Message{{Role: "user", Content: userPrompt}},
+		MaxTokens:     8192,
+		Temperature:   0.7,
+		ResponseFormat: "json",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("llm complete: %w", err)

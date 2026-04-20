@@ -75,10 +75,11 @@ func (a *Analyzer) AnalyzeFile(ctx context.Context, file FileScore, governanceRu
 	systemPrompt := prompts.WithLanguage(codeAnalysisSystemPrompt, a.lang)
 
 	resp, err := a.llmClient.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: systemPrompt,
-		Messages:     []llm.Message{{Role: "user", Content: userPrompt}},
-		MaxTokens:    2048,
-		Temperature:  0.2,
+		SystemPrompt:   systemPrompt,
+		Messages:       []llm.Message{{Role: "user", Content: userPrompt}},
+		MaxTokens:      8192,
+		Temperature:    0.2,
+		ResponseFormat: "json",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("code analyst: analyze file %q: llm completion: %w", file.FilePath, err)

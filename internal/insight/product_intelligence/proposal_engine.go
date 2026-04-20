@@ -101,10 +101,11 @@ Create proposals for implementing these features. Respond with a JSON array:
 Only respond with the JSON array.`, gapNames, featureNames)
 
 	resp, err := e.llm.Complete(ctx, llm.CompletionRequest{
-		SystemPrompt: "You are an expert software architect. Generate implementation proposals. Always respond with valid JSON.",
-		Messages:     []llm.Message{llm.UserMessage(prompt)},
-		MaxTokens:    3000,
-		Temperature:  0.7,
+		SystemPrompt:   "You are an expert software architect. Generate implementation proposals. Always respond with valid JSON.",
+		Messages:       []llm.Message{llm.UserMessage(prompt)},
+		MaxTokens:      8192,
+		Temperature:    0.7,
+		ResponseFormat: "json",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("llm request: %w", err)

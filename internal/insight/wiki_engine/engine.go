@@ -264,7 +264,7 @@ func (e *WikiEngine) GeneratePageFromData(
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},
-		MaxTokens:   2048,
+		MaxTokens:   8192,
 		Temperature: 0.4,
 	})
 	if err != nil {
