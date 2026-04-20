@@ -213,7 +213,121 @@ func ParseJSONResponse(response string, target interface{}) error {
 		}
 	}
 
+	// Lenient fallback: many local LLMs (gemma, llama) emit unquoted keys,
+	// single-quoted strings, or trailing commas despite format:"json".
+	// Apply common JSON5-style fixes and retry before giving up.
+	if relaxed := relaxJSON(candidate); relaxed != candidate {
+		if err2 := json.Unmarshal([]byte(relaxed), target); err2 == nil {
+			return nil
+		}
+		// Also try the auto-wrap path on the relaxed form.
+		if errors.As(err, &typeErr) && typeErr.Value == "object" && opener == '{' {
+			t := reflect.TypeOf(target)
+			if t != nil && t.Kind() == reflect.Ptr && t.Elem().Kind() == reflect.Slice {
+				if err3 := json.Unmarshal([]byte("["+relaxed+"]"), target); err3 == nil {
+					return nil
+				}
+			}
+		}
+	}
+
 	return err
+}
+
+// relaxJSON applies tolerant JSON fixes to an LLM-generated string:
+//   - unquoted object keys ({foo: 1} → {"foo": 1})
+//   - single-quoted strings ('x' → "x")
+//   - trailing commas before } or ]
+//
+// It walks the input tracking string/escape state so transformations apply
+// only to structural characters, never to content inside strings.
+func relaxJSON(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 32)
+
+	inString := false
+	var quoteChar byte
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+
+		if inString {
+			if c == '\\' && i+1 < len(s) {
+				b.WriteByte(c)
+				b.WriteByte(s[i+1])
+				i++
+				continue
+			}
+			if c == quoteChar {
+				b.WriteByte('"')
+				inString = false
+				continue
+			}
+			if quoteChar == '\'' && c == '"' {
+				b.WriteString(`\"`)
+				continue
+			}
+			b.WriteByte(c)
+			continue
+		}
+
+		if c == '"' || c == '\'' {
+			b.WriteByte('"')
+			inString = true
+			quoteChar = c
+			continue
+		}
+
+		if c == ',' {
+			j := i + 1
+			for j < len(s) && isJSONSpace(s[j]) {
+				j++
+			}
+			if j < len(s) && (s[j] == '}' || s[j] == ']') {
+				continue // drop trailing comma
+			}
+		}
+
+		b.WriteByte(c)
+
+		if c == '{' || c == ',' {
+			// Look ahead for a bare identifier followed by ':'. If present,
+			// wrap it in quotes before continuing the outer loop.
+			j := i + 1
+			for j < len(s) && isJSONSpace(s[j]) {
+				j++
+			}
+			if j < len(s) && isIdentStart(s[j]) {
+				start := j
+				for j < len(s) && isIdentCont(s[j]) {
+					j++
+				}
+				k := j
+				for k < len(s) && isJSONSpace(s[k]) {
+					k++
+				}
+				if k < len(s) && s[k] == ':' {
+					b.WriteString(s[i+1 : start])
+					b.WriteByte('"')
+					b.WriteString(s[start:j])
+					b.WriteByte('"')
+					i = j - 1
+				}
+			}
+		}
+	}
+
+	return b.String()
+}
+
+func isJSONSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+
+func isIdentStart(c byte) bool {
+	return c == '_' || c == '$' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isIdentCont(c byte) bool {
+	return isIdentStart(c) || (c >= '0' && c <= '9')
 }
 
 // stripCodeFence extracts content from the first markdown code fence if present.

@@ -152,6 +152,74 @@ func TestParseJSONResponse_EscapedQuotesInString(t *testing.T) {
 	}
 }
 
+func TestParseJSONResponse_UnquotedKeys(t *testing.T) {
+	var result map[string]any
+	raw := `{category: "bug", title: "oops", confidence: 0.8}`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error for LLM unquoted keys: %v", err)
+	}
+	if result["category"] != "bug" || result["title"] != "oops" {
+		t.Errorf("result = %v, want category=bug title=oops", result)
+	}
+}
+
+func TestParseJSONResponse_SingleQuotedStrings(t *testing.T) {
+	var result map[string]any
+	raw := `{'category': 'bug', 'title': 'oops'}`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error for single-quoted strings: %v", err)
+	}
+	if result["category"] != "bug" {
+		t.Errorf("category = %v, want bug", result["category"])
+	}
+}
+
+func TestParseJSONResponse_TrailingComma(t *testing.T) {
+	var result []map[string]any
+	raw := `[{"id": 1}, {"id": 2},]`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error for trailing comma: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("len = %d, want 2", len(result))
+	}
+}
+
+func TestParseJSONResponse_MixedLLMMistakes(t *testing.T) {
+	// Real-world gemma pattern: unquoted keys + trailing comma + mixed quotes.
+	type finding struct {
+		Category string `json:"category"`
+		Title    string `json:"title"`
+	}
+	var result []finding
+	raw := `[{category: "bug", title: "one",}, {category: "smell", title: 'two',},]`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error on mixed LLM JSON mistakes: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("len = %d, want 2", len(result))
+	}
+	if result[0].Title != "one" || result[1].Title != "two" {
+		t.Errorf("result = %+v, want titles one/two", result)
+	}
+}
+
+func TestParseJSONResponse_ColonInStringNotMistakenForKey(t *testing.T) {
+	var result map[string]any
+	raw := `{"url": "https://example.com:8080/path"}`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["url"] != "https://example.com:8080/path" {
+		t.Errorf("url = %v, want URL with colon preserved", result["url"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Config helper tests
 // ---------------------------------------------------------------------------
