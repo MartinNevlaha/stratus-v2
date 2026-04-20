@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -118,7 +119,7 @@ func (s *Server) handleTriggerEvolution(w http.ResponseWriter, r *http.Request) 
 	// Cap timeout. When timeout_ms is omitted (0) or exceeds the max, default to
 	// maxTimeoutMs. The evolution loop will further override with config.TimeoutMs
 	// if the value passed is 0, so this cap only prevents abuse.
-	const maxTimeoutMs = 600000
+	const maxTimeoutMs = 1800000 // 30 min — local LLMs (gemma, llama) need room
 	if req.TimeoutMs < 0 || req.TimeoutMs > maxTimeoutMs {
 		req.TimeoutMs = maxTimeoutMs
 	}
@@ -182,8 +183,8 @@ func (s *Server) handleUpdateEvolutionConfig(w http.ResponseWriter, r *http.Requ
 		jsonErr(w, http.StatusBadRequest, "proposal_threshold must be between 0 and 1")
 		return
 	}
-	if cfg.TimeoutMs < 1000 || cfg.TimeoutMs > 600000 {
-		jsonErr(w, http.StatusBadRequest, "timeout_ms must be between 1000 and 600000")
+	if cfg.TimeoutMs < 1000 || cfg.TimeoutMs > 1800000 {
+		jsonErr(w, http.StatusBadRequest, "timeout_ms must be between 1000 and 1800000")
 		return
 	}
 	if cfg.MinSampleSize < 1 {
@@ -206,5 +207,11 @@ func (s *Server) handleUpdateEvolutionConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	s.cfg.Evolution = cfg
+	if err := s.cfg.Save(filepath.Join(s.projectRoot, ".stratus.json")); err != nil {
+		slog.Error("save evolution config", "err", err)
+		jsonErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
 	json200(w, s.cfg.Evolution)
 }

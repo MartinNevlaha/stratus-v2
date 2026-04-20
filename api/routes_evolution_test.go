@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
@@ -196,7 +198,7 @@ func TestHandleTriggerEvolution_NoEngine(t *testing.T) {
 	}
 }
 
-// TestHandleTriggerEvolution_InvalidTimeout verifies that timeouts above 600000 are capped.
+// TestHandleTriggerEvolution_InvalidTimeout verifies that timeouts above 1800000 are capped.
 func TestHandleTriggerEvolution_InvalidCategory(t *testing.T) {
 	database := setupTestDB(t)
 	defer database.Close()
@@ -267,7 +269,8 @@ func TestHandleUpdateEvolutionConfig(t *testing.T) {
 	defer database.Close()
 
 	cfg := config.Default()
-	server := &Server{db: database, cfg: &cfg}
+	projectRoot := t.TempDir()
+	server := &Server{db: database, cfg: &cfg, projectRoot: projectRoot}
 
 	updated := config.EvolutionConfig{
 		Enabled:             true,
@@ -308,6 +311,25 @@ func TestHandleUpdateEvolutionConfig(t *testing.T) {
 	// Verify the server config was mutated in-place.
 	if !server.cfg.Evolution.Enabled {
 		t.Error("expected server cfg.Evolution.Enabled to be updated")
+	}
+
+	// Verify the config was persisted to disk.
+	data, err := os.ReadFile(filepath.Join(projectRoot, ".stratus.json"))
+	if err != nil {
+		t.Fatalf("config file not found on disk: %v", err)
+	}
+	var persisted config.Config
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("unmarshal persisted config: %v", err)
+	}
+	if !persisted.Evolution.Enabled {
+		t.Error("expected persisted Evolution.Enabled to be true")
+	}
+	if persisted.Evolution.TimeoutMs != 300000 {
+		t.Errorf("expected persisted TimeoutMs 300000, got %d", persisted.Evolution.TimeoutMs)
+	}
+	if persisted.Evolution.MaxHypothesesPerRun != 15 {
+		t.Errorf("expected persisted MaxHypothesesPerRun 15, got %d", persisted.Evolution.MaxHypothesesPerRun)
 	}
 }
 
@@ -359,7 +381,7 @@ func TestHandleUpdateEvolutionConfig_ValidationErrors(t *testing.T) {
 		},
 		{
 			name:    "timeout_ms above maximum",
-			mutate:  func(c *config.EvolutionConfig) { c.TimeoutMs = 600001 },
+			mutate:  func(c *config.EvolutionConfig) { c.TimeoutMs = 1800001 },
 			wantMsg: "timeout_ms",
 		},
 		{

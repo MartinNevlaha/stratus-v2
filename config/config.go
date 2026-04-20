@@ -391,7 +391,7 @@ func Default() Config {
 		},
 		Evolution: EvolutionConfig{
 			Enabled:             false,
-			TimeoutMs:           120000,
+			TimeoutMs:           600000,
 			MaxHypothesesPerRun: 10,
 			AutoApplyThreshold:  0.85,
 			ProposalThreshold:   0.65,

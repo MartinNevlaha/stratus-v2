@@ -33,6 +33,15 @@ type CycleResult struct {
 	CategoryBreakdown   map[string]int
 }
 
+// ScoredHypothesis pairs a scored hypothesis with its final blended score.
+// Returned from RunCycle so callers can persist per-hypothesis bookkeeping.
+type ScoredHypothesis struct {
+	Hypothesis scoring.Hypothesis
+	Final      float64
+	Static     scoring.StaticScores
+	LLM        scoring.LLMScores
+}
+
 // EvolutionLoop orchestrates hypothesis generation, experiment execution,
 // evaluation, and persistence for a single time-bounded evolution cycle.
 type EvolutionLoop struct {
@@ -135,14 +144,20 @@ func (l *EvolutionLoop) logf(format string, args ...any) {
 //
 // It returns ErrTokenCapRequired when cfg.MaxTokensPerCycle <= 0, and an
 // error when no ProposalWriter is configured.
-func (l *EvolutionLoop) RunCycle(ctx context.Context) (CycleResult, error) {
+func (l *EvolutionLoop) RunCycle(ctx context.Context) (CycleResult, []ScoredHypothesis, error) {
 	cfg := l.configFn()
+	return l.runCycleWithConfig(ctx, cfg)
+}
 
+// runCycleWithConfig is the internal implementation of RunCycle. It accepts a
+// pre-resolved config value so callers (e.g. RunTargetCycle) can apply
+// per-request overrides before the cycle begins without re-reading configFn.
+func (l *EvolutionLoop) runCycleWithConfig(ctx context.Context, cfg config.EvolutionConfig) (CycleResult, []ScoredHypothesis, error) {
 	if cfg.MaxTokensPerCycle <= 0 {
-		return CycleResult{}, fmt.Errorf("loop: run cycle: %w", config.ErrTokenCapRequired)
+		return CycleResult{}, nil, fmt.Errorf("loop: run cycle: %w", config.ErrTokenCapRequired)
 	}
 	if l.proposalWriter == nil {
-		return CycleResult{}, fmt.Errorf("loop: proposal writer not configured")
+		return CycleResult{}, nil, fmt.Errorf("loop: proposal writer not configured")
 	}
 
 	// Resolve effective baseline builder and static scorer — use injected
@@ -166,7 +181,7 @@ func (l *EvolutionLoop) RunCycle(ctx context.Context) (CycleResult, error) {
 	}
 	bundle, err := bldr.Build(ctx, root, cfg.BaselineLimits)
 	if err != nil {
-		return CycleResult{}, fmt.Errorf("loop: build baseline: %w", err)
+		return CycleResult{}, nil, fmt.Errorf("loop: build baseline: %w", err)
 	}
 	redacted := baseline.Redact(&bundle)
 
@@ -184,6 +199,7 @@ func (l *EvolutionLoop) RunCycle(ctx context.Context) (CycleResult, error) {
 	// 3. Score and write proposals.
 	tokensUsed := 0
 	partial := false
+	var scored []ScoredHypothesis
 
 	for _, h := range all {
 		static := ss.Score(h, *redacted)
@@ -215,6 +231,13 @@ func (l *EvolutionLoop) RunCycle(ctx context.Context) (CycleResult, error) {
 
 		blended := scoring.Blend(static, llmScores, cfg.ScoringWeights)
 
+		scored = append(scored, ScoredHypothesis{
+			Hypothesis: h,
+			Final:      blended.Final,
+			Static:     blended.Static,
+			LLM:        blended.LLM,
+		})
+
 		_, werr := l.proposalWriter.Write(ctx, ProposalInput{
 			Hypothesis: h,
 			Final:      blended.Final,
@@ -233,7 +256,7 @@ func (l *EvolutionLoop) RunCycle(ctx context.Context) (CycleResult, error) {
 		TokensUsed:          tokensUsed,
 		PartialScoring:      partial,
 		CategoryBreakdown:   countByCategory(all),
-	}, nil
+	}, scored, nil
 }
 
 // countByCategory returns a map of category → count for the given hypotheses.
@@ -371,6 +394,9 @@ func (l *EvolutionLoop) execute(
 				"run_id", run.ID,
 				"hypotheses_tested", result.HypothesesTested,
 			)
+			if result.HypothesesTested > 0 {
+				return result, "partial", nil
+			}
 			return result, "timeout", nil
 		default:
 		}
@@ -388,8 +414,11 @@ func (l *EvolutionLoop) execute(
 		if hasDeadline {
 			remaining := time.Until(deadline)
 			budget := remaining / time.Duration(len(hypotheses)-i)
-			if budget < 5*time.Second {
-				budget = 5 * time.Second
+			// Each experiment makes 3 sequential LLM calls (baseline, proposed,
+			// evaluator). Local models (gemma, llama) run ~20-30s per call, so
+			// anything under ~90s starves the experiment before it can finish.
+			if budget < 90*time.Second {
+				budget = 90 * time.Second
 			}
 			expCtx, expCancel := context.WithTimeout(ctx, budget)
 			expResult = runner.ExecuteWithLang(expCtx, h, lang)
@@ -398,8 +427,13 @@ func (l *EvolutionLoop) execute(
 			expResult = runner.ExecuteWithLang(ctx, h, lang)
 		}
 		if expResult.Error != nil {
-			// Context cancelled during experiment — stop the loop.
+			// Outer context cancelled — stop the loop. Classify as "partial"
+			// when at least one hypothesis completed so the UI doesn't present
+			// a run with real output as a total timeout.
 			if ctx.Err() != nil {
+				if result.HypothesesTested > 0 {
+					return result, "partial", nil
+				}
 				return result, "timeout", nil
 			}
 			slog.Error("evolution loop: experiment error", "hypothesis_id", h.ID, "err", expResult.Error)
