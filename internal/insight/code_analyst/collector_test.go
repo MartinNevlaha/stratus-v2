@@ -271,3 +271,58 @@ func mapKeys(m map[string]int) []string {
 	}
 	return keys
 }
+
+func TestIsExcluded_NonSourceFiles(t *testing.T) {
+	excluded := []string{
+		"data/training/train.jsonl",
+		"data/training_cleaned/checkpoint.jsonl.partial",
+		"logs/run-20260420.log",
+		"datasets/features.csv",
+		"build-artifacts/bundle.map",
+		"assets/logo.png",
+		"readme.pdf",
+		"data.parquet",
+	}
+	for _, p := range excluded {
+		if !isExcluded(p) {
+			t.Errorf("isExcluded(%q) = false, want true (non-source file)", p)
+		}
+	}
+}
+
+func TestIsExcluded_SourceFilesNotExcluded(t *testing.T) {
+	included := []string{
+		"main.go",
+		"internal/foo/bar.go",
+		"src/App.tsx",
+		"src/lib/util.ts",
+		"frontend/src/routes/Evolution.svelte",
+		"scripts/run.py",
+		"src/main.rs",
+		"Main.java",
+		"lib/helpers.rb",
+		"include/vec.h",
+		"src/server.cpp",
+	}
+	for _, p := range included {
+		if isExcluded(p) {
+			t.Errorf("isExcluded(%q) = true, want false (source file must be analyzed)", p)
+		}
+	}
+}
+
+func TestIsExcluded_SensitiveAndVendorStillExcluded(t *testing.T) {
+	excluded := []string{
+		".env",
+		"config/secret.go",
+		"lib/credentials.go",
+		"node_modules/foo/index.js",
+		"vendor/github.com/x/y.go",
+		".git/config",
+	}
+	for _, p := range excluded {
+		if !isExcluded(p) {
+			t.Errorf("isExcluded(%q) = false, want true", p)
+		}
+	}
+}

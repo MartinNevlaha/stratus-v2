@@ -241,7 +241,7 @@ func countLines(path string) (int, error) {
 }
 
 // isExcluded reports whether a relative path should be excluded from
-// collection (vendor dirs, sensitive filenames, etc.).
+// collection (vendor dirs, sensitive filenames, non-code files, etc.).
 func isExcluded(rel string) bool {
 	// Directory prefixes to skip.
 	excludedDirs := []string{
@@ -278,6 +278,28 @@ func isExcluded(rel string) bool {
 		}
 	}
 
+	// Only send actual source code to the LLM analyzer. Data files (.jsonl,
+	// .csv, .log, .partial, etc.) and binary artifacts confuse the model —
+	// it returns prose or empty strings that fail JSON parsing downstream.
+	if !isAnalyzableSource(rel) {
+		return true
+	}
+
+	return false
+}
+
+// isAnalyzableSource reports whether the file extension is a recognised
+// programming-language source file the LLM code analyst can meaningfully
+// review. Extensions outside this allowlist (data, logs, docs, config)
+// are excluded from collection.
+func isAnalyzableSource(rel string) bool {
+	ext := strings.ToLower(filepath.Ext(rel))
+	switch ext {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".svelte", ".py", ".rs",
+		".java", ".rb", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp",
+		".cs", ".kt", ".swift", ".php", ".scala", ".ex", ".exs", ".erl":
+		return true
+	}
 	return false
 }
 
