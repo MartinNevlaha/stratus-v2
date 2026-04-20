@@ -70,6 +70,88 @@ func TestParseJSONResponse_EmptyString(t *testing.T) {
 	}
 }
 
+func TestParseJSONResponse_MarkdownFencedJSON(t *testing.T) {
+	var result []map[string]any
+	raw := "```json\n[{\"id\":1},{\"id\":2}]\n```"
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("len = %d, want 2", len(result))
+	}
+}
+
+func TestParseJSONResponse_MarkdownFenceNoLang(t *testing.T) {
+	var result map[string]any
+	raw := "Here it is:\n```\n{\"status\":\"ok\"}\n```\ndone"
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["status"] != "ok" {
+		t.Errorf("status = %v, want ok", result["status"])
+	}
+}
+
+func TestParseJSONResponse_NestedObjectWithBracketsInString(t *testing.T) {
+	var result map[string]any
+	// The string contains } and ] literals that would trip a greedy "last bracket" scan.
+	raw := `prose {"outer": {"inner": "has } and ] chars"}, "tag": "[x]"} trailing`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	outer, ok := result["outer"].(map[string]any)
+	if !ok {
+		t.Fatalf("outer = %T, want map[string]any", result["outer"])
+	}
+	if outer["inner"] != "has } and ] chars" {
+		t.Errorf("outer.inner = %v, want literal text with braces", outer["inner"])
+	}
+}
+
+func TestParseJSONResponse_ObjectAutoWrappedIntoSlice(t *testing.T) {
+	// gemma sometimes returns a single object where the caller requested an array.
+	// The parser must auto-wrap it in [ ... ] before unmarshalling into a slice.
+	type finding struct {
+		Category string `json:"category"`
+		Title    string `json:"title"`
+	}
+	var result []finding
+	raw := `{"category":"bug","title":"oops"}`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len = %d, want 1", len(result))
+	}
+	if result[0].Category != "bug" || result[0].Title != "oops" {
+		t.Errorf("result[0] = %+v, want {bug oops}", result[0])
+	}
+}
+
+func TestParseJSONResponse_UnterminatedJSON(t *testing.T) {
+	var result map[string]any
+	err := ParseJSONResponse(`{"key":"value"`, &result)
+	if err == nil {
+		t.Fatal("expected error for unterminated JSON")
+	}
+}
+
+func TestParseJSONResponse_EscapedQuotesInString(t *testing.T) {
+	var result map[string]any
+	raw := `{"q": "she said \"hi\" to me"}`
+	err := ParseJSONResponse(raw, &result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["q"] != `she said "hi" to me` {
+		t.Errorf("q = %v, want literal with escaped quotes", result["q"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Config helper tests
 // ---------------------------------------------------------------------------

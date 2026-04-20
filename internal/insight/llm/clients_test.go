@@ -704,9 +704,8 @@ func TestNewClient_Ollama_NoAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient (ollama): %v", err)
 	}
-	if client.Provider() != "openai" {
-		// ollama reuses the openai client
-		t.Logf("ollama provider = %q (uses openai client internally)", client.Provider())
+	if client.Provider() != "ollama" {
+		t.Errorf("provider = %q, want ollama", client.Provider())
 	}
 }
 

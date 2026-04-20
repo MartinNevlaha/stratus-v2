@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -28,11 +29,16 @@ func NewOpenAIClient(cfg Config) (*OpenAIClient, error) {
 func (c *OpenAIClient) Provider() string { return c.config.Provider }
 func (c *OpenAIClient) Model() string    { return c.config.Model }
 
+type openAIResponseFormat struct {
+	Type string `json:"type"`
+}
+
 type openAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature float64         `json:"temperature,omitempty"`
+	Model          string                `json:"model"`
+	Messages       []openAIMessage       `json:"messages"`
+	MaxTokens      int                   `json:"max_tokens,omitempty"`
+	Temperature    float64               `json:"temperature,omitempty"`
+	ResponseFormat *openAIResponseFormat `json:"response_format,omitempty"`
 }
 
 type openAIMessage struct {
@@ -122,6 +128,18 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 		Messages:    messages,
 		MaxTokens:   maxTokens,
 		Temperature: temperature,
+	}
+
+	switch req.ResponseFormat {
+	case "json":
+		body.ResponseFormat = &openAIResponseFormat{Type: "json_object"}
+	case "":
+		// nil — omitted by omitempty
+	default:
+		slog.Warn("llm: unrecognised ResponseFormat, ignoring",
+			"response_format", req.ResponseFormat,
+			"model", c.config.Model,
+		)
 	}
 
 	jsonBody, err := json.Marshal(body)

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -139,5 +140,173 @@ func TestOpenAIClient_Complete_ObjectShapedErrorField_NonOK(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid api key") {
 		t.Errorf("error = %q, want to contain 'invalid api key'", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ResponseFormat field tests — regression guards for the OpenAI client's
+// response_format wire format. Ensures "json" maps to json_object, empty
+// omits the key, and invalid values are silently dropped.
+// ---------------------------------------------------------------------------
+
+// TestOpenAIClient_Complete_ResponseFormatJSON_IncludesInBody verifies that
+// when ResponseFormat is "json" the request body sent to the server contains
+// response_format: {"type":"json_object"}.
+func TestOpenAIClient_Complete_ResponseFormatJSON_IncludesInBody(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openAIResponse{
+			Model: "gpt-4",
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{Role: "assistant", Content: "{}"},
+					FinishReason: "stop",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "openai", Model: "gpt-4", APIKey: "k", BaseURL: srv.URL}
+	client, err := NewOpenAIClient(cfg)
+	if err != nil {
+		t.Fatalf("NewOpenAIClient: %v", err)
+	}
+
+	_, err = client.Complete(context.Background(), CompletionRequest{
+		Messages:       []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:      16,
+		ResponseFormat: "json",
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	rfRaw, ok := gotBody["response_format"]
+	if !ok {
+		t.Fatal("request body missing response_format key")
+	}
+	rf, ok := rfRaw.(map[string]any)
+	if !ok {
+		t.Fatalf("response_format = %T, want map[string]any", rfRaw)
+	}
+	if rf["type"] != "json_object" {
+		t.Errorf("response_format.type = %q, want json_object", rf["type"])
+	}
+}
+
+// TestOpenAIClient_Complete_ResponseFormatEmpty_OmitsFromBody is a regression
+// guard: callers that do not set ResponseFormat must not see the key injected
+// into the request body (preserves existing behaviour for wiki, product_intelligence, etc.).
+func TestOpenAIClient_Complete_ResponseFormatEmpty_OmitsFromBody(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openAIResponse{
+			Model: "gpt-4",
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "openai", Model: "gpt-4", APIKey: "k", BaseURL: srv.URL}
+	client, err := NewOpenAIClient(cfg)
+	if err != nil {
+		t.Fatalf("NewOpenAIClient: %v", err)
+	}
+
+	_, err = client.Complete(context.Background(), CompletionRequest{
+		Messages:       []Message{{Role: "user", Content: "hi"}},
+		ResponseFormat: "",
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	if _, ok := gotBody["response_format"]; ok {
+		t.Error("request body must not contain response_format when ResponseFormat is empty")
+	}
+}
+
+// TestOpenAIClient_Complete_ResponseFormatInvalid_OmitsFromBody verifies that
+// an unrecognised ResponseFormat value (e.g. "yaml") is silently dropped: the
+// key must not appear in the request body and Complete must not return an error.
+func TestOpenAIClient_Complete_ResponseFormatInvalid_OmitsFromBody(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openAIResponse{
+			Model: "gpt-4",
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "openai", Model: "gpt-4", APIKey: "k", BaseURL: srv.URL}
+	client, err := NewOpenAIClient(cfg)
+	if err != nil {
+		t.Fatalf("NewOpenAIClient: %v", err)
+	}
+
+	_, err = client.Complete(context.Background(), CompletionRequest{
+		Messages:       []Message{{Role: "user", Content: "hi"}},
+		ResponseFormat: "yaml",
+	})
+	if err != nil {
+		t.Fatalf("Complete must not return error for unrecognised ResponseFormat: %v", err)
+	}
+
+	if _, ok := gotBody["response_format"]; ok {
+		t.Error("request body must not contain response_format for unrecognised value")
 	}
 }

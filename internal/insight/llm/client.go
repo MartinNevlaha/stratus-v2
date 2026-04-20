@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,12 @@ type CompletionRequest struct {
 	Messages     []Message
 	MaxTokens    int
 	Temperature  float64
+	// ResponseFormat is an optional hint to force structured output. Valid values:
+	//   - "" (empty) : provider default, no constraint
+	//   - "json"     : request JSON-only output via the provider's native mechanism.
+	// Providers that do not support JSON mode silently ignore the field; callers
+	// should still parse defensively (see llm.ParseJSONResponse).
+	ResponseFormat string
 }
 
 type CompletionResponse struct {
@@ -97,8 +104,10 @@ func NewClient(cfg Config) (Client, error) {
 	switch cfg.Provider {
 	case "zai":
 		client, err = NewZAIClient(cfg)
-	case "openai", "ollama":
+	case "openai":
 		client, err = NewOpenAIClient(cfg)
+	case "ollama":
+		client, err = NewOllamaClient(cfg)
 	case "anthropic":
 		client, err = NewAnthropicClient(cfg)
 	default:
@@ -132,33 +141,96 @@ func MustNewClient(cfg Config) Client {
 	return client
 }
 
-// ParseJSONResponse attempts to extract JSON from LLM responses that may contain
-// additional text or markdown formatting. It handles simple JSON objects and arrays
-// but may fail with deeply nested structures.
-// For production use, consider using a more robust JSON extraction library.
+// ParseJSONResponse extracts and unmarshals JSON from an LLM response. It handles:
+// markdown code fences (```json ... ``` or ``` ... ```), bracket-depth balancing
+// with string-state awareness, and single-object-to-slice auto-wrapping.
 func ParseJSONResponse(response string, target interface{}) error {
-	start := -1
-	end := -1
+	src := stripCodeFence(response)
 
-	for i, c := range response {
-		if c == '{' && start == -1 {
+	start := -1
+	var opener byte
+	for i := 0; i < len(src); i++ {
+		if src[i] == '{' || src[i] == '[' {
 			start = i
-		}
-		if c == '}' {
-			end = i
-		}
-		if c == '[' && start == -1 {
-			start = i
-		}
-		if c == ']' {
-			end = i
+			opener = src[i]
+			break
 		}
 	}
-
-	if start == -1 || end == -1 {
+	if start == -1 {
 		return errors.New("llm: no JSON found in response")
 	}
 
-	jsonStr := response[start : end+1]
-	return json.Unmarshal([]byte(jsonStr), target)
+	closer := byte('}')
+	if opener == '[' {
+		closer = ']'
+	}
+
+	depth := 0
+	inString := false
+	end := -1
+	for i := start; i < len(src); i++ {
+		c := src[i]
+		if inString {
+			if c == '\\' {
+				i++ // skip escaped character
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' {
+			inString = true
+			continue
+		}
+		if c == opener {
+			depth++
+		} else if c == closer {
+			depth--
+			if depth == 0 {
+				end = i
+				break
+			}
+		}
+	}
+
+	if end == -1 {
+		return errors.New("llm: unterminated JSON")
+	}
+
+	candidate := src[start : end+1]
+	err := json.Unmarshal([]byte(candidate), target)
+	if err == nil {
+		return nil
+	}
+
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && typeErr.Value == "object" && opener == '{' {
+		t := reflect.TypeOf(target)
+		if t != nil && t.Kind() == reflect.Ptr && t.Elem().Kind() == reflect.Slice {
+			if err2 := json.Unmarshal([]byte("["+candidate+"]"), target); err2 == nil {
+				return nil
+			}
+		}
+	}
+
+	return err
+}
+
+// stripCodeFence extracts content from the first markdown code fence if present.
+// If no fence is found the input is returned unchanged.
+func stripCodeFence(s string) string {
+	open := strings.Index(s, "```")
+	if open == -1 {
+		return s
+	}
+	// skip past the opening ``` and optional language identifier + newline
+	after := open + 3
+	if nl := strings.Index(s[after:], "\n"); nl != -1 {
+		after += nl + 1
+	}
+	close := strings.Index(s[after:], "```")
+	if close == -1 {
+		return s
+	}
+	return s[after : after+close]
 }
