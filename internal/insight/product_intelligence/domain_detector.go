@@ -136,7 +136,7 @@ Only respond with the JSON object, no additional text.`,
 	resp, err := d.llm.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt:   "You are an expert software architect. Analyze codebases and identify their domain with high accuracy. Always respond with valid JSON.",
 		Messages:       []llm.Message{llm.UserMessage(prompt)},
-		MaxTokens:      8192,
+		MaxTokens:      100000,
 		Temperature:    0.3,
 		ResponseFormat: "json",
 	})

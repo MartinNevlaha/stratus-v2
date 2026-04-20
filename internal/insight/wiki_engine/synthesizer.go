@@ -64,7 +64,7 @@ func (s *Synthesizer) SynthesizeAnswer(ctx context.Context, query string, maxSou
 	resp, err := s.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt: systemPrompt,
 		Messages:     []llm.Message{{Role: "user", Content: userMessage}},
-		MaxTokens:    8192,
+		MaxTokens:    100000,
 		Temperature:  0.3,
 	})
 	if err != nil {
@@ -92,7 +92,7 @@ func (s *Synthesizer) GeneratePageContent(ctx context.Context, title string, sou
 	resp, err := s.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt: systemPrompt,
 		Messages:     []llm.Message{{Role: "user", Content: userMessage}},
-		MaxTokens:    8192,
+		MaxTokens:    100000,
 		Temperature:  0.4,
 	})
 	if err != nil {

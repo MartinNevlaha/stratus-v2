@@ -33,12 +33,25 @@ and project context, respond with STRICT JSON on a single line, matching this sc
 "novelty"    = how non-obvious this idea is given the current project state.
 Respond with ONLY the JSON object. No prose, no code fences.`
 
+// CallOption configures an LLM Complete call.
+type CallOption struct {
+	responseFormat string
+}
+
+// WithResponseFormat sets the response format hint for the provider.
+func WithResponseFormat(format string) CallOption {
+	return CallOption{responseFormat: format}
+}
+
+// ResponseFormat returns the configured response format, or "" if unset.
+func (o CallOption) ResponseFormat() string { return o.responseFormat }
+
 // LLMClient is the minimal interface consumed by the judge.
 // Implementations must forward maxTokens as the hard token limit to the model.
 type LLMClient interface {
 	// Complete sends system + user prompts and returns the raw text response,
 	// the actual tokens consumed, and any transport/API error.
-	Complete(ctx context.Context, system, user string, maxTokens int) (text string, tokensUsed int, err error)
+	Complete(ctx context.Context, system, user string, maxTokens int, opts ...CallOption) (text string, tokensUsed int, err error)
 }
 
 // LLMJudge scores a single Hypothesis against a baseline Bundle using an LLM.
@@ -67,7 +80,7 @@ func (j *llmJudge) Score(ctx context.Context, h Hypothesis, b baseline.Bundle, p
 	system := judgeSystemPrompt
 	user := buildUserPrompt(h, b)
 
-	text, tokensUsed, err := j.client.Complete(ctx, system, user, perCallCap)
+	text, tokensUsed, err := j.client.Complete(ctx, system, user, perCallCap, WithResponseFormat("json"))
 	if err != nil {
 		return LLMScores{}, 0, fmt.Errorf("llm_judge: complete: %w", err)
 	}

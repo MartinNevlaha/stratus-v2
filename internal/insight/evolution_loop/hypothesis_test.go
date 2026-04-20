@@ -219,3 +219,37 @@ func TestSeedsFor_SKAndENHaveSameIDs(t *testing.T) {
 		}
 	}
 }
+
+// TestHypothesisGenerator_generateWithLLM_UsesJSONResponseFormat verifies that
+// generateWithLLM (called via GenerateWithLang) sets ResponseFormat="json" on the
+// CompletionRequest it sends to the LLM client.
+func TestHypothesisGenerator_generateWithLLM_UsesJSONResponseFormat(t *testing.T) {
+	const jsonResp = `[{"category":"prompt_tuning","description":"x","baseline_value":"a","proposed_value":"b","metric":"m","baseline_metric":0.5,"rationale":"r"}]`
+
+	var capturedReq llm.CompletionRequest
+	callCount := 0
+	mock := &mockLLMClient{
+		completeFn: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			callCount++
+			capturedReq = req
+			return &llm.CompletionResponse{Content: jsonResp}, nil
+		},
+	}
+	store := newMockStore()
+	gen := evolution_loop.NewHypothesisGenerator(store, mock)
+
+	hypotheses, err := gen.GenerateWithLang(context.Background(), "run-id", []string{"prompt_tuning"}, 5, "en")
+	if err != nil {
+		t.Fatalf("GenerateWithLang: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Fatalf("expected exactly 1 LLM call, got %d", callCount)
+	}
+	if capturedReq.ResponseFormat != "json" {
+		t.Errorf("ResponseFormat = %q, want %q", capturedReq.ResponseFormat, "json")
+	}
+	if len(hypotheses) != 1 {
+		t.Errorf("expected 1 hypothesis (LLM path), got %d", len(hypotheses))
+	}
+}

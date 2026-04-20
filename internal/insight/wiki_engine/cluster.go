@@ -170,7 +170,7 @@ func (c *ClusterSynthesizer) synthesize(
 	resp, err := c.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt: prompts.Compose(prompts.WikiTopicSynthesis, prompts.ObsidianMarkdown),
 		Messages:     []llm.Message{{Role: "user", Content: user}},
-		MaxTokens:    8192,
+		MaxTokens:    100000,
 		Temperature:  0.4,
 	})
 	if err != nil {

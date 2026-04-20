@@ -77,7 +77,7 @@ func (a *Analyzer) AnalyzeFile(ctx context.Context, file FileScore, governanceRu
 	resp, err := a.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt:   systemPrompt,
 		Messages:       []llm.Message{{Role: "user", Content: userPrompt}},
-		MaxTokens:      8192,
+		MaxTokens:      100000,
 		Temperature:    0.2,
 		ResponseFormat: "json",
 	})

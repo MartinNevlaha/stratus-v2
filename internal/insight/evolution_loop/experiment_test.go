@@ -3,6 +3,7 @@ package evolution_loop_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -165,5 +166,66 @@ func TestExecute_LegacyCategories_UsesFallbackMetric(t *testing.T) {
 		if hardcoded[result.Metric] {
 			t.Errorf("[%s] metric %f matches a removed hard-coded baseline value — category was not cleaned up", cat, result.Metric)
 		}
+	}
+}
+
+// TestExperimentRunner_EvaluatorCallUsesJSONResponseFormatOnly verifies that the
+// three LLM calls in executePromptTuningWithLang set ResponseFormat correctly:
+// baseline (call 1) and proposed (call 2) must be plaintext (""), while the
+// evaluator (call 3) must use ResponseFormat="json".
+func TestExperimentRunner_EvaluatorCallUsesJSONResponseFormatOnly(t *testing.T) {
+	var mu sync.Mutex
+	var captured []llm.CompletionRequest
+
+	mock := &mockLLMClient{
+		completeFn: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+			mu.Lock()
+			captured = append(captured, req)
+			n := len(captured)
+			mu.Unlock()
+
+			switch n {
+			case 1:
+				return &llm.CompletionResponse{Content: "baseline output"}, nil
+			case 2:
+				return &llm.CompletionResponse{Content: "proposed output"}, nil
+			case 3:
+				return &llm.CompletionResponse{Content: `{"baseline_score":0.4,"proposed_score":0.8,"reasoning":"x"}`}, nil
+			}
+			return nil, errors.New("unexpected call")
+		},
+	}
+
+	runner := evolution_loop.NewExperimentRunner(mock)
+	hypothesis := &db.EvolutionHypothesis{
+		Category:      "prompt_tuning",
+		BaselineValue: "standard",
+		ProposedValue: "cot",
+	}
+
+	result := runner.ExecuteWithLang(context.Background(), hypothesis, "en")
+	if result.Error != nil {
+		t.Fatalf("ExecuteWithLang: %v", result.Error)
+	}
+
+	mu.Lock()
+	reqs := make([]llm.CompletionRequest, len(captured))
+	copy(reqs, captured)
+	mu.Unlock()
+
+	if len(reqs) != 3 {
+		t.Fatalf("expected 3 LLM calls, got %d", len(reqs))
+	}
+	if reqs[0].ResponseFormat != "" {
+		t.Errorf("call 1 (baseline): ResponseFormat = %q, want %q", reqs[0].ResponseFormat, "")
+	}
+	if reqs[1].ResponseFormat != "" {
+		t.Errorf("call 2 (proposed): ResponseFormat = %q, want %q", reqs[1].ResponseFormat, "")
+	}
+	if reqs[2].ResponseFormat != "json" {
+		t.Errorf("call 3 (evaluator): ResponseFormat = %q, want %q", reqs[2].ResponseFormat, "json")
+	}
+	if result.Metric != 0.8 {
+		t.Errorf("metric = %f, want 0.8 (evaluator was parsed, not fallback)", result.Metric)
 	}
 }

@@ -1,6 +1,7 @@
 package proposals
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/patterns"
@@ -23,6 +24,13 @@ const (
 	ProposalTypeAgentPromptUpdate     ProposalType = "agent.improve_prompt"
 	ProposalTypeAgentDeprecate        ProposalType = "agent.deprecate"
 	ProposalTypeAgentPromote          ProposalType = "agent.promote"
+
+	// ProposalTypeGovernanceRemediation is attached to a Guardian
+	// governance_violation alert and proposes a human-reviewable fix for
+	// the flagged file. Proposals of this type are event-driven (not
+	// pattern-derived) — SourcePatternID uses the synthetic form
+	// "guardian-alert:<alert_id>" to link back to the originating alert.
+	ProposalTypeGovernanceRemediation ProposalType = "governance.remediation"
 )
 
 type ProposalStatus string
@@ -136,5 +144,59 @@ func NewProposal(proposalType ProposalType, title, description string, pattern p
 		Recommendation:  recommendation,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+	}
+}
+
+// NewGovernanceRemediationProposal builds a proposal paired to a Guardian
+// governance_violation alert. Unlike NewProposal, it is not pattern-derived
+// — confidence and risk come from the alert's own metadata rather than a
+// pattern's frequency signal.
+//
+// alertID is the DB row ID of the Guardian alert; file is the file path that
+// was flagged; rules is a human-readable description of the matching rules
+// (either rule titles or an LLM-produced one-line reason).
+func NewGovernanceRemediationProposal(alertID int64, file, rules, severity string) Proposal {
+	now := time.Now().UTC()
+
+	// Severity comes from the Guardian alert (info|warning|critical). The
+	// mapping to risk is conservative: only a "critical" alert produces a
+	// high-risk proposal; the default is medium because governance hits
+	// warrant at least a human review.
+	risk := RiskMedium
+	confidence := 0.60
+	switch severity {
+	case "critical":
+		risk = RiskHigh
+		confidence = 0.75
+	case "info":
+		risk = RiskLow
+		confidence = 0.50
+	}
+
+	title := fmt.Sprintf("Review governance violation in %s", file)
+	if file == "" {
+		title = "Review governance violation"
+	}
+
+	return Proposal{
+		ID:              generateProposalID(),
+		Type:            ProposalTypeGovernanceRemediation,
+		Status:          ProposalStatusDetected,
+		Title:           title,
+		Description:     rules,
+		Confidence:      confidence,
+		RiskLevel:       risk,
+		SourcePatternID: fmt.Sprintf("guardian-alert:%d", alertID),
+		Evidence: map[string]any{
+			"alert_id": alertID,
+			"file":     file,
+			"rules":    rules,
+		},
+		Recommendation: map[string]any{
+			"action": "review_and_fix",
+			"file":   file,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 }

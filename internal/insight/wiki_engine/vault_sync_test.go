@@ -61,6 +61,52 @@ func vaultConceptPage(id, title string) *db.WikiPage {
 }
 
 // ---------------------------------------------------------------------------
+// TestDeletePage — removes the .md file; missing file is a no-op
+// ---------------------------------------------------------------------------
+
+func TestDeletePage_RemovesFile(t *testing.T) {
+	vaultDir := t.TempDir()
+	store := newMockStore()
+	vs := wiki_engine.NewVaultSync(store, vaultDir)
+
+	page := vaultSummaryPage("del-1", "Will Be Deleted")
+	if err := vs.SyncPage(page, nil, nil); err != nil {
+		t.Fatalf("SyncPage: %v", err)
+	}
+	path := filepath.Join(vaultDir, "summaries", "will-be-deleted.md")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("precondition: file should exist: %v", err)
+	}
+
+	if err := vs.DeletePage(page); err != nil {
+		t.Fatalf("DeletePage: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file should be gone, got err=%v", err)
+	}
+}
+
+func TestDeletePage_MissingFile_NoOp(t *testing.T) {
+	vaultDir := t.TempDir()
+	store := newMockStore()
+	vs := wiki_engine.NewVaultSync(store, vaultDir)
+
+	page := vaultSummaryPage("never-written", "Ghost Page")
+	if err := vs.DeletePage(page); err != nil {
+		t.Errorf("DeletePage on missing file should be a no-op, got: %v", err)
+	}
+}
+
+func TestDeletePage_NoVaultPath_NoOp(t *testing.T) {
+	store := newMockStore()
+	vs := wiki_engine.NewVaultSync(store, "")
+
+	if err := vs.DeletePage(vaultSummaryPage("any", "Any Page")); err != nil {
+		t.Errorf("DeletePage with empty vaultPath should be a no-op, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestSyncPage_WritesFile — sync single page, verify file exists with correct content
 // ---------------------------------------------------------------------------
 

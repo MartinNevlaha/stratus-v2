@@ -2,6 +2,8 @@ package agent_evolution
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 )
@@ -43,22 +45,22 @@ func (s *DBStore) SaveCandidate(ctx context.Context, c *CandidateAgent) error {
 
 func (s *DBStore) GetCandidateByID(ctx context.Context, id string) (*CandidateAgent, error) {
 	dbCandidate, err := s.db.GetAgentCandidateByID(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
-	}
-	if dbCandidate == nil {
-		return nil, nil
 	}
 	return dbCandidateToModel(dbCandidate), nil
 }
 
 func (s *DBStore) GetCandidateByName(ctx context.Context, agentName string) (*CandidateAgent, error) {
 	dbCandidate, err := s.db.GetAgentCandidateByName(agentName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
-	}
-	if dbCandidate == nil {
-		return nil, nil
 	}
 	return dbCandidateToModel(dbCandidate), nil
 }
@@ -94,22 +96,22 @@ func (s *DBStore) SaveExperiment(ctx context.Context, e *AgentExperiment) error 
 
 func (s *DBStore) GetExperimentByID(ctx context.Context, id string) (*AgentExperiment, error) {
 	dbExperiment, err := s.db.GetAgentExperimentByID(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
-	}
-	if dbExperiment == nil {
-		return nil, nil
 	}
 	return dbExperimentToModel(dbExperiment), nil
 }
 
 func (s *DBStore) GetExperimentByCandidateID(ctx context.Context, candidateID string) (*AgentExperiment, error) {
 	dbExperiment, err := s.db.GetAgentExperimentByCandidateID(candidateID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
-	}
-	if dbExperiment == nil {
-		return nil, nil
 	}
 	return dbExperimentToModel(dbExperiment), nil
 }

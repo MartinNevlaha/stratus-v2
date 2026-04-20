@@ -57,6 +57,7 @@ func (f *fakeStore) GetGraph(pt string, l int) ([]db.WikiPage, []db.WikiLink, er
 func (f *fakeStore) SaveRef(r *db.WikiPageRef) error    { f.refs = append(f.refs, *r); return nil }
 func (f *fakeStore) ListRefs(id string) ([]db.WikiPageRef, error) { return nil, nil }
 func (f *fakeStore) DeleteRefs(id string) error                    { return nil }
+func (f *fakeStore) FindWikiPageByTitleNewest(_ string) (*db.WikiPage, error) { return nil, nil }
 
 type fakeLLM struct{ body string }
 

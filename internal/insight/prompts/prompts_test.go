@@ -119,6 +119,37 @@ func TestWithLanguage_EnglishDefault(t *testing.T) {
 	}
 }
 
+func TestWikiLinkSuggestion_PromptContent(t *testing.T) {
+	if WikiLinkSuggestion == "" {
+		t.Fatal("WikiLinkSuggestion must not be empty")
+	}
+	mustContain := []string{
+		`"links"`,
+		"link_type",
+		"to_title",
+		"strength",
+		"rationale",
+		`"parent"`,
+		`"child"`,
+		`"cites"`,
+		`"related"`,
+	}
+	for _, substr := range mustContain {
+		if !strings.Contains(WikiLinkSuggestion, substr) {
+			t.Errorf("WikiLinkSuggestion must contain %q", substr)
+		}
+	}
+	mustNotContain := []string{
+		"contradicts",
+		"supersedes",
+	}
+	for _, substr := range mustNotContain {
+		if strings.Contains(WikiLinkSuggestion, substr) {
+			t.Errorf("WikiLinkSuggestion must NOT contain %q (LLM side only uses 4 types)", substr)
+		}
+	}
+}
+
 func TestWithLanguage_DoesNotMutateBase(t *testing.T) {
 	base := HypothesisGeneration
 	_ = WithLanguage(base, "sk")

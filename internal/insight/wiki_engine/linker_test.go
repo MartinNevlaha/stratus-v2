@@ -40,6 +40,9 @@ func (s *linkerErrStore) GetGraph(pageType string, limit int) ([]db.WikiPage, []
 func (s *linkerErrStore) SaveRef(r *db.WikiPageRef) error { panic("not called") }
 func (s *linkerErrStore) ListRefs(pageID string) ([]db.WikiPageRef, error) { panic("not called") }
 func (s *linkerErrStore) DeleteRefs(pageID string) error                    { panic("not called") }
+func (s *linkerErrStore) FindWikiPageByTitleNewest(_ string) (*db.WikiPage, error) {
+	panic("not called")
+}
 
 // --- helpers ---
 

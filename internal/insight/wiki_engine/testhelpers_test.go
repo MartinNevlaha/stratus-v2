@@ -3,6 +3,7 @@ package wiki_engine_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -273,4 +274,17 @@ func (s *mockStore) DeleteRefs(pageID string) error {
 		delete(s.refs, pageID)
 	}
 	return nil
+}
+
+func (s *mockStore) FindWikiPageByTitleNewest(title string) (*db.WikiPage, error) {
+	var best *db.WikiPage
+	for _, p := range s.pages {
+		if strings.EqualFold(p.Title, title) {
+			if best == nil || p.UpdatedAt > best.UpdatedAt {
+				clone := *p
+				best = &clone
+			}
+		}
+	}
+	return best, nil
 }

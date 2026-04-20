@@ -52,7 +52,7 @@ func (s *LinkSuggester) Suggest(ctx context.Context, page *db.WikiPage) ([]StubS
 	resp, err := s.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt:   prompts.WikiLinkSuggestion,
 		Messages:       []llm.Message{{Role: "user", Content: user}},
-		MaxTokens:      8192,
+		MaxTokens:      100000,
 		Temperature:    0.2,
 		ResponseFormat: "json",
 	})

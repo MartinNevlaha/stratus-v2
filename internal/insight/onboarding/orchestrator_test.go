@@ -105,6 +105,9 @@ func (m *mockStore) SaveRef(r *db.WikiPageRef) error {
 
 func (m *mockStore) ListRefs(pageID string) ([]db.WikiPageRef, error) { return nil, nil }
 func (m *mockStore) DeleteRefs(pageID string) error                   { return nil }
+func (m *mockStore) FindWikiPageByTitleNewest(_ string) (*db.WikiPage, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 

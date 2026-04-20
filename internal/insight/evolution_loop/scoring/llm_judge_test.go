@@ -18,14 +18,16 @@ type mockLLMClient struct {
 	LastMaxTokens int
 	LastSystem    string
 	LastUser      string
+	LastOpts      []CallOption
 	// ctxErr captures any error observed on the context when Complete is called.
 	ctxErr error
 }
 
-func (m *mockLLMClient) Complete(ctx context.Context, system, user string, maxTokens int) (string, int, error) {
+func (m *mockLLMClient) Complete(ctx context.Context, system, user string, maxTokens int, opts ...CallOption) (string, int, error) {
 	m.LastSystem = system
 	m.LastUser = user
 	m.LastMaxTokens = maxTokens
+	m.LastOpts = opts
 	m.ctxErr = ctx.Err()
 	return m.NextResponse, m.NextTokens, m.NextErr
 }
@@ -295,5 +297,36 @@ func TestLLMJudge_NegativeTokenCap_ReturnsErrInvalidTokenCap(t *testing.T) {
 	_, _, err := judge.Score(context.Background(), minimalHypothesis(), minimalBundle(), -5)
 	if !errors.Is(err, ErrInvalidTokenCap) {
 		t.Fatalf("expected ErrInvalidTokenCap for negative cap, got: %v", err)
+	}
+}
+
+// 13. Score passes WithResponseFormat("json") to the client.
+func TestLLMJudge_Score_PassesResponseFormatJSON(t *testing.T) {
+	client := &mockLLMClient{
+		NextResponse: `{"impact":0.5,"effort":0.3,"confidence":0.7,"novelty":0.4}`,
+		NextTokens:   100,
+	}
+	judge := NewLLMJudge(client)
+	_, _, err := judge.Score(context.Background(), Hypothesis{
+		Category:   "test_gap",
+		Title:      "test hypothesis",
+		Rationale:  "test rationale",
+	}, baseline.Bundle{}, 500)
+	if err != nil {
+		t.Fatalf("Score: %v", err)
+	}
+
+	if len(client.LastOpts) == 0 {
+		t.Fatal("expected CallOption to be passed")
+	}
+	found := false
+	for _, o := range client.LastOpts {
+		if o.ResponseFormat() == "json" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected WithResponseFormat(\"json\") option, not found")
 	}
 }

@@ -21,6 +21,10 @@ type WikiStore interface {
 	SaveRef(r *db.WikiPageRef) error
 	ListRefs(pageID string) ([]db.WikiPageRef, error)
 	DeleteRefs(pageID string) error
+
+	// FindWikiPageByTitleNewest returns the most recently updated page whose
+	// title matches (case-insensitive). Returns (nil, nil) if not found.
+	FindWikiPageByTitleNewest(title string) (*db.WikiPage, error)
 }
 
 // DBWikiStore delegates to *db.DB.
@@ -97,4 +101,8 @@ func (s *DBWikiStore) ListRefs(pageID string) ([]db.WikiPageRef, error) {
 
 func (s *DBWikiStore) DeleteRefs(pageID string) error {
 	return s.db.DeleteWikiPageRefs(pageID)
+}
+
+func (s *DBWikiStore) FindWikiPageByTitleNewest(title string) (*db.WikiPage, error) {
+	return s.db.FindWikiPageByTitleNewest(title)
 }

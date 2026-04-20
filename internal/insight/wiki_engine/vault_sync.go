@@ -119,6 +119,21 @@ func (v *VaultSync) SyncPage(page *db.WikiPage, refs []db.WikiPageRef, linkedPag
 	return nil
 }
 
+// DeletePage removes the Obsidian .md file for the given page. Missing files
+// are treated as success (no-op) so deletion is idempotent. Other I/O errors
+// propagate so callers can decide whether to surface them.
+func (v *VaultSync) DeletePage(page *db.WikiPage) error {
+	if v.vaultPath == "" || page == nil {
+		return nil
+	}
+	relPath := PageToVaultPath(page)
+	absPath := filepath.Join(v.vaultPath, relPath)
+	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("vault sync: delete %s: %w", absPath, err)
+	}
+	return nil
+}
+
 // GetStatus returns the current vault sync status without triggering a sync.
 // It counts all .md files currently present in the vault directory.
 func (v *VaultSync) GetStatus() (*VaultStatus, error) {

@@ -178,7 +178,7 @@ Generate up to %d hypotheses as a JSON array:
 	resp, err := g.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt:  prompts.WithLanguage(prompts.HypothesisGeneration, lang),
 		Messages:      []llm.Message{{Role: "user", Content: userPrompt}},
-		MaxTokens:     8192,
+		MaxTokens:     100000,
 		Temperature:   0.7,
 		ResponseFormat: "json",
 	})

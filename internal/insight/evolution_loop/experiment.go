@@ -133,7 +133,7 @@ func (r *ExperimentRunner) executePromptTuningWithLang(ctx context.Context, hypo
 	baselineResp, err := r.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt: fmt.Sprintf("You are a software development assistant. Style: %s", hypothesis.BaselineValue),
 		Messages:     []llm.Message{{Role: "user", Content: testScenario}},
-		MaxTokens:    8192,
+		MaxTokens:    100000,
 		Temperature:  0.3,
 	})
 	if err != nil {
@@ -144,7 +144,7 @@ func (r *ExperimentRunner) executePromptTuningWithLang(ctx context.Context, hypo
 	proposedResp, err := r.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt: fmt.Sprintf("You are a software development assistant. Style: %s", hypothesis.ProposedValue),
 		Messages:     []llm.Message{{Role: "user", Content: testScenario}},
-		MaxTokens:    8192,
+		MaxTokens:    100000,
 		Temperature:  0.3,
 	})
 	if err != nil {
@@ -167,7 +167,7 @@ Return a JSON object: {"baseline_score": 0.0-1.0, "proposed_score": 0.0-1.0, "re
 	evalResp, err := r.llmClient.Complete(ctx, llm.CompletionRequest{
 		SystemPrompt:  prompts.WithLanguage(prompts.ExperimentEvaluation, lang),
 		Messages:      []llm.Message{{Role: "user", Content: evalPrompt}},
-		MaxTokens:     8192,
+		MaxTokens:     100000,
 		Temperature:   0.2,
 		ResponseFormat: "json",
 	})

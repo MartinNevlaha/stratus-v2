@@ -281,7 +281,7 @@ func generatePage(ctx context.Context, client wiki_engine.LLMClient, spec pageSp
 		Messages: []llm.Message{
 			{Role: "user", Content: spec.sourceData},
 		},
-		MaxTokens:   8192,
+		MaxTokens:   100000,
 		Temperature: 0.4,
 	}
 

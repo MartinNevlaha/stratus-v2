@@ -142,7 +142,7 @@ func TestRunCycle_ReturnsErrWhenMaxTokensZero(t *testing.T) {
 		evolution_loop.WithProposalWriter(writer),
 	)
 
-	_, err := loop.RunCycle(context.Background())
+	_, _, err := loop.RunCycle(context.Background())
 	if err == nil {
 		t.Fatal("expected error when MaxTokensPerCycle == 0")
 	}
@@ -164,7 +164,7 @@ func TestRunCycle_ReturnsErrWhenNoProposalWriter(t *testing.T) {
 		// no WithProposalWriter
 	)
 
-	_, err := loop.RunCycle(context.Background())
+	_, _, err := loop.RunCycle(context.Background())
 	if err == nil {
 		t.Fatal("expected error when proposalWriter is nil")
 	}
@@ -189,7 +189,7 @@ func TestRunCycle_WritesProposalsForEachHypothesis(t *testing.T) {
 		evolution_loop.WithProjectRoot("."),
 	)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestRunCycle_PartialScoringWhenJudgeErrors(t *testing.T) {
 		evolution_loop.WithProjectRoot("."),
 	)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestRunCycle_TokenCapAbortsJudge(t *testing.T) {
 		evolution_loop.WithProjectRoot("."),
 	)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestRunCycle_NoApplyFn(t *testing.T) {
 		}),
 	)
 
-	_, err := loop.RunCycle(context.Background())
+	_, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestRunCycle_CategoryBreakdown(t *testing.T) {
 		evolution_loop.WithProjectRoot("."),
 	)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestRunCycle_WriterErrorContinues(t *testing.T) {
 		evolution_loop.WithProjectRoot("."),
 	)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("RunCycle should not return error on write failures, got: %v", err)
 	}

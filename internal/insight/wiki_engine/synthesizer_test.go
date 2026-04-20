@@ -16,11 +16,13 @@ import (
 // ---------------------------------------------------------------------------
 
 type synthLLM struct {
-	response *llm.CompletionResponse
-	err      error
+	response  *llm.CompletionResponse
+	err       error
+	completeCalls int
 }
 
 func (m *synthLLM) Complete(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
+	m.completeCalls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -185,7 +187,6 @@ func TestSynthesizeAnswer_LLMError(t *testing.T) {
 }
 
 func TestSynthesizeAnswer_NoResults(t *testing.T) {
-	// Empty search results — LLM should still be called.
 	store := newMockStore()
 	store.searchResult = []db.WikiPage{}
 
@@ -202,7 +203,37 @@ func TestSynthesizeAnswer_NoResults(t *testing.T) {
 		t.Error("expected non-empty answer even with no source pages")
 	}
 	if len(result.Citations) != 0 {
-		t.Errorf("expected 0 citations for citation-free answer, got %d", len(result.Citations))
+		t.Errorf("expected 0 citations, got %d", len(result.Citations))
+	}
+	if result.TokensUsed != 0 {
+		t.Errorf("expected 0 tokens for early return, got %d", result.TokensUsed)
+	}
+}
+
+func TestSynthesizeAnswer_NoResults_NoLLMCall(t *testing.T) {
+	store := newMockStore()
+	store.searchResult = []db.WikiPage{}
+
+	lm := &synthLLM{
+		response: llmResponse("should not be called", 0, 0),
+	}
+	s := wiki_engine.NewSynthesizer(store, lm)
+
+	result, err := s.SynthesizeAnswer(context.Background(), "nonexistent topic", 10, false)
+	if err != nil {
+		t.Fatalf("SynthesizeAnswer: %v", err)
+	}
+	if lm.completeCalls != 0 {
+		t.Errorf("expected 0 LLM calls, got %d", lm.completeCalls)
+	}
+	if result.TokensUsed != 0 {
+		t.Errorf("expected 0 tokens, got %d", result.TokensUsed)
+	}
+	if result.WikiPageID != nil {
+		t.Error("expected nil WikiPageID for no-result query")
+	}
+	if !strings.Contains(result.Answer, "No relevant wiki pages") {
+		t.Errorf("expected 'No relevant wiki pages' in answer, got: %q", result.Answer)
 	}
 }
 

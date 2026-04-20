@@ -244,7 +244,7 @@ func TestIntegration_FullCycle_WritesProposalsAndWikiPage(t *testing.T) {
 
 	loop := buildIntegrationLoop(t, database, cfg, bldr, judge)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("RunCycle: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestIntegration_SecondCycle_IsIdempotent(t *testing.T) {
 	loop := buildIntegrationLoop(t, database, cfg, bldr, judge)
 
 	// First cycle.
-	res1, err := loop.RunCycle(context.Background())
+	res1, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("first RunCycle: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestIntegration_SecondCycle_IsIdempotent(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Second cycle — same bundle, same config.
-	res2, err := loop.RunCycle(context.Background())
+	res2, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("second RunCycle: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestIntegration_TokenCap_ProducesPartialScoring(t *testing.T) {
 
 	loop := buildIntegrationLoop(t, database, cfg, bldr, judge)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("RunCycle: %v", err)
 	}
@@ -450,7 +450,7 @@ func TestIntegration_CategoryBreakdown_MatchesWrittenRows(t *testing.T) {
 
 	loop := buildIntegrationLoop(t, database, cfg, bldr, judge)
 
-	result, err := loop.RunCycle(context.Background())
+	result, _, err := loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("RunCycle: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestIntegration_LegacyRowsCoexist(t *testing.T) {
 	}
 
 	loop := buildIntegrationLoop(t, database, cfg, bldr, nil)
-	_, err = loop.RunCycle(context.Background())
+	_, _, err = loop.RunCycle(context.Background())
 	if err != nil {
 		t.Fatalf("RunCycle: %v", err)
 	}
