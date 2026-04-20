@@ -107,6 +107,59 @@ func TestOllamaClient_Complete_ResponseFormatJSON_IncludesFormatInBody(t *testin
 	}
 }
 
+func TestOllamaClient_Complete_ResponseFormatJSON_DisablesThinking(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		newOllamaSuccessHandler(`{}`, "gemma4:e4b", 1, 1)(w, r)
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "ollama", Model: "gemma4:e4b", BaseURL: srv.URL}
+	client, _ := NewOllamaClient(cfg)
+
+	_, err := client.Complete(context.Background(), CompletionRequest{
+		Messages:       []Message{{Role: "user", Content: "give json"}},
+		ResponseFormat: "json",
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	think, ok := gotBody["think"]
+	if !ok {
+		t.Fatal("request body must contain think:false when ResponseFormat is json (avoid thinking tokens truncating JSON)")
+	}
+	if think != false {
+		t.Errorf("think = %v, want false", think)
+	}
+}
+
+func TestOllamaClient_Complete_ResponseFormatEmpty_OmitsThinkAndFormat(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		newOllamaSuccessHandler("ok", "gemma4:e4b", 1, 1)(w, r)
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "ollama", Model: "gemma4:e4b", BaseURL: srv.URL}
+	client, _ := NewOllamaClient(cfg)
+
+	_, err := client.Complete(context.Background(), CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if _, ok := gotBody["think"]; ok {
+		t.Errorf("request body must not contain think when ResponseFormat is empty; got %v", gotBody["think"])
+	}
+}
+
 func TestOllamaClient_Complete_ResponseFormatEmpty_OmitsFormat(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

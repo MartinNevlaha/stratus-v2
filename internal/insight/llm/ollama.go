@@ -53,6 +53,10 @@ type ollamaRequest struct {
 	Stream   bool            `json:"stream"`
 	Format   string          `json:"format,omitempty"`
 	Options  *ollamaOptions  `json:"options,omitempty"`
+	// Think disables reasoning traces for thinking models (e.g. gemma4). When a
+	// caller asks for JSON, thinking tokens compete with output tokens against
+	// num_predict and truncate the JSON. Sent only when we need to force it off.
+	Think *bool `json:"think,omitempty"`
 }
 
 type ollamaResponse struct {
@@ -109,6 +113,8 @@ func (c *OllamaClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 
 	if req.ResponseFormat == "json" {
 		body.Format = "json"
+		off := false
+		body.Think = &off
 	}
 
 	jsonBody, err := json.Marshal(body)
