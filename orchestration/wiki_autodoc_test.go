@@ -33,6 +33,23 @@ func (s *stubAutodocStore) UpsertWikiPageByWorkflow(ctx context.Context, workflo
 	return &out, nil
 }
 
+// --- stub enricher ---
+
+type stubEnricher struct {
+	called     bool
+	receivedW  *WorkflowState
+	receivedIn string
+	returnOut  string
+	returnErr  error
+}
+
+func (e *stubEnricher) Enrich(ctx context.Context, w *WorkflowState, base string) (string, error) {
+	e.called = true
+	e.receivedW = w
+	e.receivedIn = base
+	return e.returnOut, e.returnErr
+}
+
 // --- helpers ---
 
 func workflowWithTasks(id, title string) *WorkflowState {
@@ -61,7 +78,7 @@ func TestAutodocWorkflow_ProducesExpectedPageFields(t *testing.T) {
 	store := &stubAutodocStore{}
 	w := workflowWithTasks("spec-my-cool-feature", "My Cool Feature")
 
-	err := AutodocWorkflow(context.Background(), store, w)
+	err := AutodocWorkflow(context.Background(), store, nil, w)
 	if err != nil {
 		t.Fatalf("AutodocWorkflow: unexpected error: %v", err)
 	}
@@ -146,7 +163,7 @@ func TestAutodocWorkflow_SlugFromBugWorkflow(t *testing.T) {
 	w := workflowWithTasks("bug-nil-pointer-crash", "Nil Pointer Crash Fix")
 	w.Type = WorkflowBug
 
-	if err := AutodocWorkflow(context.Background(), store, w); err != nil {
+	if err := AutodocWorkflow(context.Background(), store, nil, w); err != nil {
 		t.Fatalf("AutodocWorkflow: %v", err)
 	}
 
@@ -159,7 +176,7 @@ func TestAutodocWorkflow_SlugNoPrefix(t *testing.T) {
 	store := &stubAutodocStore{}
 	w := workflowWithTasks("plain-workflow-id", "Plain Workflow")
 
-	if err := AutodocWorkflow(context.Background(), store, w); err != nil {
+	if err := AutodocWorkflow(context.Background(), store, nil, w); err != nil {
 		t.Fatalf("AutodocWorkflow: %v", err)
 	}
 
@@ -174,11 +191,125 @@ func TestAutodocWorkflow_StoreError_ReturnsError(t *testing.T) {
 	store := &stubAutodocStore{returnErr: storeErr}
 	w := workflowWithTasks("spec-feature", "Feature")
 
-	err := AutodocWorkflow(context.Background(), store, w)
+	err := AutodocWorkflow(context.Background(), store, nil, w)
 	if err == nil {
 		t.Fatal("expected error when store fails")
 	}
 	if !errors.Is(err, storeErr) {
 		t.Errorf("error should wrap store error; got %v", err)
+	}
+}
+
+// --- Enricher tests ---
+
+func TestAutodocWorkflow_EnricherEnriched(t *testing.T) {
+	store := &stubAutodocStore{}
+	enricher := &stubEnricher{returnOut: "## Enriched\n\nRich functional description."}
+	w := workflowWithTasks("spec-feature", "Feature")
+
+	if err := AutodocWorkflow(context.Background(), store, enricher, w); err != nil {
+		t.Fatalf("AutodocWorkflow: %v", err)
+	}
+
+	if !enricher.called {
+		t.Fatal("enricher must be called")
+	}
+	if enricher.receivedW != w {
+		t.Error("enricher should receive the same WorkflowState pointer")
+	}
+	if !strings.Contains(enricher.receivedIn, "## Overview") {
+		t.Error("enricher should receive base markdown including ## Overview")
+	}
+	if store.page == nil || !strings.Contains(store.page.Content, "Rich functional description") {
+		t.Errorf("persisted content should be enricher output; got %q", store.page.Content)
+	}
+}
+
+func TestAutodocWorkflow_EnricherError_FallsBackToBase(t *testing.T) {
+	store := &stubAutodocStore{}
+	enricher := &stubEnricher{returnErr: errors.New("llm timeout")}
+	w := workflowWithTasks("spec-feature", "Feature")
+
+	err := AutodocWorkflow(context.Background(), store, enricher, w)
+	if err != nil {
+		t.Fatalf("AutodocWorkflow: enricher error must not fail the call: %v", err)
+	}
+	if store.page == nil {
+		t.Fatal("page must still be persisted when enricher errors")
+	}
+	if !strings.Contains(store.page.Content, "## Overview") ||
+		!strings.Contains(store.page.Content, "Add handler") {
+		t.Error("content should fall back to base template on enricher error")
+	}
+}
+
+func TestAutodocWorkflow_EnricherEmptyString_FallsBackToBase(t *testing.T) {
+	store := &stubAutodocStore{}
+	enricher := &stubEnricher{returnOut: "   \n\t  "} // whitespace only
+	w := workflowWithTasks("spec-feature", "Feature")
+
+	if err := AutodocWorkflow(context.Background(), store, enricher, w); err != nil {
+		t.Fatalf("AutodocWorkflow: %v", err)
+	}
+	if store.page == nil || !strings.Contains(store.page.Content, "## Tasks") {
+		t.Error("empty enricher output must not overwrite base template")
+	}
+}
+
+// --- buildAutodocContent / ChangeSummary tests ---
+
+func TestBuildAutodocContent_WithChangeSummary(t *testing.T) {
+	w := workflowWithTasks("spec-feature", "Feature")
+	w.ChangeSummary = &ChangeSummary{
+		CapabilitiesAdded:    []string{"LLM enricher interface", "Richer wiki pages"},
+		CapabilitiesModified: []string{"AutodocWorkflow signature"},
+		CapabilitiesRemoved:  nil,
+		DownstreamRisks:      []string{"LLM may hallucinate file paths"},
+		TestCoverageDelta:    "+4.1%",
+		FilesChanged:         5,
+		LinesAdded:           180,
+		LinesRemoved:         12,
+	}
+
+	content := buildAutodocContent(w)
+
+	want := []string{
+		"## Change Summary",
+		"**Files changed:** 5 (+180 / -12)",
+		"**Test coverage delta:** +4.1%",
+		"### Capabilities added",
+		"LLM enricher interface",
+		"Richer wiki pages",
+		"### Capabilities modified",
+		"AutodocWorkflow signature",
+		"### Downstream risks",
+		"LLM may hallucinate file paths",
+	}
+	for _, w := range want {
+		if !strings.Contains(content, w) {
+			t.Errorf("content missing %q\n--- content ---\n%s", w, content)
+		}
+	}
+
+	// Empty CapabilitiesRemoved section must be omitted entirely.
+	if strings.Contains(content, "### Capabilities removed") {
+		t.Error("empty Capabilities Removed section should be skipped")
+	}
+}
+
+func TestBuildAutodocContent_NilChangeSummary(t *testing.T) {
+	w := workflowWithTasks("spec-feature", "Feature")
+	w.ChangeSummary = nil
+
+	content := buildAutodocContent(w)
+
+	if strings.Contains(content, "## Change Summary") {
+		t.Error("nil ChangeSummary must not render Change Summary heading")
+	}
+	// Other sections still present
+	for _, h := range []string{"## Overview", "## Tasks", "## Delegated Agents", "## Status"} {
+		if !strings.Contains(content, h) {
+			t.Errorf("content missing %q", h)
+		}
 	}
 }

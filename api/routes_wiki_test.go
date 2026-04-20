@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -174,6 +176,118 @@ func TestHandleGetWikiPage(t *testing.T) {
 			t.Errorf("expected 1 ref, got %d", len(refs))
 		}
 	})
+}
+
+func TestHandleDeleteWikiPage_Success(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	tmp := t.TempDir()
+	cfg := config.Default()
+	cfg.Wiki.VaultPath = tmp
+	server := &Server{db: database, cfg: &cfg, vaultSync: newVaultSyncForConfig(&cfg, database)}
+
+	page := newWikiPage("wiki-del-1", "summary", "Delete Me", "published", nil)
+	if err := database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wiki/pages/wiki-del-1", nil)
+	req.SetPathValue("id", "wiki-del-1")
+	w := httptest.NewRecorder()
+
+	server.handleDeleteWikiPage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// DB row must be gone.
+	got, err := database.GetWikiPage("wiki-del-1")
+	if err != nil {
+		t.Fatalf("GetWikiPage: %v", err)
+	}
+	if got != nil {
+		t.Error("page should be deleted from DB")
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["deleted"] != true {
+		t.Errorf("expected deleted=true; got %v", resp["deleted"])
+	}
+}
+
+func TestHandleDeleteWikiPage_NotFound(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	cfg := config.Default()
+	server := &Server{db: database, cfg: &cfg}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wiki/pages/nonexistent", nil)
+	req.SetPathValue("id", "nonexistent")
+	w := httptest.NewRecorder()
+
+	server.handleDeleteWikiPage(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleDeleteWikiPage_MissingID(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	cfg := config.Default()
+	server := &Server{db: database, cfg: &cfg}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wiki/pages/", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+
+	server.handleDeleteWikiPage(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleDeleteWikiPage_NoVault_StillDeletesDB(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	// No vault path configured — vaultSync is nil.
+	cfg := config.Default()
+	cfg.Wiki.VaultPath = ""
+	server := &Server{db: database, cfg: &cfg, vaultSync: nil}
+
+	page := newWikiPage("wiki-del-novault", "summary", "No Vault", "published", nil)
+	if err := database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wiki/pages/wiki-del-novault", nil)
+	req.SetPathValue("id", "wiki-del-novault")
+	w := httptest.NewRecorder()
+
+	server.handleDeleteWikiPage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got, _ := database.GetWikiPage("wiki-del-novault")
+	if got != nil {
+		t.Error("page should be deleted even without vault")
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if resp["vault_deleted"] != false {
+		t.Errorf("expected vault_deleted=false; got %v", resp["vault_deleted"])
+	}
 }
 
 func TestHandleGetWikiPage_NotFound(t *testing.T) {
@@ -896,4 +1010,559 @@ func TestHandleGetWikiGraph(t *testing.T) {
 			t.Errorf("expected 1 node (summary type), got %d", len(nodes))
 		}
 	})
+}
+
+// --- POST /api/wiki/links/rebuild ---
+
+func doRebuildPost(t *testing.T, server *Server, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	var bodyBytes []byte
+	if body != nil {
+		bodyBytes, _ = json.Marshal(body)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/wiki/links/rebuild", bytes.NewReader(bodyBytes))
+	w := httptest.NewRecorder()
+	server.handleRebuildWikiLinks(w, req)
+	return w
+}
+
+func TestRebuildLinks_AllRelatedIncreases(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	// Page A's content mentions page B's title.
+	pageA := &db.WikiPage{
+		ID: "rebuild-a", PageType: "concept", Title: "Alpha Feature",
+		Content: "This page describes the Beta Feature in detail.", Status: "published",
+		GeneratedBy: "ingest",
+	}
+	pageB := &db.WikiPage{
+		ID: "rebuild-b", PageType: "concept", Title: "Beta Feature",
+		Content: "This is the beta feature page.", Status: "published",
+		GeneratedBy: "ingest",
+	}
+	pageC := &db.WikiPage{
+		ID: "rebuild-c", PageType: "concept", Title: "Gamma Feature",
+		Content: "Gamma has nothing to do with others.", Status: "published",
+		GeneratedBy: "ingest",
+	}
+	for _, p := range []*db.WikiPage{pageA, pageB, pageC} {
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage %s: %v", p.ID, err)
+		}
+	}
+
+	w := doRebuildPost(t, server, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result rebuildLinksResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if result.LinksSaved < 1 {
+		t.Errorf("expected at least 1 link saved (A->B cross-ref), got %d", result.LinksSaved)
+	}
+	if result.ByType["related"] < 1 {
+		t.Errorf("expected at least 1 related link, got %d", result.ByType["related"])
+	}
+	if result.PagesScanned != 3 {
+		t.Errorf("expected 3 pages scanned, got %d", result.PagesScanned)
+	}
+}
+
+func TestRebuildLinks_OrphansDecrease(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	// 2 pages that reference each other (will get linked by cross-ref).
+	pageA := &db.WikiPage{
+		ID: "orphan-a", PageType: "concept", Title: "Orphan Alpha",
+		Content: "This mentions Orphan Beta in depth.", Status: "published", GeneratedBy: "ingest",
+	}
+	pageB := &db.WikiPage{
+		ID: "orphan-b", PageType: "concept", Title: "Orphan Beta",
+		Content: "Main content.", Status: "published", GeneratedBy: "ingest",
+	}
+	// 3 truly isolated pages with unrelated content and titles.
+	pageC := &db.WikiPage{
+		ID: "orphan-c", PageType: "concept", Title: "Unrelated One",
+		Content: "Completely isolated page.", Status: "published", GeneratedBy: "ingest",
+	}
+	pageD := &db.WikiPage{
+		ID: "orphan-d", PageType: "concept", Title: "Unrelated Two",
+		Content: "Also completely isolated.", Status: "published", GeneratedBy: "ingest",
+	}
+	pageE := &db.WikiPage{
+		ID: "orphan-e", PageType: "concept", Title: "Unrelated Three",
+		Content: "Nothing in common with others.", Status: "published", GeneratedBy: "ingest",
+	}
+	for _, p := range []*db.WikiPage{pageA, pageB, pageC, pageD, pageE} {
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage %s: %v", p.ID, err)
+		}
+	}
+
+	// All 5 are orphans before rebuild.
+	before, err := database.CountOrphanWikiPages()
+	if err != nil {
+		t.Fatalf("CountOrphanWikiPages: %v", err)
+	}
+	if before != 5 {
+		t.Fatalf("expected 5 orphans before rebuild, got %d", before)
+	}
+
+	w := doRebuildPost(t, server, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result rebuildLinksResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if result.OrphansBefore != 5 {
+		t.Errorf("expected OrphansBefore=5, got %d", result.OrphansBefore)
+	}
+	// After rebuild at least the cross-ref (A->B) should reduce orphans.
+	if result.OrphansAfter > result.OrphansBefore {
+		t.Errorf("orphans increased: before=%d after=%d", result.OrphansBefore, result.OrphansAfter)
+	}
+}
+
+func TestRebuildLinks_DetectsContradictions(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	// Two pages with the same 3-word title prefix but different content.
+	pageA := &db.WikiPage{
+		ID: "contra-a", PageType: "concept", Title: "Auth Service Overview",
+		Content: "This is the first description of auth.", Status: "published", GeneratedBy: "ingest",
+	}
+	pageB := &db.WikiPage{
+		ID: "contra-b", PageType: "concept", Title: "Auth Service Overview",
+		Content: "This is a completely different and contradicting description of auth.", Status: "published", GeneratedBy: "ingest",
+	}
+	for _, p := range []*db.WikiPage{pageA, pageB} {
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage %s: %v", p.ID, err)
+		}
+	}
+
+	w := doRebuildPost(t, server, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result rebuildLinksResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if result.ByType["contradicts"] < 1 {
+		t.Errorf("expected at least 1 contradicts link, got %d", result.ByType["contradicts"])
+	}
+}
+
+func TestRebuildLinks_MaxPagesExceeded_Returns400(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	// Seed 10 pages.
+	for i := 0; i < 10; i++ {
+		p := &db.WikiPage{
+			ID:          "maxp-" + string(rune('a'+i)),
+			PageType:    "concept",
+			Title:       "Page " + string(rune('A'+i)),
+			Content:     "Content.",
+			Status:      "published",
+			GeneratedBy: "ingest",
+		}
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage: %v", err)
+		}
+	}
+
+	w := doRebuildPost(t, server, map[string]any{"max_pages": 5})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRebuildLinks_MaxPagesOutOfRange_Returns400(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	for _, maxPages := range []int{0, 5000} {
+		w := doRebuildPost(t, server, map[string]any{"max_pages": maxPages})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("max_pages=%d: expected 400, got %d: %s", maxPages, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestRebuildLinks_NoLLMClient_SkipsSuggester(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	// guardianLLM is nil — suggester must be skipped even when include_suggester=true.
+	server := &Server{db: database, guardianLLM: nil}
+
+	page := &db.WikiPage{
+		ID: "nollm-1", PageType: "concept", Title: "No LLM Page",
+		Content: "Some content.", Status: "published", GeneratedBy: "ingest",
+	}
+	if err := database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+
+	trueVal := true
+	body := map[string]any{"include_suggester": trueVal}
+	w := doRebuildPost(t, server, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result rebuildLinksResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if result.SuggesterInvokedFor != 0 {
+		t.Errorf("expected SuggesterInvokedFor=0, got %d", result.SuggesterInvokedFor)
+	}
+	// Deterministic linker still ran — PagesScanned should reflect this.
+	if result.PagesScanned != 1 {
+		t.Errorf("expected PagesScanned=1, got %d", result.PagesScanned)
+	}
+}
+
+func TestRebuildLinks_ConcurrentRequests_SecondReturns409(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	// Hold the rebuild mutex to simulate an in-progress rebuild.
+	server.rebuildMu.Lock()
+
+	// Second request must get 409 immediately.
+	w := doRebuildPost(t, server, nil)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409 while mutex held, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Release the mutex.
+	server.rebuildMu.Unlock()
+
+	// Wait briefly and retry — should now succeed (0 pages = 200).
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var retryCode int
+	go func() {
+		defer wg.Done()
+		time.Sleep(10 * time.Millisecond)
+		rw := doRebuildPost(t, server, nil)
+		retryCode = rw.Code
+	}()
+	wg.Wait()
+
+	if retryCode != http.StatusOK {
+		t.Errorf("expected 200 after mutex released, got %d", retryCode)
+	}
+}
+
+// --- POST /api/wiki/links ---
+
+func doCreateLink(t *testing.T, server *Server, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/wiki/links", bytes.NewReader(bodyBytes))
+	w := httptest.NewRecorder()
+	server.handleCreateWikiLink(w, req)
+	return w
+}
+
+func seedTwoPages(t *testing.T, database *db.DB) (*db.WikiPage, *db.WikiPage) {
+	t.Helper()
+	pageA := &db.WikiPage{
+		ID: "link-from-1", PageType: "concept", Title: "From Page",
+		Content: "Content.", Status: "published", GeneratedBy: "ingest",
+	}
+	pageB := &db.WikiPage{
+		ID: "link-to-1", PageType: "concept", Title: "To Page",
+		Content: "Content.", Status: "published", GeneratedBy: "ingest",
+	}
+	for _, p := range []*db.WikiPage{pageA, pageB} {
+		if err := database.SaveWikiPage(p); err != nil {
+			t.Fatalf("SaveWikiPage %s: %v", p.ID, err)
+		}
+	}
+	return pageA, pageB
+}
+
+func TestCreateWikiLink_ValidatesLinkType(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	pageA, pageB := seedTwoPages(t, database)
+
+	// Valid link type → 201.
+	w := doCreateLink(t, server, map[string]any{
+		"from_page_id": pageA.ID,
+		"to_page_id":   pageB.ID,
+		"link_type":    "related",
+	})
+	if w.Code != http.StatusCreated {
+		t.Errorf("valid link_type: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Invalid link type → 400.
+	w = doCreateLink(t, server, map[string]any{
+		"from_page_id": pageA.ID,
+		"to_page_id":   pageB.ID,
+		"link_type":    "invalid-type",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("invalid link_type: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateWikiLink_RejectsUnknownType(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	pageA, pageB := seedTwoPages(t, database)
+
+	for _, lt := range []string{"friend", "", "x"} {
+		w := doCreateLink(t, server, map[string]any{
+			"from_page_id": pageA.ID,
+			"to_page_id":   pageB.ID,
+			"link_type":    lt,
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("link_type=%q: expected 400, got %d: %s", lt, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestCreateWikiLink_RejectsSelfLoop(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	pageA, _ := seedTwoPages(t, database)
+
+	w := doCreateLink(t, server, map[string]any{
+		"from_page_id": pageA.ID,
+		"to_page_id":   pageA.ID,
+		"link_type":    "related",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("self-loop: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateWikiLink_RejectsInvalidStrength(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	pageA, pageB := seedTwoPages(t, database)
+
+	for _, strength := range []float64{-0.1, 1.1} {
+		w := doCreateLink(t, server, map[string]any{
+			"from_page_id": pageA.ID,
+			"to_page_id":   pageB.ID,
+			"link_type":    "related",
+			"strength":     strength,
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("strength=%v: expected 400, got %d: %s", strength, w.Code, w.Body.String())
+		}
+	}
+
+	// nil strength → should default to 0.5 and succeed.
+	w := doCreateLink(t, server, map[string]any{
+		"from_page_id": pageA.ID,
+		"to_page_id":   pageB.ID,
+		"link_type":    "related",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("nil strength: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var link db.WikiLink
+	if err := json.NewDecoder(w.Body).Decode(&link); err != nil {
+		t.Fatalf("decode link: %v", err)
+	}
+	if link.Strength != 0.5 {
+		t.Errorf("expected default strength 0.5, got %v", link.Strength)
+	}
+}
+
+func TestCreateWikiLink_FromPageNotFound_Returns404(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	_, pageB := seedTwoPages(t, database)
+
+	w := doCreateLink(t, server, map[string]any{
+		"from_page_id": "nonexistent-from",
+		"to_page_id":   pageB.ID,
+		"link_type":    "related",
+	})
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateWikiLink_ToPageNotFound_Returns404(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	pageA, _ := seedTwoPages(t, database)
+
+	w := doCreateLink(t, server, map[string]any{
+		"from_page_id": pageA.ID,
+		"to_page_id":   "nonexistent-to",
+		"link_type":    "related",
+	})
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateWikiLink_DuplicateReturnsUpsert(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	pageA, pageB := seedTwoPages(t, database)
+
+	// First call.
+	s1 := 0.3
+	w1 := doCreateLink(t, server, map[string]any{
+		"from_page_id": pageA.ID,
+		"to_page_id":   pageB.ID,
+		"link_type":    "related",
+		"strength":     s1,
+	})
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first create: expected 201, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// Second call with a different strength — SaveWikiLink upserts on conflict.
+	s2 := 0.9
+	w2 := doCreateLink(t, server, map[string]any{
+		"from_page_id": pageA.ID,
+		"to_page_id":   pageB.ID,
+		"link_type":    "related",
+		"strength":     s2,
+	})
+	if w2.Code != http.StatusCreated && w2.Code != http.StatusOK {
+		t.Fatalf("second create: expected 201 or 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// DB should reflect the second strength value via the upsert.
+	links, err := database.ListWikiLinksFrom(pageA.ID)
+	if err != nil {
+		t.Fatalf("ListWikiLinksFrom: %v", err)
+	}
+	if len(links) == 0 {
+		t.Fatal("expected at least one link")
+	}
+	found := false
+	for _, l := range links {
+		if l.FromPageID == pageA.ID && l.ToPageID == pageB.ID && l.LinkType == "related" {
+			if l.Strength != s2 {
+				t.Errorf("expected strength %v after upsert, got %v", s2, l.Strength)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected related link from pageA to pageB")
+	}
+}
+
+// --- DELETE /api/wiki/links/{id} ---
+
+func TestDeleteWikiLink_Success(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+	pageA, pageB := seedTwoPages(t, database)
+
+	link := &db.WikiLink{
+		ID:         "del-link-1",
+		FromPageID: pageA.ID,
+		ToPageID:   pageB.ID,
+		LinkType:   "related",
+		Strength:   0.5,
+	}
+	if err := database.SaveWikiLink(link); err != nil {
+		t.Fatalf("SaveWikiLink: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wiki/links/del-link-1", nil)
+	req.SetPathValue("id", "del-link-1")
+	w := httptest.NewRecorder()
+	server.handleDeleteWikiLink(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["deleted"] != true {
+		t.Errorf("expected deleted=true, got %v", resp["deleted"])
+	}
+
+	// Confirm DB row is gone.
+	linksFrom, err := database.ListWikiLinksFrom(pageA.ID)
+	if err != nil {
+		t.Fatalf("ListWikiLinksFrom: %v", err)
+	}
+	for _, l := range linksFrom {
+		if l.ID == "del-link-1" {
+			t.Error("link should have been deleted from DB")
+		}
+	}
+}
+
+func TestDeleteWikiLink_UnknownID_Returns404(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	server := &Server{db: database}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wiki/links/does-not-exist", nil)
+	req.SetPathValue("id", "does-not-exist")
+	w := httptest.NewRecorder()
+	server.handleDeleteWikiLink(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/events"
 	insightllm "github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 )

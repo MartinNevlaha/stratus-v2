@@ -9,7 +9,7 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/events"
 )
 
 func setupTestDB(t *testing.T) *db.DB {

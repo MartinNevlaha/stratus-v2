@@ -15,7 +15,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/insight"
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	insightllm "github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
@@ -57,7 +57,8 @@ type Server struct {
 	dirtyMu    sync.Mutex
 	dirtyCh    chan struct{}
 
-	updateMu sync.Mutex
+	updateMu  sync.Mutex
+	rebuildMu sync.Mutex
 
 	onboardingMu       sync.Mutex
 	onboardingProgress *onboarding.OnboardingProgress
@@ -129,6 +130,12 @@ func (s *Server) getVaultSync() *wiki_engine.VaultSync {
 	s.vaultSyncMu.RLock()
 	defer s.vaultSyncMu.RUnlock()
 	return s.vaultSync
+}
+
+// GetVaultSync is the exported accessor for the current VaultSync. Returns nil
+// when no vault path is configured.
+func (s *Server) GetVaultSync() *wiki_engine.VaultSync {
+	return s.getVaultSync()
 }
 
 // rebuildVaultSync replaces the VaultSync to match the current cfg.Wiki.VaultPath.
@@ -429,9 +436,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/wiki/pages", s.handleCreateWikiPageFromWorkflow)
 	mux.HandleFunc("GET /api/wiki/pages", s.handleListWikiPages)
 	mux.HandleFunc("GET /api/wiki/pages/{id}", s.handleGetWikiPage)
+	mux.HandleFunc("DELETE /api/wiki/pages/{id}", s.handleDeleteWikiPage)
 	mux.HandleFunc("GET /api/wiki/search", s.handleSearchWikiPages)
 	mux.HandleFunc("POST /api/wiki/query", s.handleWikiQuery)
 	mux.HandleFunc("GET /api/wiki/graph", s.handleGetWikiGraph)
+	mux.HandleFunc("POST /api/wiki/links/rebuild", s.handleRebuildWikiLinks)
+	mux.HandleFunc("POST /api/wiki/links", s.handleCreateWikiLink)
+	mux.HandleFunc("DELETE /api/wiki/links/{id}", s.handleDeleteWikiLink)
 	mux.HandleFunc("POST /api/wiki/vault/sync", s.handleVaultSync)
 	mux.HandleFunc("POST /api/wiki/vault/pull", s.handleVaultPull)
 	mux.HandleFunc("GET /api/wiki/vault/status", s.handleVaultStatus)

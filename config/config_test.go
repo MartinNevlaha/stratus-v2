@@ -14,6 +14,15 @@ func TestConfig_LanguageDefault(t *testing.T) {
 	}
 }
 
+// TestDefault_LLMMaxRetries verifies that the default LLM config has MaxRetries == 3.
+func TestDefault_LLMMaxRetries(t *testing.T) {
+	t.Chdir(t.TempDir())
+	cfg := Default()
+	if cfg.LLM.MaxRetries != 3 {
+		t.Errorf("Default().LLM.MaxRetries = %d, want 3", cfg.LLM.MaxRetries)
+	}
+}
+
 // TestValidLanguage_Enum verifies that only "sk" and "en" are accepted.
 func TestValidLanguage_Enum(t *testing.T) {
 	cases := []struct {

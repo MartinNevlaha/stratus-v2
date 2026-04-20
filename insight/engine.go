@@ -31,7 +31,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/google/uuid"
 )
 
@@ -756,6 +756,44 @@ func (e *Engine) HandleEvent(ctx context.Context, event events.Event) {
 	if event.Type == events.EventWorkflowCompleted {
 		go e.handleWorkflowWikiStaleness(event.Payload)
 	}
+
+	if event.Type == events.EventGovernanceViolation {
+		go e.handleGovernanceViolation(ctx, event.Payload)
+	}
+}
+
+// handleGovernanceViolation pairs an incoming Guardian governance.violation
+// event with a remediation proposal in Insight. Runs in its own goroutine
+// because proposal persistence is a DB write and must not block the bus.
+//
+// Errors are logged but never surfaced: a failed pairing should not stop
+// other subscribers from processing the same event.
+func (e *Engine) handleGovernanceViolation(ctx context.Context, payload map[string]any) {
+	if e.proposalEngine == nil || e.database == nil {
+		return
+	}
+
+	alertID, _ := payload["alert_id"].(int64)
+	if alertID == 0 {
+		// Some bus encoders round-trip int64 as float64; accept both.
+		if f, ok := payload["alert_id"].(float64); ok {
+			alertID = int64(f)
+		}
+	}
+	file, _ := payload["file"].(string)
+	rules, _ := payload["rules"].(string)
+	severity, _ := payload["severity"].(string)
+
+	proposal := proposals.NewGovernanceRemediationProposal(alertID, file, rules, severity)
+
+	store := proposals.NewDBProposalStore(e.database)
+	if err := store.SaveProposal(ctx, proposal); err != nil {
+		slog.Warn("insight: failed to save governance remediation proposal",
+			"error", err, "alert_id", alertID, "file", file)
+		return
+	}
+	slog.Info("insight: paired governance proposal saved",
+		"proposal_id", proposal.ID, "alert_id", alertID, "file", file)
 }
 
 // handleWorkflowWikiStaleness boosts the staleness score of wiki pages that
@@ -1494,7 +1532,18 @@ func (e *Engine) RunEvolutionCycle(ctx context.Context, triggerType string, time
 	if e.evolutionLoop == nil {
 		return nil, nil
 	}
-	result, err := e.evolutionLoop.Run(ctx, triggerType, timeoutMs, categories)
+
+	// StratusSelfEnabled=true → legacy Run() path (HypothesisGenerator + ExperimentRunner).
+	// Otherwise → RunTargetCycle for target-project analysis.
+	if e.evoCfg.StratusSelfEnabled {
+		result, err := e.evolutionLoop.Run(ctx, triggerType, timeoutMs, categories)
+		if err != nil {
+			return nil, fmt.Errorf("evolution cycle: %w", err)
+		}
+		return result, nil
+	}
+
+	result, err := e.evolutionLoop.RunTargetCycle(ctx, triggerType, timeoutMs, categories)
 	if err != nil {
 		return nil, fmt.Errorf("evolution cycle: %w", err)
 	}

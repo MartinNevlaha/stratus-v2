@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/events"
 )
 
 const (

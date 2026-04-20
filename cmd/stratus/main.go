@@ -27,10 +27,11 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/hooks"
 	"github.com/MartinNevlaha/stratus-v2/insight"
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/prompts"
 	wiki_engine "github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/mcp"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
@@ -126,6 +127,51 @@ Commands:
               Flags: --tags a,b,c --title "..." --no-synth --skip-links`)
 }
 
+// llmAutodocEnricher calls an LLM to rewrite the base autodoc markdown into a
+// richer functional description. Implements orchestration.WikiEnricher.
+type llmAutodocEnricher struct {
+	client   llm.Client
+	language string
+}
+
+func (e *llmAutodocEnricher) Enrich(ctx context.Context, w *orchestration.WorkflowState, base string) (string, error) {
+	if e == nil || e.client == nil {
+		return "", nil
+	}
+	sys := prompts.WithLanguage(
+		prompts.Compose(prompts.WikiWorkflowEnrichment, prompts.ObsidianMarkdown),
+		e.language,
+	)
+
+	userCtx, err := json.Marshal(map[string]any{
+		"title":            w.Title,
+		"workflow_id":      w.ID,
+		"plan":             w.PlanContent,
+		"tasks":            w.Tasks,
+		"delegated_agents": w.Delegated,
+		"change_summary":   w.ChangeSummary,
+	})
+	if err != nil {
+		return "", fmt.Errorf("autodoc enricher: marshal context: %w", err)
+	}
+
+	userMsg := fmt.Sprintf(
+		"Workflow context (JSON):\n%s\n\nBase markdown to rewrite:\n\n%s",
+		string(userCtx), base,
+	)
+
+	resp, err := e.client.Complete(ctx, llm.CompletionRequest{
+		SystemPrompt: sys,
+		Messages:     []llm.Message{{Role: "user", Content: userMsg}},
+		MaxTokens:    2048,
+		Temperature:  0.3,
+	})
+	if err != nil {
+		return "", fmt.Errorf("autodoc enricher: llm complete: %w", err)
+	}
+	return resp.Content, nil
+}
+
 func cmdServe() {
 	cfg := config.Load()
 	database := mustOpenDB(cfg)
@@ -140,11 +186,10 @@ func cmdServe() {
 
 	coord := orchestration.NewCoordinator(database)
 	coord.SetWikiStore(database)
-	var eventBus events.EventBus
-	if cfg.Insight.Enabled {
-		eventBus = events.NewInMemoryBus(1000)
-		coord.SetEventBus(eventBus)
-	}
+	// The event bus is always created: Guardian uses it regardless of the
+	// Insight toggle, and no-op cost is negligible when nobody subscribes.
+	eventBus := events.NewInMemoryBus(1000)
+	coord.SetEventBus(eventBus)
 	vexorClient := vexor.New(cfg.Vexor.BinaryPath, cfg.Vexor.Model, cfg.Vexor.TimeoutSec)
 	hub := api.NewHub()
 	termMgr := terminal.NewManager()
@@ -211,6 +256,9 @@ func cmdServe() {
 	g := guardian.New(database, coord, func() config.GuardianConfig { return config.Load().Guardian }, hub, cfg.ProjectRoot)
 	// Wire language function so alert messages honour the configured language.
 	g.SetLangFn(func() string { return config.Load().Language })
+	// Wire Guardian into the shared event bus: outbound alert.emitted /
+	// governance.violation events, inbound agent.failed / review.failed.
+	g.SetEventBus(eventBus)
 	srv.SetGuardian(g)
 
 	// Wire shared LLM client into guardian if configured.
@@ -237,7 +285,64 @@ func cmdServe() {
 		}
 	}
 
+	// Wire optional LLM enricher for wiki autodoc (learn→complete). Fail-open:
+	// if no top-level provider is configured or the client fails to init, the
+	// coordinator falls back to the template-only autodoc.
+	if cfg.LLM.Provider != "" && cfg.LLM.Model != "" {
+		autodocCfg := llm.Config{
+			Provider:             cfg.LLM.Provider,
+			Model:                cfg.LLM.Model,
+			APIKey:               cfg.LLM.APIKey,
+			BaseURL:              cfg.LLM.BaseURL,
+			Timeout:              cfg.LLM.Timeout,
+			MaxTokens:            cfg.LLM.MaxTokens,
+			Temperature:          cfg.LLM.Temperature,
+			MaxRetries:           cfg.LLM.MaxRetries,
+			Concurrency:          cfg.LLM.Concurrency,
+			MinRequestIntervalMs: cfg.LLM.MinRequestIntervalMs,
+		}.WithEnv()
+		if autodocClient, err := llm.NewClient(autodocCfg); err == nil {
+			coord.SetAutodocEnricher(&llmAutodocEnricher{client: autodocClient, language: cfg.Language})
+			log.Printf("autodoc: using LLM enricher (provider=%s, model=%s)", autodocCfg.Provider, autodocCfg.Model)
+		} else {
+			log.Printf("autodoc: LLM client unavailable, using template fallback: %v", err)
+		}
+	}
+
 	go g.Run(guardianCtx)
+
+	// Periodic vault pull: pull external .md edits from the Obsidian vault back
+	// into the DB. Fail-open; intervals < 1 or wiki disabled skip the loop.
+	if cfg.Wiki.Enabled && cfg.Wiki.VaultPath != "" && cfg.Wiki.VaultPullIntervalMinutes > 0 {
+		interval := time.Duration(cfg.Wiki.VaultPullIntervalMinutes) * time.Minute
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			log.Printf("vault pull: enabled, every %s", interval)
+			for {
+				select {
+				case <-guardianCtx.Done():
+					return
+				case <-ticker.C:
+					vs := srv.GetVaultSync()
+					if vs == nil {
+						continue
+					}
+					ctx, cancel := context.WithTimeout(guardianCtx, interval)
+					status, err := vs.PullAll(ctx)
+					cancel()
+					if err != nil {
+						log.Printf("warn: vault pull: %v", err)
+						continue
+					}
+					if status.PagesUpdated > 0 || status.PagesCreated > 0 || status.Conflicts > 0 {
+						log.Printf("vault pull: scanned=%d created=%d updated=%d conflicts=%d",
+							status.FilesScanned, status.PagesCreated, status.PagesUpdated, status.Conflicts)
+					}
+				}
+			}
+		}()
+	}
 
 	// Start STT container (best-effort).
 	sttOwned := sttStart(cfg.STT.Model)

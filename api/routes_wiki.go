@@ -187,6 +187,45 @@ func (s *Server) handleGetWikiPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DELETE /api/wiki/pages/{id}
+// Removes the wiki page from the DB (cascades links + refs) and, when a vault
+// sync is configured, also removes the corresponding .md file from disk.
+// Vault delete failures are logged but do not block DB deletion (fail-open).
+func (s *Server) handleDeleteWikiPage(w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	if id == "" {
+		jsonErr(w, http.StatusBadRequest, "missing page id")
+		return
+	}
+
+	page, err := s.db.GetWikiPage(id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "get wiki page: "+err.Error())
+		return
+	}
+	if page == nil {
+		jsonErr(w, http.StatusNotFound, "wiki page not found")
+		return
+	}
+
+	if err := s.db.DeleteWikiPage(id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "delete wiki page: "+err.Error())
+		return
+	}
+
+	vaultDeleted := false
+	if vs := s.getVaultSync(); vs != nil {
+		if err := vs.DeletePage(page); err != nil {
+			// Fail-open: DB row is gone; log and continue.
+			fmt.Fprintf(os.Stderr, "warn: delete vault file for page %s: %v\n", id, err)
+		} else {
+			vaultDeleted = true
+		}
+	}
+
+	json200(w, map[string]any{"deleted": true, "vault_deleted": vaultDeleted})
+}
+
 // GET /api/wiki/search
 func (s *Server) handleSearchWikiPages(w http.ResponseWriter, r *http.Request) {
 	q := queryStr(r, "q")

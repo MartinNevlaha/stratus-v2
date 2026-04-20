@@ -64,6 +64,7 @@ type Task struct {
 type Coordinator struct {
 	db        *db.DB
 	wikiStore WikiAutodocStore
+	enricher  WikiEnricher
 }
 
 // NewCoordinator creates a new coordinator.
@@ -77,6 +78,13 @@ func NewCoordinator(db *db.DB) *Coordinator {
 // If never called (or called with nil), autodoc is silently skipped.
 func (c *Coordinator) SetWikiStore(s WikiAutodocStore) {
 	c.wikiStore = s
+}
+
+// SetAutodocEnricher injects an optional LLM-backed enricher that rewrites the
+// base autodoc markdown before persistence. If never called (or called with
+// nil), autodoc falls back to the template-only output.
+func (c *Coordinator) SetAutodocEnricher(e WikiEnricher) {
+	c.enricher = e
 }
 
 // Start creates a new workflow or returns an existing one with the same ID.
@@ -331,6 +339,7 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	if to == PhaseComplete && from == PhaseLearn && c.wikiStore != nil {
 		snapshot := *state
 		store := c.wikiStore
+		enricher := c.enricher
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -339,7 +348,7 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 			}()
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if err := AutodocWorkflow(ctx, store, &snapshot); err != nil {
+			if err := AutodocWorkflow(ctx, store, enricher, &snapshot); err != nil {
 				log.Printf("warn: autodoc workflow %s: %v", snapshot.ID, err)
 			}
 		}()
@@ -763,6 +772,6 @@ func (c *Coordinator) save(state *WorkflowState) error {
 	return err
 }
 
-// SetEventBus is a no-op stub so the Insight event bus can be wired in without
-// requiring the orchestration package to import insight/events.
+// SetEventBus is a no-op stub so the event bus can be wired in without
+// requiring the orchestration package to import the events package.
 func (c *Coordinator) SetEventBus(_ interface{}) {}

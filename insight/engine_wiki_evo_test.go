@@ -6,7 +6,7 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
-	"github.com/MartinNevlaha/stratus-v2/insight/events"
+	"github.com/MartinNevlaha/stratus-v2/events"
 )
 
 func makeEngineWithWikiEvo(t *testing.T) *Engine {
@@ -22,6 +22,7 @@ func makeEngineWithWikiEvo(t *testing.T) *Engine {
 		Enabled:             true,
 		TimeoutMs:           5000,
 		MaxHypothesesPerRun: 3,
+		MaxTokensPerCycle:   1000,
 	}
 	return NewEngineWithConfig(database, insightCfg, wikiCfg, evoCfg)
 }

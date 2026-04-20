@@ -107,10 +107,18 @@ type SearchEventsInput struct {
 	Offset    int
 }
 
-// buildFTS5Query converts a raw user query into a safe FTS5 MATCH expression.
-// Each whitespace-separated term is quoted (escaping internal quotes) and given
-// a trailing '*' so that partial-word / prefix matching works.
-// E.g. "auth error" → `"auth"* "error"*`
+var ftsStopWords = map[string]struct{}{
+	"the": {}, "and": {}, "for": {}, "are": {}, "but": {}, "not": {}, "you": {}, "all": {}, "can": {}, "had": {},
+	"her": {}, "was": {}, "one": {}, "our": {}, "out": {}, "has": {}, "have": {}, "been": {}, "will": {}, "your": {},
+	"from": {}, "they": {}, "this": {}, "that": {}, "with": {}, "what": {}, "when": {}, "where": {}, "which": {}, "while": {},
+	"about": {}, "after": {}, "before": {}, "between": {}, "into": {}, "through": {}, "during": {}, "above": {}, "below": {}, "under": {},
+	"again": {}, "further": {}, "then": {}, "once": {}, "here": {}, "there": {}, "should": {}, "would": {}, "could": {}, "being": {},
+	"over": {}, "just": {}, "more": {}, "some": {}, "such": {}, "only": {}, "also": {}, "than": {}, "too": {}, "very": {},
+	"use": {}, "using": {}, "used": {}, "may": {}, "is": {}, "it": {}, "an": {}, "a": {}, "do": {}, "does": {},
+	"did": {}, "how": {}, "if": {}, "or": {}, "in": {}, "on": {}, "at": {}, "to": {}, "of": {}, "by": {},
+	"as": {}, "be": {}, "we": {}, "me": {}, "my": {}, "its": {}, "no": {}, "so": {}, "up": {},
+}
+
 func buildFTS5Query(raw string) string {
 	terms := strings.Fields(strings.TrimSpace(raw))
 	if len(terms) == 0 {
@@ -118,10 +126,16 @@ func buildFTS5Query(raw string) string {
 	}
 	parts := make([]string, 0, len(terms))
 	for _, t := range terms {
-		t = strings.ReplaceAll(t, `"`, `""`) // escape internal double-quotes
+		if _, stop := ftsStopWords[strings.ToLower(t)]; stop {
+			continue
+		}
+		t = strings.ReplaceAll(t, `"`, `""`)
 		parts = append(parts, `"`+t+`"*`)
 	}
-	return strings.Join(parts, " ")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " OR ")
 }
 
 // SearchEvents searches events using FTS5.
@@ -135,7 +149,9 @@ func (d *DB) SearchEvents(in SearchEventsInput) ([]Event, error) {
 
 	if in.Query != "" {
 		ftsQuery := buildFTS5Query(in.Query)
-		// FTS5 search
+		if ftsQuery == "" {
+			return []Event{}, nil
+		}
 		rows, err = d.sql.Query(`
 			SELECT e.id, e.ts, e.actor, e.scope, e.type, e.text, e.title,
 			       e.tags, e.refs, e.ttl, e.importance, e.dedupe_key, e.project, e.session_id, e.created_ms

@@ -451,9 +451,7 @@ func (d *DB) GetAgentExperimentMetrics(experimentID string) (candidate, baseline
 		candidate.SuccessRate = float64(candSuccess) / float64(candCount)
 		candidate.AvgCycleTimeMs = float64(candCycleTime) / float64(candCount)
 		candidate.ReviewPassRate = float64(candReviewPasses) / float64(candCount)
-		if candCount > 0 {
-			candidate.ReworkRate = float64(candReworkCount) / float64(candCount)
-		}
+		candidate.ReworkRate = float64(candReworkCount) / float64(candCount)
 	}
 
 	if baseCount > 0 {
@@ -461,68 +459,93 @@ func (d *DB) GetAgentExperimentMetrics(experimentID string) (candidate, baseline
 		baseline.SuccessRate = float64(baseSuccess) / float64(baseCount)
 		baseline.AvgCycleTimeMs = float64(baseCycleTime) / float64(baseCount)
 		baseline.ReviewPassRate = float64(baseReviewPasses) / float64(baseCount)
-		if baseCount > 0 {
-			baseline.ReworkRate = float64(baseReworkCount) / float64(baseCount)
-		}
+		baseline.ReworkRate = float64(baseReworkCount) / float64(baseCount)
 	}
 
 	return candidate, baseline, nil
 }
 
 func (d *DB) DeleteAgentExperiment(id string) error {
-	_, err := d.sql.Exec("DELETE FROM insight_agent_experiments WHERE id = ?", id)
-	return err
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("DELETE FROM insight_agent_experiment_results WHERE experiment_id = ?", id)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec("DELETE FROM insight_agent_experiments WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func scanAgentCandidateValues(id, agentName, baseAgent, specialization, reason string, confidence float64, promptDiffJSON, status, evidenceJSON, opportunityType, createdAt, updatedAt string) (*AgentCandidate, error) {
+	var c AgentCandidate
+	c.ID = id
+	c.AgentName = agentName
+	c.BaseAgent = baseAgent
+	c.Specialization = specialization
+	c.Reason = reason
+	c.Confidence = confidence
+	c.Status = status
+	c.OpportunityType = opportunityType
+	c.CreatedAt = createdAt
+	c.UpdatedAt = updatedAt
+
+	if err := unmarshalJSONField("prompt_diff", promptDiffJSON, &c.PromptDiff); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSONField("evidence", evidenceJSON, &c.Evidence); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 func scanAgentCandidate(row *sql.Row) (*AgentCandidate, error) {
-	var c AgentCandidate
-	var promptDiffJSON, evidenceJSON string
+	var id, agentName, baseAgent, specialization, reason string
+	var confidence float64
+	var promptDiffJSON, status, evidenceJSON, opportunityType, createdAt, updatedAt string
 
 	err := row.Scan(
-		&c.ID, &c.AgentName, &c.BaseAgent, &c.Specialization, &c.Reason, &c.Confidence,
-		&promptDiffJSON, &c.Status, &evidenceJSON, &c.OpportunityType, &c.CreatedAt, &c.UpdatedAt,
+		&id, &agentName, &baseAgent, &specialization, &reason, &confidence,
+		&promptDiffJSON, &status, &evidenceJSON, &opportunityType, &createdAt, &updatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, fmt.Errorf("agent candidate not found: %w", sql.ErrNoRows)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan agent candidate: %w", err)
 	}
 
-	if err := unmarshalJSONField("prompt_diff", promptDiffJSON, &c.PromptDiff); err != nil {
-		return nil, err
-	}
-
-	if err := unmarshalJSONField("evidence", evidenceJSON, &c.Evidence); err != nil {
-		return nil, err
-	}
-
-	return &c, nil
+	return scanAgentCandidateValues(id, agentName, baseAgent, specialization, reason, confidence, promptDiffJSON, status, evidenceJSON, opportunityType, createdAt, updatedAt)
 }
 
 func scanAgentCandidates(rows *sql.Rows) ([]AgentCandidate, error) {
 	var candidates []AgentCandidate
 	for rows.Next() {
-		var c AgentCandidate
-		var promptDiffJSON, evidenceJSON string
+		var id, agentName, baseAgent, specialization, reason string
+		var confidence float64
+		var promptDiffJSON, status, evidenceJSON, opportunityType, createdAt, updatedAt string
 
 		err := rows.Scan(
-			&c.ID, &c.AgentName, &c.BaseAgent, &c.Specialization, &c.Reason, &c.Confidence,
-			&promptDiffJSON, &c.Status, &evidenceJSON, &c.OpportunityType, &c.CreatedAt, &c.UpdatedAt,
+			&id, &agentName, &baseAgent, &specialization, &reason, &confidence,
+			&promptDiffJSON, &status, &evidenceJSON, &opportunityType, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan agent candidate row: %w", err)
 		}
 
-		if err := unmarshalJSONField("prompt_diff", promptDiffJSON, &c.PromptDiff); err != nil {
+		c, err := scanAgentCandidateValues(id, agentName, baseAgent, specialization, reason, confidence, promptDiffJSON, status, evidenceJSON, opportunityType, createdAt, updatedAt)
+		if err != nil {
 			return nil, err
 		}
-
-		if err := unmarshalJSONField("evidence", evidenceJSON, &c.Evidence); err != nil {
-			return nil, err
-		}
-
-		candidates = append(candidates, c)
+		candidates = append(candidates, *c)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -536,24 +559,19 @@ func scanAgentCandidates(rows *sql.Rows) ([]AgentCandidate, error) {
 	return candidates, nil
 }
 
-func scanAgentExperiment(row *sql.Row) (*AgentExperiment, error) {
+func scanAgentExperimentValues(id, candidateID, candidateAgent, baselineAgent string, trafficPercent float64, status string, sampleSize, runsCandidate, runsBaseline int, banditJSON, startedAt string, completedAt, winner sql.NullString, createdAt, updatedAt string) (*AgentExperiment, error) {
 	var e AgentExperiment
-	var banditJSON string
-	var startedAt string
-	var completedAt sql.NullString
-	var winner sql.NullString
-
-	err := row.Scan(
-		&e.ID, &e.CandidateID, &e.CandidateAgent, &e.BaselineAgent, &e.TrafficPercent, &e.Status,
-		&e.SampleSize, &e.RunsCandidate, &e.RunsBaseline, &banditJSON,
-		&startedAt, &completedAt, &winner, &e.CreatedAt, &e.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("scan agent experiment: %w", err)
-	}
+	e.ID = id
+	e.CandidateID = candidateID
+	e.CandidateAgent = candidateAgent
+	e.BaselineAgent = baselineAgent
+	e.TrafficPercent = trafficPercent
+	e.Status = status
+	e.SampleSize = sampleSize
+	e.RunsCandidate = runsCandidate
+	e.RunsBaseline = runsBaseline
+	e.CreatedAt = createdAt
+	e.UpdatedAt = updatedAt
 
 	if banditJSON != "" {
 		if err := json.Unmarshal([]byte(banditJSON), &e.BanditState); err != nil {
@@ -580,47 +598,50 @@ func scanAgentExperiment(row *sql.Row) (*AgentExperiment, error) {
 	return &e, nil
 }
 
+func scanAgentExperiment(row *sql.Row) (*AgentExperiment, error) {
+	var id, candidateID, candidateAgent, baselineAgent, status, banditJSON, startedAt, createdAt, updatedAt string
+	var trafficPercent float64
+	var sampleSize, runsCandidate, runsBaseline int
+	var completedAt, winner sql.NullString
+
+	err := row.Scan(
+		&id, &candidateID, &candidateAgent, &baselineAgent, &trafficPercent, &status,
+		&sampleSize, &runsCandidate, &runsBaseline, &banditJSON,
+		&startedAt, &completedAt, &winner, &createdAt, &updatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("agent experiment not found: %w", sql.ErrNoRows)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan agent experiment: %w", err)
+	}
+
+	return scanAgentExperimentValues(id, candidateID, candidateAgent, baselineAgent, trafficPercent, status, sampleSize, runsCandidate, runsBaseline, banditJSON, startedAt, completedAt, winner, createdAt, updatedAt)
+}
+
 func scanAgentExperiments(rows *sql.Rows) ([]AgentExperiment, error) {
 	var experiments []AgentExperiment
 	for rows.Next() {
-		var e AgentExperiment
-		var banditJSON string
-		var startedAt string
-		var completedAt sql.NullString
-		var winner sql.NullString
+		var id, candidateID, candidateAgent, baselineAgent, status, banditJSON, startedAt, createdAt, updatedAt string
+		var trafficPercent float64
+		var sampleSize, runsCandidate, runsBaseline int
+		var completedAt, winner sql.NullString
 
 		err := rows.Scan(
-			&e.ID, &e.CandidateID, &e.CandidateAgent, &e.BaselineAgent, &e.TrafficPercent, &e.Status,
-			&e.SampleSize, &e.RunsCandidate, &e.RunsBaseline, &banditJSON,
-			&startedAt, &completedAt, &winner, &e.CreatedAt, &e.UpdatedAt,
+			&id, &candidateID, &candidateAgent, &baselineAgent, &trafficPercent, &status,
+			&sampleSize, &runsCandidate, &runsBaseline, &banditJSON,
+			&startedAt, &completedAt, &winner, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan agent experiment row: %w", err)
 		}
 
-		if banditJSON != "" {
-			if err := json.Unmarshal([]byte(banditJSON), &e.BanditState); err != nil {
-				return nil, fmt.Errorf("unmarshal bandit state: %w", err)
-			}
-		}
-
-		parsedStartedAt, err := parseRequiredTimeRFC3339Nano("started_at", startedAt)
+		e, err := scanAgentExperimentValues(id, candidateID, candidateAgent, baselineAgent, trafficPercent, status, sampleSize, runsCandidate, runsBaseline, banditJSON, startedAt, completedAt, winner, createdAt, updatedAt)
 		if err != nil {
-			return nil, err
-		}
-		e.StartedAt = parsedStartedAt
-
-		parsedCompletedAt, err := parseOptionalTimeRFC3339Nano("completed_at", completedAt)
-		if err != nil {
-			return nil, err
-		}
-		e.CompletedAt = parsedCompletedAt
-
-		if winner.Valid {
-			e.Winner = winner.String
+			return nil, fmt.Errorf("scan agent experiment row: %w", err)
 		}
 
-		experiments = append(experiments, e)
+		experiments = append(experiments, *e)
 	}
 
 	if err := rows.Err(); err != nil {
