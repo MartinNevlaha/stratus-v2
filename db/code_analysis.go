@@ -376,6 +376,11 @@ func (d *DB) SearchCodeFindings(query string, limit int) ([]CodeFinding, error) 
 		limit = 20
 	}
 
+	ftsQuery := buildFTS5Query(query)
+	if ftsQuery == "" {
+		return []CodeFinding{}, nil
+	}
+
 	rows, err := d.sql.Query(`
 		SELECT cf.id, cf.run_id, cf.file_path, cf.category, cf.severity, cf.title, cf.description,
 		       cf.line_start, cf.line_end, cf.confidence, cf.suggestion, cf.wiki_page_id,
@@ -385,7 +390,7 @@ func (d *DB) SearchCodeFindings(query string, limit int) ([]CodeFinding, error) 
 		WHERE code_findings_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?
-	`, query, limit)
+	`, ftsQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search code findings: %w", err)
 	}

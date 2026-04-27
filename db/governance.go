@@ -165,21 +165,16 @@ func chunkMarkdown(content string) []markdownChunk {
 }
 
 func preprocessFTS5Query(query string) string {
-	replacer := strings.NewReplacer(
-		"-", " ",
-		"*", " ",
-		"^", " ",
-		"(", " ",
-		")", " ",
-	)
-	query = replacer.Replace(query)
-
-	terms := strings.Fields(query)
-	if len(terms) <= 1 {
-		return query
+	terms := strings.Fields(strings.TrimSpace(query))
+	if len(terms) == 0 {
+		return ""
 	}
-
-	return strings.Join(terms, " OR ")
+	parts := make([]string, 0, len(terms))
+	for _, t := range terms {
+		t = strings.ReplaceAll(t, `"`, `""`)
+		parts = append(parts, `"`+t+`"`)
+	}
+	return strings.Join(parts, " OR ")
 }
 
 // SearchDocs searches governance docs using FTS5.
