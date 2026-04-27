@@ -62,9 +62,11 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db        *db.DB
-	wikiStore WikiAutodocStore
-	enricher  WikiEnricher
+	db              *db.DB
+	wikiStore       WikiAutodocStore
+	enricher        WikiEnricher
+	artifactBuilder LearnArtifactBuilder
+	knowledgeEngine LearnKnowledgeEngine
 }
 
 // NewCoordinator creates a new coordinator.
@@ -85,6 +87,14 @@ func (c *Coordinator) SetWikiStore(s WikiAutodocStore) {
 // nil), autodoc falls back to the template-only output.
 func (c *Coordinator) SetAutodocEnricher(e WikiEnricher) {
 	c.enricher = e
+}
+
+func (c *Coordinator) SetArtifactBuilder(b LearnArtifactBuilder) {
+	c.artifactBuilder = b
+}
+
+func (c *Coordinator) SetKnowledgeEngine(e LearnKnowledgeEngine) {
+	c.knowledgeEngine = e
 }
 
 // Start creates a new workflow or returns an existing one with the same ID.
@@ -334,24 +344,15 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 		return nil, err
 	}
 
-	// Fail-open: auto-write wiki page on learn→complete for spec workflows.
-	// Runs asynchronously so a slow wiki store never delays the transition response.
-	if to == PhaseComplete && from == PhaseLearn && c.wikiStore != nil {
+	if to == PhaseComplete && from == PhaseLearn {
 		snapshot := *state
-		store := c.wikiStore
-		enricher := c.enricher
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("warn: autodoc workflow %s panicked: %v", snapshot.ID, r)
-				}
-			}()
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := AutodocWorkflow(ctx, store, enricher, &snapshot); err != nil {
-				log.Printf("warn: autodoc workflow %s: %v", snapshot.ID, err)
-			}
-		}()
+		go RunLearnPipeline(context.Background(), LearnPipelineDeps{
+			State:           &snapshot,
+			WikiStore:       c.wikiStore,
+			Enricher:        c.enricher,
+			ArtifactBuilder: c.artifactBuilder,
+			KnowledgeEngine: c.knowledgeEngine,
+		})
 	}
 
 	return state, nil

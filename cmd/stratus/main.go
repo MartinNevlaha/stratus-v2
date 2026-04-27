@@ -172,6 +172,45 @@ func (e *llmAutodocEnricher) Enrich(ctx context.Context, w *orchestration.Workfl
 	return resp.Content, nil
 }
 
+type insightArtifactAdapter struct {
+	insight *insight.Engine
+}
+
+func (a *insightArtifactAdapter) Build(ctx context.Context, workflowID string) (*orchestration.LearnArtifact, error) {
+	artifact, err := a.insight.ArtifactBuilder().Build(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if artifact == nil {
+		return nil, nil
+	}
+	return &orchestration.LearnArtifact{
+		ID:              artifact.ID,
+		WorkflowID:      artifact.WorkflowID,
+		TaskType:        string(artifact.TaskType),
+		WorkflowType:    artifact.WorkflowType,
+		RepoType:        string(artifact.RepoType),
+		ProblemClass:    string(artifact.ProblemClass),
+		AgentsUsed:      artifact.AgentsUsed,
+		RootCause:       artifact.RootCause,
+		SolutionPattern: artifact.SolutionPattern,
+		FilesChanged:    artifact.FilesChanged,
+		ReviewResult:    string(artifact.ReviewResult),
+		CycleTimeMin:    artifact.CycleTimeMin,
+		Success:         artifact.Success,
+		Metadata:        artifact.Metadata,
+		CreatedAt:       artifact.CreatedAt,
+	}, nil
+}
+
+type insightKnowledgeAdapter struct {
+	insight *insight.Engine
+}
+
+func (a *insightKnowledgeAdapter) RunAnalysis(ctx context.Context) error {
+	return a.insight.KnowledgeEngine().RunAnalysis(ctx)
+}
+
 func cmdServe() {
 	cfg := config.Load()
 	database := mustOpenDB(cfg)
@@ -307,6 +346,12 @@ func cmdServe() {
 		} else {
 			log.Printf("autodoc: LLM client unavailable, using template fallback: %v", err)
 		}
+	}
+
+	if insightEngine != nil {
+		coord.SetArtifactBuilder(&insightArtifactAdapter{insight: insightEngine})
+		coord.SetKnowledgeEngine(&insightKnowledgeAdapter{insight: insightEngine})
+		log.Printf("learn pipeline: wired artifact builder + knowledge engine")
 	}
 
 	go g.Run(guardianCtx)

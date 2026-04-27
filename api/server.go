@@ -201,9 +201,24 @@ func (s *Server) SetProductIntelligenceEngine(engine *product_intelligence.Engin
 func (s *Server) indexWorker() {
 	const quietPeriod = 5 * time.Second
 	const maxBatch = 20
+	const maxBackoff = 30 * time.Minute
+
+	var consecutiveErrors int
 
 	for {
-		<-s.dirtyCh // wait for first dirty signal
+		<-s.dirtyCh
+
+		if consecutiveErrors > 0 {
+			backoff := time.Duration(1<<min(consecutiveErrors, 5)) * time.Minute
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			log.Printf("vexor reindex: backing off %v after %d consecutive errors", backoff, consecutiveErrors)
+			select {
+			case <-time.After(backoff):
+			case <-s.dirtyCh:
+			}
+		}
 
 		timer := time.NewTimer(quietPeriod)
 	debounce:
@@ -231,10 +246,16 @@ func (s *Server) indexWorker() {
 			continue
 		}
 		if len(files) > maxBatch {
-			files = nil // full reindex
+			files = nil
 		}
 		if err := s.vexor.Index(files); err != nil {
-			log.Printf("vexor reindex: %v", err)
+			consecutiveErrors++
+			log.Printf("vexor reindex: %v (error %d/%d)", err, consecutiveErrors, 5)
+		} else {
+			if consecutiveErrors > 0 {
+				log.Printf("vexor reindex: recovered after %d errors", consecutiveErrors)
+			}
+			consecutiveErrors = 0
 		}
 	}
 }

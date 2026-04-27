@@ -174,39 +174,16 @@ tags: ["<relevant-tags>"]
 importance: 0.8
 ```
 
-**Step 2 — MANDATORY: Create learning candidates + proposals** for each significant pattern, rule, or decision:
+**Step 2 — Automatic learn pipeline (runs on learn→complete transition):**
 
-Use Bash with curl to the local API (`http://localhost:$(stratus port)`):
+When you transition to complete, the coordinator automatically runs:
+1. **Artifact build** — extracts engineering knowledge from this workflow (agents used, problem class, solution pattern, cycle time)
+2. **Knowledge update** — updates problem statistics and mines solution patterns for future recommendations
+3. **Wiki autodoc** — generates a wiki summary page
 
-```bash
-# 2a. Save candidate
-CANDIDATE_ID=$(curl -sS -X POST http://localhost:$(stratus port)/api/learning/candidates \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "detection_type": "pattern|decision|anti_pattern",
-    "description": "Short description of what was found",
-    "confidence": 0.85,
-    "files": ["path/to/relevant/file.ts"],
-    "count": 1
-  }' | jq -r '.id')
+You do NOT need to call these manually. They run asynchronously and never block the transition.
 
-# 2b. Generate proposal from candidate
-curl -sS -X POST http://localhost:$(stratus port)/api/learning/proposals \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "candidate_id": "'$CANDIDATE_ID'",
-    "type": "rule|adr|template|skill",
-    "title": "Short proposal title",
-    "description": "Why this matters",
-    "proposed_content": "Full content of the rule/ADR/template",
-    "proposed_path": ".claude/rules/<name>.md",
-    "confidence": 0.85
-  }'
-```
-
-Create a proposal for every insight worth preserving. The user will review proposals in the Learning tab. **Do not write governance files directly** — proposals are the gate.
-
-**Step 3 — Wiki auto-doc (optional enrichment):**
+**Step 3 — Wiki enrichment (optional):**
 
 On the `learn → complete` transition below, the coordinator automatically writes a wiki page for this workflow (status=`auto-generated`, upsert by `(workflow_id, feature_slug)`). The auto-generated content is a minimal summary of plan + tasks + delegations.
 
