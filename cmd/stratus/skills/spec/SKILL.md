@@ -176,37 +176,16 @@ tags: ["<relevant-tags>"]
 importance: 0.8
 ```
 
-**Step 2 — MANDATORY: Create learning candidates + proposals** for each significant pattern, rule, or decision:
+**Step 2 — Automatic learn pipeline (runs on learn→complete transition):**
 
-Use Bash with curl to the local API (`http://localhost:$(stratus port)`):
+When you transition to complete, the coordinator runs (async, fail-open):
+1. **Artifact build** — extracts engineering knowledge from this workflow (agents used, problem class, solution pattern, cycle time). Runs only if insight is enabled in config.
+2. **Knowledge update** — updates problem statistics and mines solution patterns for future recommendations. Runs only if step 1 produced an artifact.
+3. **Wiki autodoc** — generates a wiki summary page. Always runs when the wiki store is configured.
 
-```bash
-# 2a. Save candidate
-CANDIDATE_ID=$(curl -sS -X POST http://localhost:$(stratus port)/api/learning/candidates \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "detection_type": "pattern|decision|anti_pattern",
-    "description": "Short description of what was found",
-    "confidence": 0.85,
-    "files": ["path/to/relevant/file.ts"],
-    "count": 1
-  }' | jq -r '.id')
+The coordinator records a `learn_pipeline` memory event with the per-step outcome (`ok` / `skipped` / `failed` / `disabled`) so it shows up in the workflow timeline. Pipeline timeout defaults to 180s and is configurable via `learn.pipeline_timeout_sec`.
 
-# 2b. Generate proposal from candidate
-curl -sS -X POST http://localhost:$(stratus port)/api/learning/proposals \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "candidate_id": "'$CANDIDATE_ID'",
-    "type": "rule|adr|template|skill",
-    "title": "Short proposal title",
-    "description": "Why this matters",
-    "proposed_content": "Full content of the rule/ADR/template",
-    "proposed_path": ".claude/rules/<name>.md",
-    "confidence": 0.85
-  }'
-```
-
-Create a proposal for every insight worth preserving. The user will review proposals in the Learning tab. **Do not write governance files directly** — proposals are the gate.
+You do NOT need to call these manually.
 
 **Step 3 — Wiki auto-doc (optional enrichment):**
 

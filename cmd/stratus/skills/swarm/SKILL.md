@@ -278,21 +278,9 @@ curl -sS -X POST $BASE/api/events \
   -d '{"title": "<name>", "text": "<details>", "type": "decision|discovery", "importance": 0.7, "tags": ["swarm", "<domain>"], "refs": {"mission_id": "<mission-id>"}, "session_id": "<slug>"}'
 ```
 
-### Step 3 — Create learning candidates + proposals
+### Step 3 — Automatic learn pipeline (runs on workflow complete)
 
-For each significant pattern found across workers:
-
-```bash
-CANDIDATE_ID=$(curl -sS -X POST $BASE/api/learning/candidates \
-  -H 'Content-Type: application/json' \
-  -d '{"detection_type": "pattern|decision|anti_pattern", "description": "...", "confidence": 0.85, "files": ["..."], "count": 1}' | jq -r '.id')
-
-curl -sS -X POST $BASE/api/learning/proposals \
-  -H 'Content-Type: application/json' \
-  -d '{"candidate_id": "'$CANDIDATE_ID'", "type": "rule|adr|template|skill", "title": "...", "description": "...", "proposed_content": "...", "proposed_path": ".claude/rules/<name>.md", "confidence": 0.85, "session_id": "<slug>"}'
-```
-
-Focus on: coordination patterns, conflict resolutions, reusable ticket templates, anti-patterns. User reviews proposals in the **Learning tab**.
+The coordinator runs the learn pipeline async on `complete` transition: artifact build (insight-gated), knowledge update (only if artifact built), wiki autodoc (wiki-gated). Outcomes land as a `learn_pipeline` memory event on the workflow timeline. You do NOT need to create candidates or proposals manually.
 
 ### Step 4 — Write governance artifacts + re-index
 

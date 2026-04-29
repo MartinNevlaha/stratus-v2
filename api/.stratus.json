@@ -126,5 +126,8 @@
       "provider": "",
       "model": ""
     }
+  },
+  "learn": {
+    "pipeline_timeout_sec": 180
   }
 }

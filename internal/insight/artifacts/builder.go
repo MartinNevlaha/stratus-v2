@@ -51,7 +51,10 @@ func (b *ArtifactBuilder) Build(ctx context.Context, workflowID string) (*Artifa
 	}
 
 	if len(events) < b.config.MinEventsForBuild {
-		slog.Debug("insufficient events for artifact", "workflow_id", workflowID, "count", len(events))
+		slog.Info("artifact build skipped: insufficient events",
+			"workflow_id", workflowID,
+			"count", len(events),
+			"min_required", b.config.MinEventsForBuild)
 		return nil, nil
 	}
 

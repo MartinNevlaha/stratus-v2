@@ -113,6 +113,14 @@ type InsightConfig struct {
 	LLM           LLMConfig `json:"llm"`
 }
 
+// LearnConfig configures the workflow `learn → complete` pipeline.
+type LearnConfig struct {
+	// PipelineTimeoutSec caps the total runtime of artifact build,
+	// knowledge analysis, and wiki autodoc. Default 180 — increase if
+	// using a slow local LLM enricher (Ollama, large context).
+	PipelineTimeoutSec int `json:"pipeline_timeout_sec"`
+}
+
 // GuardianConfig configures the Ambient Codebase Guardian.
 type GuardianConfig struct {
 	Enabled                bool      `json:"enabled"`
@@ -297,6 +305,7 @@ type Config struct {
 	Wiki                     WikiConfig         `json:"wiki"`
 	Evolution                EvolutionConfig    `json:"evolution"`
 	CodeAnalysis             CodeAnalysisConfig `json:"code_analysis"`
+	Learn                    LearnConfig        `json:"learn"`
 }
 
 // ValidLanguage returns true if s is a supported UI language code.
@@ -429,6 +438,9 @@ func Default() Config {
 			IncludeGitHistory:   true,
 			GitHistoryDepth:     100,
 			Categories:          []string{},
+		},
+		Learn: LearnConfig{
+			PipelineTimeoutSec: 180,
 		},
 	}
 }

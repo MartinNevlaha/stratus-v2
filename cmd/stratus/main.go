@@ -354,6 +354,13 @@ func cmdServe() {
 		log.Printf("learn pipeline: wired artifact builder + knowledge engine")
 	}
 
+	// Always wire the summary-event sink so pipeline outcomes show up in the
+	// workflow timeline regardless of whether insight is enabled.
+	coord.SetLearnEventStore(database)
+	if cfg.Learn.PipelineTimeoutSec > 0 {
+		coord.SetLearnPipelineTimeout(time.Duration(cfg.Learn.PipelineTimeoutSec) * time.Second)
+	}
+
 	go g.Run(guardianCtx)
 
 	// Periodic vault pull: pull external .md edits from the Obsidian vault back

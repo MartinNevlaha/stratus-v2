@@ -79,7 +79,7 @@ Find first `pending`/`in_progress` task. Start it: `POST $BASE/api/workflows/<id
 Delegate to `delivery-code-reviewer`. If `[must_fix]` → back to `implement`. On pass → `learn`.
 
 ### spec — `learn`
-Save memory events. Create learning candidates via `POST $BASE/api/learning/candidates`. Transition to `complete`.
+Save memory events via `mcp__stratus__save_memory`. Transition to `complete` — the coordinator runs the learn pipeline (artifact build, knowledge update, wiki autodoc) automatically.
 
 ### bug — `analyze`
 Delegate to `delivery-debugger`. Present diagnosis, get approval. Transition to `fix`.

@@ -176,12 +176,14 @@ importance: 0.8
 
 **Step 2 — Automatic learn pipeline (runs on learn→complete transition):**
 
-When you transition to complete, the coordinator automatically runs:
-1. **Artifact build** — extracts engineering knowledge from this workflow (agents used, problem class, solution pattern, cycle time)
-2. **Knowledge update** — updates problem statistics and mines solution patterns for future recommendations
-3. **Wiki autodoc** — generates a wiki summary page
+When you transition to complete, the coordinator runs (async, fail-open):
+1. **Artifact build** — extracts engineering knowledge from this workflow (agents used, problem class, solution pattern, cycle time). Runs only if insight is enabled in config.
+2. **Knowledge update** — updates problem statistics and mines solution patterns for future recommendations. Runs only if step 1 produced an artifact.
+3. **Wiki autodoc** — generates a wiki summary page. Always runs when the wiki store is configured.
 
-You do NOT need to call these manually. They run asynchronously and never block the transition.
+The coordinator records a `learn_pipeline` memory event with the per-step outcome (`ok` / `skipped` / `failed` / `disabled`) so it shows up in the workflow timeline. Pipeline timeout defaults to 180s and is configurable via `learn.pipeline_timeout_sec`.
+
+You do NOT need to call these manually.
 
 **Step 3 — Wiki enrichment (optional):**
 

@@ -62,11 +62,13 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
-	db              *db.DB
-	wikiStore       WikiAutodocStore
-	enricher        WikiEnricher
-	artifactBuilder LearnArtifactBuilder
-	knowledgeEngine LearnKnowledgeEngine
+	db                  *db.DB
+	wikiStore           WikiAutodocStore
+	enricher            WikiEnricher
+	artifactBuilder     LearnArtifactBuilder
+	knowledgeEngine     LearnKnowledgeEngine
+	learnEventStore     LearnEventStore
+	learnPipelineTimeout time.Duration
 }
 
 // NewCoordinator creates a new coordinator.
@@ -95,6 +97,20 @@ func (c *Coordinator) SetArtifactBuilder(b LearnArtifactBuilder) {
 
 func (c *Coordinator) SetKnowledgeEngine(e LearnKnowledgeEngine) {
 	c.knowledgeEngine = e
+}
+
+// SetLearnEventStore injects the persistence used to record a summary memory
+// event after the learn pipeline runs. If nil, no summary event is written.
+func (c *Coordinator) SetLearnEventStore(s LearnEventStore) {
+	c.learnEventStore = s
+}
+
+// SetLearnPipelineTimeout overrides the default 180s pipeline timeout. Values
+// <= 0 are ignored (the pipeline keeps its built-in default).
+func (c *Coordinator) SetLearnPipelineTimeout(d time.Duration) {
+	if d > 0 {
+		c.learnPipelineTimeout = d
+	}
 }
 
 // Start creates a new workflow or returns an existing one with the same ID.
@@ -352,6 +368,8 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 			Enricher:        c.enricher,
 			ArtifactBuilder: c.artifactBuilder,
 			KnowledgeEngine: c.knowledgeEngine,
+			EventStore:      c.learnEventStore,
+			Timeout:         c.learnPipelineTimeout,
 		})
 	}
 
