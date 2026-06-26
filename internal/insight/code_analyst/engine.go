@@ -32,6 +32,8 @@ type CodeAnalysisConfig struct {
 	IncludeGitHistory   bool
 	GitHistoryDepth     int
 	Categories          []string
+	ExcludePaths        []string
+	VerifyFindings      bool
 }
 
 // LangFn is a callback that returns the active UI language code ("en", "sk", …).
@@ -117,7 +119,7 @@ func (e *Engine) Run(ctx context.Context, triggerType string, categories []strin
 		MaxFiles:      config.MaxFilesPerRun,
 		MinChurnScore: config.MinChurnScore,
 	})
-	analyzer := NewAnalyzer(e.analyzer.llmClient, e.projRoot, effectiveCategories, config.ConfidenceThreshold).WithLang(lang)
+	analyzer := NewAnalyzer(e.analyzer.llmClient, e.projRoot, effectiveCategories, config.ConfidenceThreshold).WithLang(lang).WithVerify(config.VerifyFindings)
 
 	// Step 3: get HEAD commit hash.
 	commitHash, err := getHeadCommit(ctx, e.projRoot)
@@ -215,6 +217,9 @@ func (e *Engine) execute(
 	if gitDepth <= 0 {
 		gitDepth = 50
 	}
+	// Apply user-configured exclude_paths (additive to built-in excludes). Safe to
+	// mutate here: execute runs under the engine's single-run mutex.
+	e.collector.excludePaths = config.ExcludePaths
 	signals, err := e.collector.CollectAll(ctx, gitDepth)
 	if err != nil {
 		// If the project is not a git repository (or has no commits), treat

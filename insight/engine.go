@@ -14,12 +14,13 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/artifacts"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/code_analyst"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/ingest"
 	evolution_baseline "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/baseline"
 	evolution_scoring "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/scoring"
+	"github.com/MartinNevlaha/stratus-v2/internal/insight/ingest"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/knowledge_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/patterns"
@@ -31,7 +32,6 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
-	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/google/uuid"
 )
 
@@ -384,6 +384,8 @@ func (e *Engine) initCodeAnalyst() {
 			IncludeGitHistory:   cfg.CodeAnalysis.IncludeGitHistory,
 			GitHistoryDepth:     cfg.CodeAnalysis.GitHistoryDepth,
 			Categories:          cfg.CodeAnalysis.Categories,
+			ExcludePaths:        cfg.CodeAnalysis.ExcludePaths,
+			VerifyFindings:      cfg.CodeAnalysis.VerifyFindings,
 		}
 	}
 

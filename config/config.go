@@ -93,16 +93,16 @@ type SyncState struct {
 }
 
 type LLMConfig struct {
-	Provider    string  `json:"provider"`
-	Model       string  `json:"model"`
-	APIKey      string  `json:"api_key,omitempty"`
-	BaseURL     string  `json:"base_url,omitempty"`
-	Timeout     int     `json:"timeout,omitempty"`
-	MaxTokens   int     `json:"max_tokens,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	MaxRetries  int     `json:"max_retries,omitempty"`
-	Concurrency          int `json:"concurrency,omitempty"`
-	MinRequestIntervalMs int `json:"min_request_interval_ms,omitempty"`
+	Provider             string  `json:"provider"`
+	Model                string  `json:"model"`
+	APIKey               string  `json:"api_key,omitempty"`
+	BaseURL              string  `json:"base_url,omitempty"`
+	Timeout              int     `json:"timeout,omitempty"`
+	MaxTokens            int     `json:"max_tokens,omitempty"`
+	Temperature          float64 `json:"temperature,omitempty"`
+	MaxRetries           int     `json:"max_retries,omitempty"`
+	Concurrency          int     `json:"concurrency,omitempty"`
+	MinRequestIntervalMs int     `json:"min_request_interval_ms,omitempty"`
 }
 
 type InsightConfig struct {
@@ -144,8 +144,8 @@ type GuardianConfig struct {
 
 // WikiConfig configures the Wiki ingestion and Vault sync subsystem.
 type WikiConfig struct {
-	Enabled       bool    `json:"enabled"`
-	IngestOnEvent bool    `json:"ingest_on_event"`
+	Enabled       bool `json:"enabled"`
+	IngestOnEvent bool `json:"ingest_on_event"`
 	// MaxPagesPerIngest caps the number of pages processed per ingest run.
 	// 0 is the unlimited sentinel — all pages will be processed.
 	// Negative values are invalid and will be rejected by ValidateWikiConfig.
@@ -232,15 +232,15 @@ type BaselineLimits struct {
 
 // EvolutionConfig configures the autonomous rule evolution subsystem.
 type EvolutionConfig struct {
-	Enabled             bool     `json:"enabled"`
-	TimeoutMs           int64    `json:"timeout_ms"`
-	MaxHypothesesPerRun int      `json:"max_hypotheses_per_run"`
+	Enabled             bool  `json:"enabled"`
+	TimeoutMs           int64 `json:"timeout_ms"`
+	MaxHypothesesPerRun int   `json:"max_hypotheses_per_run"`
 	// Deprecated: ignored in proposals-only mode. Retained for backward-compat config files.
-	AutoApplyThreshold  float64  `json:"auto_apply_threshold"`
-	ProposalThreshold   float64  `json:"proposal_threshold"`
-	MinSampleSize       int      `json:"min_sample_size"`
-	DailyTokenBudget    int      `json:"daily_token_budget"`
-	Categories          []string `json:"categories"`
+	AutoApplyThreshold float64  `json:"auto_apply_threshold"`
+	ProposalThreshold  float64  `json:"proposal_threshold"`
+	MinSampleSize      int      `json:"min_sample_size"`
+	DailyTokenBudget   int      `json:"daily_token_budget"`
+	Categories         []string `json:"categories"`
 
 	// Opt-in toggle: when true, evolution may also generate Stratus-self hypotheses (prompt_tuning).
 	// Default false — evolution targets the working-directory project.
@@ -270,11 +270,13 @@ type CodeAnalysisConfig struct {
 	TokenBudgetPerRun   int       `json:"token_budget_per_run"`
 	MinChurnScore       float64   `json:"min_churn_score"`
 	ConfidenceThreshold float64   `json:"confidence_threshold"`
-	ScanInterval        int       `json:"scan_interval"`         // minutes between scheduled scans
+	ScanInterval        int       `json:"scan_interval"` // minutes between scheduled scans
 	IncludeGitHistory   bool      `json:"include_git_history"`
-	GitHistoryDepth     int       `json:"git_history_depth"`     // number of commits to analyze
-	Categories          []string  `json:"categories"`            // empty = all categories
-	LLM                 LLMConfig `json:"llm"`                   // per-subsystem LLM override
+	GitHistoryDepth     int       `json:"git_history_depth"` // number of commits to analyze
+	Categories          []string  `json:"categories"`        // empty = all categories
+	ExcludePaths        []string  `json:"exclude_paths"`     // path prefixes to skip, additive to built-in excludes (e.g. "scripts/")
+	VerifyFindings      bool      `json:"verify_findings"`   // run an adversarial verification pass to suppress false-positive findings
+	LLM                 LLMConfig `json:"llm"`               // per-subsystem LLM override
 }
 
 // AllowedCodeAnalysisCategories is the set of valid category values for CodeAnalysisConfig.Categories.
@@ -438,6 +440,7 @@ func Default() Config {
 			IncludeGitHistory:   true,
 			GitHistoryDepth:     100,
 			Categories:          []string{},
+			VerifyFindings:      true,
 		},
 		Learn: LearnConfig{
 			PipelineTimeoutSec: 180,

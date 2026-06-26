@@ -16,6 +16,9 @@ import (
 // Collector gathers per-file signals from the host project filesystem and git history.
 type Collector struct {
 	projRoot string
+	// excludePaths holds user-configured path prefixes to skip, additive to the
+	// built-in isExcluded rules. Set per-run from CodeAnalysisConfig.ExcludePaths.
+	excludePaths []string
 }
 
 // NewCollector creates a Collector rooted at projRoot.
@@ -44,7 +47,7 @@ func (c *Collector) CollectAll(ctx context.Context, gitDepth int) ([]FileSignals
 	absPaths := make([]string, 0, len(files))
 	relToAbs := make(map[string]string, len(files))
 	for _, rel := range files {
-		if isExcluded(rel) {
+		if isExcluded(rel) || c.isUserExcluded(rel) {
 			continue
 		}
 		abs := filepath.Join(c.projRoot, rel)
@@ -285,6 +288,24 @@ func isExcluded(rel string) bool {
 		return true
 	}
 
+	return false
+}
+
+// isUserExcluded reports whether rel matches one of the user-configured
+// exclude_paths prefixes (CodeAnalysisConfig.ExcludePaths). Each entry is
+// treated as a path prefix; a trailing slash is optional, so "scripts/" and
+// "scripts" both skip the scripts/ directory, and an exact file path skips
+// just that file. Additive to the built-in isExcluded rules.
+func (c *Collector) isUserExcluded(rel string) bool {
+	for _, ex := range c.excludePaths {
+		ex = strings.TrimPrefix(strings.TrimSpace(ex), "./")
+		if ex == "" {
+			continue
+		}
+		if rel == ex || strings.HasPrefix(rel, strings.TrimSuffix(ex, "/")+"/") {
+			return true
+		}
+	}
 	return false
 }
 

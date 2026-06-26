@@ -326,3 +326,37 @@ func TestIsExcluded_SensitiveAndVendorStillExcluded(t *testing.T) {
 		}
 	}
 }
+
+func TestIsUserExcluded_PrefixMatching(t *testing.T) {
+	c := &Collector{excludePaths: []string{"scripts/", "tools", "./gen/", "one/exact.py", "  "}}
+
+	excluded := []string{
+		"scripts/eval_retrieval.py", // dir prefix with trailing slash
+		"tools/build.go",            // dir prefix without trailing slash
+		"gen/proto.go",              // "./" prefix is stripped
+		"one/exact.py",              // exact file match
+	}
+	for _, p := range excluded {
+		if !c.isUserExcluded(p) {
+			t.Errorf("isUserExcluded(%q) = false, want true", p)
+		}
+	}
+
+	kept := []string{
+		"scripts.py",       // not under scripts/ — must not match by bare prefix
+		"src/scripts/a.py", // prefix anchored at path start, not mid-path
+		"toolsmith/x.go",   // "tools" must not match "toolsmith"
+		"one/other.py",     // exact-path entry must not match siblings
+	}
+	for _, p := range kept {
+		if c.isUserExcluded(p) {
+			t.Errorf("isUserExcluded(%q) = true, want false", p)
+		}
+	}
+
+	// Empty config excludes nothing.
+	empty := &Collector{}
+	if empty.isUserExcluded("scripts/eval_retrieval.py") {
+		t.Errorf("isUserExcluded with no excludePaths should be false")
+	}
+}

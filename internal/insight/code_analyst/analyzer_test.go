@@ -15,14 +15,26 @@ import (
 type mockLLMClient struct {
 	response *llm.CompletionResponse
 	err      error
+	// queue, when non-empty, supplies one response per Complete call in order
+	// (used to script the analyze call followed by the verify call). Falls back
+	// to response once exhausted.
+	queue []*llm.CompletionResponse
 	// capturedRequest is the last request sent to Complete.
 	capturedRequest llm.CompletionRequest
+	// capturedRequests holds every request, in order.
+	capturedRequests []llm.CompletionRequest
 }
 
 func (m *mockLLMClient) Complete(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	m.capturedRequest = req
+	m.capturedRequests = append(m.capturedRequests, req)
 	if m.err != nil {
 		return nil, m.err
+	}
+	if len(m.queue) > 0 {
+		r := m.queue[0]
+		m.queue = m.queue[1:]
+		return r, nil
 	}
 	return m.response, nil
 }
@@ -214,9 +226,124 @@ func TestAnalyzer_AnalyzeFile_LargeFile(t *testing.T) {
 		t.Fatal("no messages captured")
 	}
 	userMsg := mock.capturedRequest.Messages[0].Content
-	// The user message includes the truncated file content; ensure it's not the full ~48KB.
-	if len(userMsg) > 40*1024 {
+	// The content is truncated at 32KB then line-numbered (which adds a prefix
+	// per line), so the message is larger than the raw cap but still far below
+	// the full ~48KB file rendered with numbers (~63KB).
+	if len(userMsg) > 48*1024 {
 		t.Errorf("expected truncated content in LLM message, but message length is %d bytes", len(userMsg))
+	}
+	// Bug 2: a truncated file must carry an explicit truncation notice.
+	if !strings.Contains(userMsg, "file truncated") {
+		t.Errorf("expected truncation notice in user message, got: %s", userMsg[:200])
+	}
+}
+
+func TestAnalyzer_AnalyzeFile_NumbersSourceLines(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+
+	mock := &mockLLMClient{response: &llm.CompletionResponse{Content: "[]"}}
+	a := NewAnalyzer(mock, dir, nil, 0.7)
+	file := FileScore{FilePath: "main.go"}
+
+	if _, err := a.AnalyzeFile(context.Background(), file, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userMsg := mock.capturedRequest.Messages[0].Content
+	for _, want := range []string{"1\tpackage main", "3\tfunc main() {}"} {
+		if !strings.Contains(userMsg, want) {
+			t.Errorf("expected line-numbered content %q in user message, got: %s", want, userMsg)
+		}
+	}
+}
+
+func TestAnalyzer_AnalyzeFile_VerifyRejectsFinding(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "v.go", "package v\n\nfunc f() {}\n")
+
+	analyzeResp := `[{"category":"security","severity":"critical","title":"X","description":"d","line_start":3,"line_end":3,"confidence":0.95,"suggestion":"s"}]`
+	verifyResp := `[{"index":0,"verdict":"rejected","reason":"line does not contain the issue"}]`
+	mock := &mockLLMClient{queue: []*llm.CompletionResponse{
+		{Content: analyzeResp, InputTokens: 10, OutputTokens: 10},
+		{Content: verifyResp, InputTokens: 5, OutputTokens: 5},
+	}}
+
+	a := NewAnalyzer(mock, dir, nil, 0.7).WithVerify(true)
+	result, err := a.AnalyzeFile(context.Background(), FileScore{FilePath: "v.go"}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("expected rejected finding to be dropped, got %d findings", len(result.Findings))
+	}
+	if result.TokensUsed != 30 {
+		t.Errorf("expected 30 tokens (analyze + verify), got %d", result.TokensUsed)
+	}
+	if len(mock.capturedRequests) != 2 {
+		t.Fatalf("expected 2 LLM calls (analyze + verify), got %d", len(mock.capturedRequests))
+	}
+}
+
+func TestAnalyzer_AnalyzeFile_VerifyKeepsConfirmedFinding(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "v.go", "package v\n\nfunc f() {}\n")
+
+	analyzeResp := `[{"category":"security","severity":"critical","title":"X","description":"d","line_start":3,"line_end":3,"confidence":0.95,"suggestion":"s"}]`
+	verifyResp := `[{"index":0,"verdict":"confirmed","reason":"valid"}]`
+	mock := &mockLLMClient{queue: []*llm.CompletionResponse{
+		{Content: analyzeResp},
+		{Content: verifyResp},
+	}}
+
+	a := NewAnalyzer(mock, dir, nil, 0.7).WithVerify(true)
+	result, err := a.AnalyzeFile(context.Background(), FileScore{FilePath: "v.go"}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Findings) != 1 {
+		t.Fatalf("expected confirmed finding to survive, got %d findings", len(result.Findings))
+	}
+}
+
+func TestAnalyzer_AnalyzeFile_VerifyFailsOpen(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "v.go", "package v\n\nfunc f() {}\n")
+
+	analyzeResp := `[{"category":"security","severity":"critical","title":"X","description":"d","line_start":3,"line_end":3,"confidence":0.95,"suggestion":"s"}]`
+	mock := &mockLLMClient{queue: []*llm.CompletionResponse{
+		{Content: analyzeResp},
+		{Content: "not json"}, // verify pass returns garbage
+	}}
+
+	a := NewAnalyzer(mock, dir, nil, 0.7).WithVerify(true)
+	result, err := a.AnalyzeFile(context.Background(), FileScore{FilePath: "v.go"}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// A verify parse failure must fail open: the finding is kept, not dropped.
+	if len(result.Findings) != 1 {
+		t.Fatalf("expected finding kept on verify failure (fail-open), got %d", len(result.Findings))
+	}
+}
+
+func TestAnalyzer_AnalyzeFile_VerifyDisabledByDefault(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "v.go", "package v\n\nfunc f() {}\n")
+
+	analyzeResp := `[{"category":"security","severity":"critical","title":"X","description":"d","line_start":3,"line_end":3,"confidence":0.95,"suggestion":"s"}]`
+	mock := &mockLLMClient{response: &llm.CompletionResponse{Content: analyzeResp}}
+
+	a := NewAnalyzer(mock, dir, nil, 0.7) // verify not enabled
+	result, err := a.AnalyzeFile(context.Background(), FileScore{FilePath: "v.go"}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Findings) != 1 {
+		t.Fatalf("expected 1 finding without verify, got %d", len(result.Findings))
+	}
+	if len(mock.capturedRequests) != 1 {
+		t.Errorf("expected exactly 1 LLM call when verify disabled, got %d", len(mock.capturedRequests))
 	}
 }
 
