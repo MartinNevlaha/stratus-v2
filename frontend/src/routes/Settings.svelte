@@ -291,6 +291,7 @@
             <option value="anthropic">anthropic</option>
             <option value="openai">openai</option>
             <option value="ollama">ollama</option>
+            <option value="lmstudio">lmstudio</option>
           </select>
         </div>
         <div class="form-group">
@@ -500,6 +501,7 @@
                 <option value="anthropic">anthropic</option>
                 <option value="openai">openai</option>
                 <option value="ollama">ollama</option>
+            <option value="lmstudio">lmstudio</option>
               </select>
             </div>
             <div class="form-group">
@@ -632,6 +634,7 @@
                 <option value="anthropic">anthropic</option>
                 <option value="openai">openai</option>
                 <option value="ollama">ollama</option>
+            <option value="lmstudio">lmstudio</option>
               </select>
             </div>
             <div class="form-group">

@@ -65,7 +65,7 @@ Stratus is a single-binary Claude Code extension framework. The binary embeds fo
 ## Workflow Phase Transitions
 
 **Spec workflow** (simple): `plan → implement → verify → learn → complete`
-**Spec workflow** (complex): `plan → discovery → design → governance → accept → implement → verify → learn → complete`
+**Spec workflow** (complex): `plan → discovery → design → governance → plan → implement → verify → learn → complete` (governance loops back to plan for approval; `accept` is a legacy alias still accepted by the state machine)
 **Bug workflow**: `analyze → fix → review → complete` (review can loop back to fix)
 **E2E workflow**: `setup → plan → generate → heal → complete` (heal can loop back to generate)
 

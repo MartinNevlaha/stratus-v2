@@ -149,7 +149,7 @@ If checker returns `[must_update]` findings → address them in the design doc b
 
 ```
 workflow_id: "<slug>"
-phase: "Plan"
+phase: "plan"
 ```
 
 **DO NOT PROCEED to Phase 4 until this transition succeeds.**

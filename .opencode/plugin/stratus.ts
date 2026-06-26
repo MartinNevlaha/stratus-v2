@@ -90,6 +90,24 @@ async function fetchDashboardStateStrict(): Promise<DashboardState> {
   return await res.json()
 }
 
+async function fetchWorkflowByID(id: string): Promise<Workflow | null> {
+  const res = await fetch(`${BASE}/api/workflows/${encodeURIComponent(id)}`)
+  if (res.status === 404) return null
+  if (!res.ok) {
+    throw new Error(`Stratus API returned status ${res.status}`)
+  }
+  return await res.json()
+}
+
+function extractWorkflowIDFromTaskArgs(args: Record<string, unknown>): string | null {
+  const parts = [args["prompt"], args["command"], args["description"]]
+    .filter((v): v is string => typeof v === "string")
+    .join("\n")
+
+  const match = parts.match(/\b(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}\b/)
+  return match?.[0] ?? null
+}
+
 async function getActiveWorkflow(sessionID?: string): Promise<Workflow | null> {
   const state = await fetchDashboardState()
   if (!state) return null
@@ -116,6 +134,16 @@ async function getWorkflowForSessionStrict(sessionID?: string): Promise<Workflow
     if (wf.session_id === sessionID) return wf
   }
   return null
+}
+
+async function getWorkflowForTaskStrict(args: Record<string, unknown>, sessionID?: string): Promise<Workflow | null> {
+  const explicitWorkflowID = extractWorkflowIDFromTaskArgs(args)
+  if (explicitWorkflowID) {
+    const wf = await fetchWorkflowByID(explicitWorkflowID)
+    if (wf) return wf
+  }
+
+  return getWorkflowForSessionStrict(sessionID)
 }
 
 function isDeliveryAgent(): boolean {
@@ -239,7 +267,7 @@ export const Stratus: Plugin = async () => {
             if (isDelivery) {
               let wf: Workflow | null = null
               try {
-                wf = await getWorkflowForSessionStrict(input.sessionID)
+                wf = await getWorkflowForTaskStrict(output.args, input.sessionID)
               } catch (err) {
                 throw new Error(
                   `Cannot verify workflow: ${err}. Ensure Stratus server is running (stratus serve).`,

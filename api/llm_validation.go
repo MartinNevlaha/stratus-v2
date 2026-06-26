@@ -23,9 +23,9 @@ func validateLLMConfig(c config.LLMConfig, allowEmpty bool) error {
 
 	// Provider enum (empty allowed for override partial shape)
 	switch c.Provider {
-	case "", "zai", "anthropic", "openai", "ollama":
+	case "", "zai", "anthropic", "openai", "ollama", "lmstudio":
 	default:
-		return fmt.Errorf("llm.provider: invalid value %q (allowed: zai, anthropic, openai, ollama)", c.Provider)
+		return fmt.Errorf("llm.provider: invalid value %q (allowed: zai, anthropic, openai, ollama, lmstudio)", c.Provider)
 	}
 
 	// Temperature ∈ [0, 2]

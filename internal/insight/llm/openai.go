@@ -132,7 +132,14 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 
 	switch req.ResponseFormat {
 	case "json":
-		body.ResponseFormat = &openAIResponseFormat{Type: "json_object"}
+		// LM Studio's OpenAI-compatible endpoint rejects {"type":"json_object"}
+		// (it only accepts "json_schema" or "text"). We have no per-call JSON
+		// schema at this layer, so for lmstudio we omit the constraint and rely on
+		// the prompt plus llm.ParseJSONResponse's lenient parsing — gemma reliably
+		// emits valid JSON when the prompt asks for it.
+		if c.config.Provider != "lmstudio" {
+			body.ResponseFormat = &openAIResponseFormat{Type: "json_object"}
+		}
 	case "":
 		// nil — omitted by omitempty
 	default:

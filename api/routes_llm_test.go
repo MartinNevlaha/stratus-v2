@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 )
@@ -235,9 +236,11 @@ func TestHandleGetLLMUsage_TotalTokensCalculation(t *testing.T) {
 	database := setupTestDB(t)
 	defer database.Close()
 
-	// Pre-seed usage data.
-	_ = database.RecordTokenUsage("2026-04-09", "wiki_engine", 100, 50)
-	_ = database.RecordTokenUsage("2026-04-09", "guardian", 200, 100)
+	// Pre-seed usage data using today's date so the 7-day window always covers it
+	// (the DB query filters on date('now', '-N days'), so a hardcoded date rots).
+	today := time.Now().UTC().Format("2006-01-02")
+	_ = database.RecordTokenUsage(today, "wiki_engine", 100, 50)
+	_ = database.RecordTokenUsage(today, "guardian", 200, 100)
 
 	server := &Server{db: database}
 	req := httptest.NewRequest(http.MethodGet, "/api/llm/usage?days=7", nil)

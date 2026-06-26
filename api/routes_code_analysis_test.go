@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -331,7 +332,7 @@ func TestHandleGetCodeAnalysisMetrics(t *testing.T) {
 
 	m := &db.CodeQualityMetric{
 		ID:            "metric-1",
-		MetricDate:    "2026-04-12",
+		MetricDate:    time.Now().UTC().Format("2006-01-02"),
 		TotalFiles:    100,
 		FilesAnalyzed: 80,
 		FindingsTotal: 5,

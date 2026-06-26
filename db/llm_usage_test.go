@@ -1,6 +1,9 @@
 package db
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRecordTokenUsage_Insert(t *testing.T) {
 	d := openTestDB(t)
@@ -76,8 +79,11 @@ func TestGetDailyTokenUsage_NoRows(t *testing.T) {
 
 func TestGetTokenUsageHistory(t *testing.T) {
 	d := openTestDB(t)
-	_ = d.RecordTokenUsage("2026-04-09", "wiki_engine", 100, 50)
-	_ = d.RecordTokenUsage("2026-04-08", "guardian", 200, 100)
+	// Use dates inside the 7-day window — GetTokenUsageHistory filters on
+	// date('now', '-N days'), so hardcoded calendar dates rot over time.
+	now := time.Now().UTC()
+	_ = d.RecordTokenUsage(now.Format("2006-01-02"), "wiki_engine", 100, 50)
+	_ = d.RecordTokenUsage(now.AddDate(0, 0, -1).Format("2006-01-02"), "guardian", 200, 100)
 
 	rows, err := d.GetTokenUsageHistory(7)
 	if err != nil {

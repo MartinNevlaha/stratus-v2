@@ -104,7 +104,8 @@ func NewClient(cfg Config) (Client, error) {
 	switch cfg.Provider {
 	case "zai":
 		client, err = NewZAIClient(cfg)
-	case "openai":
+	case "openai", "lmstudio":
+		// LM Studio exposes an OpenAI-compatible /v1/chat/completions endpoint.
 		client, err = NewOpenAIClient(cfg)
 	case "ollama":
 		client, err = NewOllamaClient(cfg)

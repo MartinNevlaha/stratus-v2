@@ -209,6 +209,59 @@ func TestOpenAIClient_Complete_ResponseFormatJSON_IncludesInBody(t *testing.T) {
 	}
 }
 
+// TestOpenAIClient_Complete_ResponseFormatJSON_LMStudio_OmitsJSONObject is a
+// regression guard for LM Studio: its OpenAI-compatible endpoint rejects
+// {"type":"json_object"} with a 400, so the lmstudio provider must omit
+// response_format entirely even when the caller asks for "json".
+func TestOpenAIClient_Complete_ResponseFormatJSON_LMStudio_OmitsJSONObject(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(openAIResponse{
+			Model: "google/gemma-4-e4b",
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{Role: "assistant", Content: "{}"},
+					FinishReason: "stop",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := Config{Provider: "lmstudio", Model: "google/gemma-4-e4b", BaseURL: srv.URL}
+	client, err := NewOpenAIClient(cfg)
+	if err != nil {
+		t.Fatalf("NewOpenAIClient: %v", err)
+	}
+
+	_, err = client.Complete(context.Background(), CompletionRequest{
+		Messages:       []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:      16,
+		ResponseFormat: "json",
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	if _, ok := gotBody["response_format"]; ok {
+		t.Errorf("lmstudio request must omit response_format, got %v", gotBody["response_format"])
+	}
+}
+
 // TestOpenAIClient_Complete_ResponseFormatEmpty_OmitsFromBody is a regression
 // guard: callers that do not set ResponseFormat must not see the key injected
 // into the request body (preserves existing behaviour for wiki, product_intelligence, etc.).

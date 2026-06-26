@@ -709,6 +709,29 @@ func TestNewClient_Ollama_NoAPIKey(t *testing.T) {
 	}
 }
 
+func TestNewClient_LMStudio_NoAPIKey(t *testing.T) {
+	cfg := Config{Provider: "lmstudio", Model: "google/gemma-4-4b"}
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient (lmstudio): %v", err)
+	}
+	if client.Provider() != "lmstudio" {
+		t.Errorf("provider = %q, want lmstudio", client.Provider())
+	}
+}
+
+func TestConfig_LMStudio_EffectiveBaseURL(t *testing.T) {
+	cfg := Config{Provider: "lmstudio", Model: "m"}
+	if got := cfg.EffectiveBaseURL(); got != "http://localhost:1234/v1" {
+		t.Errorf("EffectiveBaseURL = %q, want http://localhost:1234/v1", got)
+	}
+	// Explicit base_url must win over the default.
+	cfg.BaseURL = "http://192.168.1.5:1234/v1"
+	if got := cfg.EffectiveBaseURL(); got != "http://192.168.1.5:1234/v1" {
+		t.Errorf("EffectiveBaseURL = %q, want explicit override", got)
+	}
+}
+
 func TestNewClient_UnsupportedProvider(t *testing.T) {
 	cfg := Config{Provider: "unknown_provider", Model: "m", APIKey: "k"}
 	_, err := NewClient(cfg)

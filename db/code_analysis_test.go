@@ -453,8 +453,9 @@ func TestSearchCodeFindings_FTS5(t *testing.T) {
 func TestSaveCodeQualityMetric_RoundTrip(t *testing.T) {
 	db := openTestDB(t)
 
+	today := time.Now().UTC().Format("2006-01-02")
 	m := &CodeQualityMetric{
-		MetricDate:         "2026-04-12",
+		MetricDate:         today,
 		TotalFiles:         500,
 		FilesAnalyzed:      450,
 		FindingsTotal:      30,
@@ -480,8 +481,8 @@ func TestSaveCodeQualityMetric_RoundTrip(t *testing.T) {
 	}
 
 	got := list[0]
-	if got.MetricDate != "2026-04-12" {
-		t.Errorf("MetricDate: got %q want 2026-04-12", got.MetricDate)
+	if got.MetricDate != today {
+		t.Errorf("MetricDate: got %q want %q", got.MetricDate, today)
 	}
 	if got.TotalFiles != 500 {
 		t.Errorf("TotalFiles: got %d want 500", got.TotalFiles)
@@ -505,8 +506,9 @@ func TestSaveCodeQualityMetric_RoundTrip(t *testing.T) {
 func TestSaveCodeQualityMetric_Upsert(t *testing.T) {
 	db := openTestDB(t)
 
+	today := time.Now().UTC().Format("2006-01-02")
 	m1 := &CodeQualityMetric{
-		MetricDate:    "2026-04-11",
+		MetricDate:    today,
 		TotalFiles:    100,
 		FindingsTotal: 10,
 	}
@@ -515,7 +517,7 @@ func TestSaveCodeQualityMetric_Upsert(t *testing.T) {
 	}
 
 	m2 := &CodeQualityMetric{
-		MetricDate:    "2026-04-11", // same date
+		MetricDate:    today, // same date
 		TotalFiles:    200,
 		FindingsTotal: 20,
 	}

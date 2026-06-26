@@ -67,7 +67,7 @@ Perform ALL of the following:
 
 ```
 workflow_id: "<slug>"
-phase: "Plan"
+phase: "plan"
 ```
 
 **DO NOT PROCEED to Phase 2 until this transition succeeds.**

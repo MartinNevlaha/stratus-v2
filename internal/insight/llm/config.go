@@ -58,14 +58,15 @@ func (c Config) Validate() error {
 	if c.Provider == "" {
 		return nil
 	}
-	validProviders := map[string]bool{"zai": true, "openai": true, "ollama": true, "anthropic": true}
+	validProviders := map[string]bool{"zai": true, "openai": true, "ollama": true, "anthropic": true, "lmstudio": true}
 	if !validProviders[c.Provider] {
-		return fmt.Errorf("llm: unsupported provider %q, must be one of: zai, openai, ollama, anthropic", c.Provider)
+		return fmt.Errorf("llm: unsupported provider %q, must be one of: zai, openai, ollama, anthropic, lmstudio", c.Provider)
 	}
 	if c.Model == "" {
 		return fmt.Errorf("llm: model is required")
 	}
-	if c.APIKey == "" && c.Provider != "ollama" {
+	// ollama and lmstudio are local OpenAI-compatible servers that don't require auth.
+	if c.APIKey == "" && c.Provider != "ollama" && c.Provider != "lmstudio" {
 		return fmt.Errorf("llm: api_key is required for provider %s", c.Provider)
 	}
 	if c.MaxTokens < 0 || c.MaxTokens > 131072 {
@@ -97,6 +98,8 @@ func (c Config) EffectiveBaseURL() string {
 		return "https://api.openai.com/v1"
 	case "ollama":
 		return "http://localhost:11434/v1"
+	case "lmstudio":
+		return "http://localhost:1234/v1"
 	case "anthropic":
 		return "https://api.anthropic.com"
 	default:

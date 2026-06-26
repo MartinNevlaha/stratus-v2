@@ -363,7 +363,11 @@ func (s *Server) handleTransitionPhase(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	state, err := s.coordinator.Transition(id, orchestration.Phase(body.Phase))
+	// Phase names are canonical lowercase constants. Normalize the incoming value
+	// so agent-supplied casing/whitespace (e.g. "Plan" from a skill heading) still
+	// matches the state machine instead of failing with "invalid transition".
+	phase := orchestration.Phase(strings.ToLower(strings.TrimSpace(body.Phase)))
+	state, err := s.coordinator.Transition(id, phase)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
