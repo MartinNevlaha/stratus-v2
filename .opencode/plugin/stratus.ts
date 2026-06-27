@@ -254,9 +254,7 @@ function isWriteBashCommand(cmd: string): boolean {
 
 export const Stratus: Plugin = async () => {
   return {
-    tool: {
-      execute: {
-        before: async (input: { tool: string; sessionID?: string }, output: { args: Record<string, unknown> }) => {
+    "tool.execute.before": async (input: { tool: string; sessionID?: string }, output: { args: Record<string, unknown> }) => {
           const toolName = input.tool.toLowerCase()
 
           // workflow_existence_guard: block Task delegation without workflow
@@ -321,21 +319,19 @@ export const Stratus: Plugin = async () => {
               )
             }
           }
-        },
+    },
 
-        after: async (input: { tool: string }, output: { args: Record<string, unknown> }) => {
-          if (!WATCH_TOOLS.includes(input.tool.toLowerCase())) return
+    "tool.execute.after": async (input: { tool: string; args: Record<string, unknown> }) => {
+      if (!WATCH_TOOLS.includes(input.tool.toLowerCase())) return
 
-          const filePath = (output.args["filePath"] ?? output.args["path"]) as string | undefined
-          if (!filePath) return
+      const filePath = (input.args["filePath"] ?? input.args["path"]) as string | undefined
+      if (!filePath) return
 
-          fetch(`${BASE}/api/retrieve/dirty`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: [filePath] }),
-          }).catch(() => {})
-        },
-      },
+      fetch(`${BASE}/api/retrieve/dirty`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: [filePath] }),
+      }).catch(() => {})
     },
   }
 }

@@ -4,7 +4,7 @@
     "build": {
       "description": "Full development work with all tools enabled",
       "mode": "primary",
-      "model": "zai-coding-plan/glm-5-turbo",
+      "model": "openai/gpt-5.5",
       "tools": {
         "bash": true,
         "edit": true,
@@ -14,7 +14,7 @@
     "delivery-backend-engineer": {
       "description": "Backend implementation specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-backend-engineer.md}",
       "tools": {
         "read": true
@@ -23,7 +23,7 @@
     "delivery-code-reviewer": {
       "description": "Code quality and pattern compliance reviewer",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5.1",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-code-reviewer.md}",
       "tools": {
         "read": true
@@ -32,7 +32,7 @@
     "delivery-database-engineer": {
       "description": "Database schema and migration specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-database-engineer.md}",
       "tools": {
         "read": true
@@ -41,7 +41,7 @@
     "delivery-debugger": {
       "description": "Diagnosis and system state inspection specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5.1",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-debugger.md}",
       "tools": {
         "read": true
@@ -50,7 +50,7 @@
     "delivery-devops-engineer": {
       "description": "CI/CD and infrastructure specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-devops-engineer.md}",
       "tools": {
         "read": true
@@ -59,7 +59,7 @@
     "delivery-frontend-engineer": {
       "description": "Frontend UI and styling specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5.1",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-frontend-engineer.md}",
       "tools": {
         "read": true
@@ -68,7 +68,7 @@
     "delivery-governance-checker": {
       "description": "Compliance and governance rule enforcement",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-governance-checker.md}",
       "tools": {
         "read": true
@@ -77,7 +77,7 @@
     "delivery-implementation-expert": {
       "description": "Focused implementation and drafting expert",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-implementation-expert.md}",
       "tools": {
         "read": true
@@ -86,7 +86,7 @@
     "delivery-mobile-engineer": {
       "description": "Mobile application development specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-mobile-engineer.md}",
       "tools": {
         "read": true
@@ -95,7 +95,7 @@
     "delivery-qa-engineer": {
       "description": "Quality assurance and testing specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-qa-engineer.md}",
       "tools": {
         "read": true
@@ -104,7 +104,7 @@
     "delivery-strategic-architect": {
       "description": "High-level architectural design specialist",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5.1",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-strategic-architect.md}",
       "tools": {
         "read": true
@@ -113,7 +113,7 @@
     "delivery-system-architect": {
       "description": "System architecture and infrastructure designer",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5.1",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-system-architect.md}",
       "tools": {
         "read": true
@@ -122,7 +122,7 @@
     "delivery-ux-designer": {
       "description": "User experience and interface designer",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-ux-designer.md}",
       "tools": {
         "read": true
@@ -131,7 +131,7 @@
     "plan": {
       "description": "Analysis and planning without making changes",
       "mode": "primary",
-      "model": "zai-coding-plan/glm-5-turbo",
+      "model": "openai/gpt-5.5",
       "permission": {
         "bash": "ask",
         "edit": "ask"
@@ -140,7 +140,7 @@
     "playwright-test-generator": {
       "description": "Use this agent when you need to create automated browser tests using Playwright",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/prompts/playwright-test-generator.md}",
       "tools": {
         "glob": true,
@@ -171,7 +171,7 @@
     "playwright-test-healer": {
       "description": "Use this agent when you need to debug and fix failing Playwright tests",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/prompts/playwright-test-healer.md}",
       "tools": {
         "edit": true,
@@ -193,7 +193,7 @@
     "playwright-test-planner": {
       "description": "Use this agent when you need to create comprehensive test plan for a web application or website",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5",
+      "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/prompts/playwright-test-planner.md}",
       "tools": {
         "glob": true,
