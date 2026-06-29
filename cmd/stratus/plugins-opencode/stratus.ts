@@ -99,12 +99,14 @@ async function fetchWorkflowByID(id: string): Promise<Workflow | null> {
   return await res.json()
 }
 
-function extractWorkflowIDFromTaskArgs(args: Record<string, unknown>): string | null {
-  const parts = [args["prompt"], args["command"], args["description"]]
+function getTaskText(args: Record<string, unknown>): string {
+  return [args["prompt"], args["command"], args["description"]]
     .filter((v): v is string => typeof v === "string")
     .join("\n")
+}
 
-  const match = parts.match(/\b(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}\b/)
+function extractWorkflowIDFromTaskArgs(args: Record<string, unknown>): string | null {
+  const match = getTaskText(args).match(/\b(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}\b/)
   return match?.[0] ?? null
 }
 
@@ -137,13 +139,29 @@ async function getWorkflowForSessionStrict(sessionID?: string): Promise<Workflow
 }
 
 async function getWorkflowForTaskStrict(args: Record<string, unknown>, sessionID?: string): Promise<Workflow | null> {
+  const taskText = getTaskText(args)
+  const state = await fetchDashboardStateStrict()
+
+  // Prefer matching the task text against actual active workflow IDs. This
+  // supports workflow IDs that do not use the spec-/bug-/e2e- prefix.
+  for (const wf of state.workflows) {
+    if (taskText.includes(wf.id)) return wf
+  }
+
+  // Fall back to the prefix regex for explicit IDs not present in dashboard state.
   const explicitWorkflowID = extractWorkflowIDFromTaskArgs(args)
   if (explicitWorkflowID) {
     const wf = await fetchWorkflowByID(explicitWorkflowID)
     if (wf) return wf
   }
 
-  return getWorkflowForSessionStrict(sessionID)
+  // Last resort: session ownership.
+  if (!sessionID) return null
+  for (const wf of state.workflows) {
+    if (wf.session_id === sessionID) return wf
+  }
+
+  return null
 }
 
 function isDeliveryAgent(): boolean {
