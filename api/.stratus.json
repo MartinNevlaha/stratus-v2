@@ -122,6 +122,8 @@
       "complexity",
       "security"
     ],
+    "exclude_paths": null,
+    "verify_findings": false,
     "llm": {
       "provider": "",
       "model": ""
