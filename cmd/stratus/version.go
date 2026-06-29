@@ -1,4 +1,4 @@
 package main
 
 // Version is the current stratus binary version. Update this before each release.
-const Version = "0.14.3"
+const Version = "0.14.4"
