@@ -143,6 +143,45 @@
       }
     })
 
+    // Clipboard support. xterm.js does not copy the selection to the system
+    // clipboard on its own, and plain Ctrl+C is forwarded to the shell as
+    // SIGINT. Interactive TUIs (opencode, claude code) also enable mouse
+    // reporting, so a normal drag is sent to the app instead of selecting
+    // text — hold Shift while dragging to force a local selection.
+    const copySelection = () => {
+      const sel = term.getSelection()
+      if (sel) navigator.clipboard?.writeText(sel).catch(() => {})
+    }
+
+    // Copy-on-select: as soon as a selection is made (Shift+drag inside a TUI,
+    // or a plain drag otherwise) it is mirrored to the system clipboard.
+    const onMouseUp = () => {
+      if (term.hasSelection()) copySelection()
+    }
+    container.addEventListener('mouseup', onMouseUp)
+
+    // Explicit shortcuts: Ctrl+Shift+C copies the selection, Ctrl+Shift+V
+    // pastes. Returning false stops xterm from forwarding the key to the shell.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true
+      if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+        if (term.hasSelection()) {
+          copySelection()
+          return false
+        }
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+        navigator.clipboard?.readText().then((text) => {
+          if (text && ws?.readyState === WebSocket.OPEN) {
+            autoScroll = true
+            ws.send(JSON.stringify({ type: 'input', data: { id: sessionId, data: text } }))
+          }
+        }).catch(() => {})
+        return false
+      }
+      return true
+    })
+
     // Intercept clipboard paste containing images.
     // Text paste falls through to xterm's native handler.
     const onPaste = async (e: ClipboardEvent) => {
@@ -196,6 +235,7 @@
       visObs.disconnect()
       viewport?.removeEventListener('scroll', onViewportScroll)
       window.removeEventListener('focus', onFocus)
+      container.removeEventListener('mouseup', onMouseUp)
       container.removeEventListener('paste', onPaste)
       container.removeEventListener('dragover', onDragOver)
       container.removeEventListener('dragleave', onDragLeave)
