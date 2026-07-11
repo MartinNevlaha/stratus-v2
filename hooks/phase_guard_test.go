@@ -24,7 +24,7 @@ func TestWorkflowExistenceGuardBlocksWithoutSessionWorkflow(t *testing.T) {
 	if decision.Continue {
 		t.Fatalf("expected guard to block when no session workflow exists")
 	}
-	if decision.Reason != noActiveWorkflowReason {
+	if decision.Reason != unresolvedWorkflowReason {
 		t.Fatalf("unexpected reason: %q", decision.Reason)
 	}
 }
@@ -65,7 +65,59 @@ func TestDelegationGuardUsesExactSessionWorkflow(t *testing.T) {
 	if decision.Continue {
 		t.Fatalf("expected delegation guard to block when only another session has a workflow")
 	}
-	if decision.Reason != noActiveWorkflowReason {
+	if decision.Reason != unresolvedWorkflowReason {
+		t.Fatalf("unexpected reason: %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuardResolvesByExplicitWorkflowIDAmongParallel(t *testing.T) {
+	// Two parallel workflows sharing one session. spec-a is in implement (backend allowed),
+	// spec-b is in verify (backend NOT allowed). The task prompt names spec-a, so the guard
+	// must resolve spec-a and allow — not pick spec-b by list order.
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-b", "session_id": "sess", "type": "spec", "phase": "verify"},
+			{"id": "spec-a", "session_id": "sess", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Task",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+			"prompt":        "Implement task 3 under workflow spec-a per the plan.",
+		},
+	})
+
+	if !decision.Continue {
+		t.Fatalf("expected guard to allow backend-engineer under spec-a implement, got blocked: %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuardAmbiguousParallelBlocks(t *testing.T) {
+	// Two parallel workflows, neither owned by this session and no ID in the prompt →
+	// the guard must not guess; it blocks with the actionable unresolved reason.
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "sess-a", "type": "spec", "phase": "implement"},
+			{"id": "bug-b", "session_id": "sess-b", "type": "bug", "phase": "review"},
+		},
+	})
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Task",
+		SessionID: "sess-current",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+			"prompt":        "Implement the fix.",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected guard to block on ambiguous parallel state")
+	}
+	if decision.Reason != unresolvedWorkflowReason {
 		t.Fatalf("unexpected reason: %q", decision.Reason)
 	}
 }
@@ -175,6 +227,81 @@ func TestDelegationGuardPhaseAgentMatching(t *testing.T) {
 				t.Fatalf("expected shouldAllow=%v, got Continue=%v, Reason=%q", tt.shouldAllow, decision.Continue, decision.Reason)
 			}
 		})
+	}
+}
+
+func TestFetchActiveWorkflowExactSessionMatchAmongParallel(t *testing.T) {
+	// Two parallel workflows in different phases. The resolver must return the one
+	// owned by the querying session, not whichever is first in the list.
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-b", "session_id": "session-b", "type": "spec", "phase": "verify"},
+			{"id": "spec-a", "session_id": "session-a", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	wf := fetchActiveWorkflow("session-a")
+	if wf == nil {
+		t.Fatalf("expected to resolve session-a workflow, got nil")
+	}
+	if id, _ := wf["id"].(string); id != "spec-a" {
+		t.Fatalf("expected spec-a, got %q", id)
+	}
+}
+
+func TestFetchActiveWorkflowAmbiguousReturnsNil(t *testing.T) {
+	// Multiple parallel workflows, none owned by this session → do not guess.
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-b", "session_id": "session-b", "type": "spec", "phase": "verify"},
+			{"id": "bug-c", "session_id": "", "type": "bug", "phase": "review"},
+		},
+	})
+
+	if wf := fetchActiveWorkflow("session-a"); wf != nil {
+		t.Fatalf("expected nil for ambiguous multi-workflow state, got %#v", wf)
+	}
+	// Empty session must not fall back to first when several flows are active.
+	if wf := fetchActiveWorkflow(""); wf != nil {
+		t.Fatalf("expected nil for empty session with multiple workflows, got %#v", wf)
+	}
+}
+
+func TestFetchActiveWorkflowSingleWorkflowFallback(t *testing.T) {
+	// A single active workflow is safe to return even without a session match
+	// (session-tracking glitch / resumed session).
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	wf := fetchActiveWorkflow("session-unknown")
+	if wf == nil {
+		t.Fatalf("expected single-workflow fallback, got nil")
+	}
+	if id, _ := wf["id"].(string); id != "spec-a" {
+		t.Fatalf("expected spec-a, got %q", id)
+	}
+}
+
+func TestPhaseGuardDoesNotBlockAcrossParallelWorkflows(t *testing.T) {
+	// A delivery agent implementing in session-a must not be blocked just because a
+	// different parallel workflow (session-b) is in its verify phase.
+	t.Setenv("CLAUDE_AGENT_ID", "delivery-backend-engineer")
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-b", "session_id": "session-b", "type": "spec", "phase": "verify"},
+			{"id": "spec-a", "session_id": "session-a", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := PhaseGuard(HookEvent{
+		ToolName:  "Write",
+		SessionID: "session-a",
+	})
+	if !decision.Continue {
+		t.Fatalf("expected write to be allowed in session-a implement phase, got blocked: %q", decision.Reason)
 	}
 }
 

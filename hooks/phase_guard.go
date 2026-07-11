@@ -4,14 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
-
 )
 
 const noActiveWorkflowReason = "No active workflow registered. Use mcp__stratus__register_workflow first."
+
+const unresolvedWorkflowReason = "No workflow could be resolved for this delegation. Register a workflow with mcp__stratus__register_workflow first. " +
+	"If several workflows are active in parallel, include the exact workflow ID in the Task prompt so the correct flow is selected."
+
+// workflowIDRe matches an explicit workflow ID (spec-/bug-/e2e- prefixed) embedded in a
+// Task prompt. Mirrors the OpenCode plugin regex so both runtimes resolve identically.
+var workflowIDRe = regexp.MustCompile(`\b(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}\b`)
 
 // phaseAgentAllowlist defines which delivery agents are allowed in each phase per workflow type.
 var phaseAgentAllowlist = map[string]map[string][]string{
@@ -83,7 +91,7 @@ func WorkflowExistenceGuard(event HookEvent) Decision {
 		return Decision{Continue: true}
 	}
 
-	wf, err := fetchWorkflowForSessionStrict(event.SessionID)
+	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
 		return Decision{
 			Continue: false,
@@ -93,7 +101,7 @@ func WorkflowExistenceGuard(event HookEvent) Decision {
 	if wf == nil {
 		return Decision{
 			Continue: false,
-			Reason:   noActiveWorkflowReason,
+			Reason:   unresolvedWorkflowReason,
 		}
 	}
 
@@ -113,7 +121,7 @@ func DelegationGuard(event HookEvent) Decision {
 		return Decision{Continue: true}
 	}
 
-	wf, err := fetchWorkflowForSessionStrict(event.SessionID)
+	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
 		return Decision{
 			Continue: false,
@@ -123,7 +131,7 @@ func DelegationGuard(event HookEvent) Decision {
 	if wf == nil {
 		return Decision{
 			Continue: false,
-			Reason:   noActiveWorkflowReason,
+			Reason:   unresolvedWorkflowReason,
 		}
 	}
 
@@ -326,46 +334,157 @@ func fetchWorkflowForSessionStrict(sessionID string) (map[string]any, error) {
 	return nil, nil
 }
 
+// fetchWorkflowForTaskStrict resolves the workflow a Task delegation belongs to. It mirrors
+// the OpenCode plugin: an explicit workflow ID in the task prompt is the most reliable signal
+// and the only one that disambiguates parallel workflows sharing a session. FAIL-CLOSED:
+// returns an error if the Stratus API is unreachable.
+//
+// Resolution order:
+//  1. Workflow ID present in the task text (unique match, or the session-owned one).
+//  2. Prefix-form ID (spec-/bug-/e2e-) not yet in dashboard state, fetched by ID.
+//  3. Session ownership — only when it resolves to a single workflow.
+//
+// When several workflows match without a disambiguating ID, it returns nil rather than
+// picking by list order, so parallel flows never mix.
+func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map[string]any, error) {
+	state, err := fetchDashboardStateStrict()
+	if err != nil {
+		return nil, err
+	}
+
+	var workflows []map[string]any
+	for _, wf := range state.Workflows {
+		if wf != nil {
+			workflows = append(workflows, wf)
+		}
+	}
+
+	taskText := getTaskText(toolInput)
+
+	// 1. Explicit workflow ID embedded in the task text.
+	var textMatches []map[string]any
+	for _, wf := range workflows {
+		if id, _ := wf["id"].(string); id != "" && strings.Contains(taskText, id) {
+			textMatches = append(textMatches, wf)
+		}
+	}
+	if len(textMatches) == 1 {
+		return textMatches[0], nil
+	}
+	if len(textMatches) > 1 {
+		// Multiple IDs in the prompt: prefer one owned by this session; else ambiguous.
+		for _, wf := range textMatches {
+			if s, _ := wf["session_id"].(string); sessionID != "" && s == sessionID {
+				return wf, nil
+			}
+		}
+		return nil, nil
+	}
+
+	// 2. Prefix-form ID not present in dashboard state.
+	if id := workflowIDRe.FindString(taskText); id != "" {
+		wf, err := fetchWorkflowByID(id)
+		if err != nil {
+			return nil, err
+		}
+		if wf != nil {
+			return wf, nil
+		}
+	}
+
+	// 3. Session ownership — only when it resolves to a single workflow. Picking the first
+	//    of several session-mates is exactly what let parallel flows mix.
+	if sessionID != "" {
+		var sessionMatches []map[string]any
+		for _, wf := range workflows {
+			if s, _ := wf["session_id"].(string); s == sessionID {
+				sessionMatches = append(sessionMatches, wf)
+			}
+		}
+		if len(sessionMatches) == 1 {
+			return sessionMatches[0], nil
+		}
+	}
+
+	return nil, nil
+}
+
+// getTaskText concatenates the free-text fields of a Task tool call for workflow-ID matching.
+func getTaskText(toolInput map[string]any) string {
+	var parts []string
+	for _, key := range []string{"prompt", "command", "description"} {
+		if v, ok := toolInput[key].(string); ok && v != "" {
+			parts = append(parts, v)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// fetchWorkflowByID looks up a single workflow by ID. Returns (nil, nil) on 404.
+func fetchWorkflowByID(id string) (map[string]any, error) {
+	port := getPort()
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://localhost:" + port + "/api/workflows/" + url.PathEscape(id))
+	if err != nil {
+		return nil, fmt.Errorf("stratus API unreachable at localhost:%s: %w", port, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("stratus API returned status %d", resp.StatusCode)
+	}
+
+	var wf map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&wf); err != nil {
+		return nil, fmt.Errorf("failed to decode stratus response: %w", err)
+	}
+	return wf, nil
+}
+
 // fetchActiveWorkflow queries the local Stratus API for the active workflow state.
 //
 // Matching priority:
-//  1. Exact session_id match          — preferred (multiple concurrent windows)
-//  2. Workflow with no session_id set — created before session tracking / CLAUDE_SESSION_ID
-//     was not available in the Bash environment; treated as a wildcard
-//  3. First active workflow           — last-resort fallback for resumed sessions whose
-//     session_id changed; PhaseGuard uses this to keep phase checks best-effort
+//  1. Exact session_id match — preferred and unambiguous (multiple concurrent windows).
+//  2. Single active workflow — last-resort fallback for resumed sessions whose session_id
+//     changed, or when CLAUDE_SESSION_ID was unavailable; safe only because there is
+//     exactly one flow to bind to.
+//
+// When several workflows run in parallel and none is owned by this session, we do NOT
+// guess. Binding the session to whichever flow happens to be first would gate its writes
+// against the wrong phase (the flows "mix"). Returning nil keeps PhaseGuard best-effort
+// (it simply does not block) rather than blocking legitimate work under a foreign phase.
 func fetchActiveWorkflow(sessionID string) map[string]any {
 	state := fetchDashboardState()
 	if state == nil {
 		return nil
 	}
 
-	var untracked, first map[string]any
+	var workflows []map[string]any
 	for _, wf := range state.Workflows {
-		if wf == nil {
-			continue
-		}
-		// Track first workflow for last-resort fallback.
-		if first == nil {
-			first = wf
-		}
-		if sessionID == "" {
-			return wf // no session filter → return first
-		}
-		wfSession, _ := wf["session_id"].(string)
-		if wfSession == sessionID {
-			return wf // exact match — best case
-		}
-		if wfSession == "" && untracked == nil {
-			untracked = wf // workflow without session tracking
+		if wf != nil {
+			workflows = append(workflows, wf)
 		}
 	}
-	// Fall back: prefer an untracked workflow, then any workflow.
-	// This handles CLAUDE_SESSION_ID being unset during /spec and resumed sessions.
-	if untracked != nil {
-		return untracked
+
+	// 1. Exact session match is unambiguous — always prefer it.
+	if sessionID != "" {
+		for _, wf := range workflows {
+			if s, _ := wf["session_id"].(string); s == sessionID {
+				return wf
+			}
+		}
 	}
-	return first
+
+	// 2. No session match: fall back only when a single workflow is active.
+	if len(workflows) == 1 {
+		return workflows[0]
+	}
+
+	// 3. Ambiguous (multiple parallel workflows, none owned by this session) → don't guess.
+	return nil
 }
 
 func fetchDashboardState() *dashboardState {

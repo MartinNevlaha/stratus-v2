@@ -19,6 +19,10 @@ const WATCH_TOOLS = ["write", "edit"]
 
 const noActiveWorkflowReason = "No active workflow registered. Use /spec or /bug command first."
 
+const unresolvedWorkflowReason =
+  "No workflow could be resolved for this delegation. Register a workflow with /spec or /bug first. " +
+  "If several workflows are active in parallel, include the exact workflow ID in the Task prompt so the correct flow is selected."
+
 const phaseAgentAllowlist: Record<string, Record<string, string[]>> = {
   bug: {
     analyze: ["delivery-debugger", "delivery-strategic-architect", "delivery-system-architect", "plan", "explore"],
@@ -114,17 +118,23 @@ async function getActiveWorkflow(sessionID?: string): Promise<Workflow | null> {
   const state = await fetchDashboardState()
   if (!state) return null
 
-  let untracked: Workflow | null = null
-  let first: Workflow | null = null
+  const workflows = state.workflows ?? []
 
-  for (const wf of state.workflows) {
-    if (!first) first = wf
-    if (!sessionID) return wf
-    if (wf.session_id === sessionID) return wf
-    if (!wf.session_id && !untracked) untracked = wf
+  // 1. Exact session match is unambiguous — always prefer it.
+  if (sessionID) {
+    for (const wf of workflows) {
+      if (wf.session_id === sessionID) return wf
+    }
   }
 
-  return untracked ?? first
+  // 2. No session match. Only fall back when exactly one workflow is active, so a
+  //    session-tracking glitch does not disable the guard. With several parallel
+  //    workflows we must NOT guess — binding this session to whichever flow happens
+  //    to be first would gate its writes against the wrong phase (the flows "mix").
+  if (workflows.length === 1) return workflows[0]
+
+  // 3. Ambiguous: multiple parallel workflows, none owned by this session → don't guess.
+  return null
 }
 
 async function getWorkflowForSessionStrict(sessionID?: string): Promise<Workflow | null> {
@@ -141,24 +151,31 @@ async function getWorkflowForSessionStrict(sessionID?: string): Promise<Workflow
 async function getWorkflowForTaskStrict(args: Record<string, unknown>, sessionID?: string): Promise<Workflow | null> {
   const taskText = getTaskText(args)
   const state = await fetchDashboardStateStrict()
+  const workflows = state.workflows ?? []
 
-  // Prefer matching the task text against actual active workflow IDs. This
-  // supports workflow IDs that do not use the spec-/bug-/e2e- prefix.
-  for (const wf of state.workflows) {
-    if (taskText.includes(wf.id)) return wf
+  // 1. Explicit workflow ID embedded in the task text — the most reliable signal and
+  //    the only one that disambiguates parallel workflows sharing a session. Supports
+  //    workflow IDs that do not use the spec-/bug-/e2e- prefix.
+  const textMatches = workflows.filter((wf) => wf.id && taskText.includes(wf.id))
+  if (textMatches.length === 1) return textMatches[0]
+  if (textMatches.length > 1) {
+    // Multiple IDs appear in the prompt: prefer one owned by this session; otherwise
+    // it is genuinely ambiguous and we must not pick by list order.
+    return textMatches.find((wf) => sessionID && wf.session_id === sessionID) ?? null
   }
 
-  // Fall back to the prefix regex for explicit IDs not present in dashboard state.
+  // 2. Fall back to the prefix regex for explicit IDs not present in dashboard state.
   const explicitWorkflowID = extractWorkflowIDFromTaskArgs(args)
   if (explicitWorkflowID) {
     const wf = await fetchWorkflowByID(explicitWorkflowID)
     if (wf) return wf
   }
 
-  // Last resort: session ownership.
-  if (!sessionID) return null
-  for (const wf of state.workflows) {
-    if (wf.session_id === sessionID) return wf
+  // 3. Last resort: session ownership — but only when it resolves to a single workflow.
+  //    Picking the first of several session-mates is exactly what let parallel flows mix.
+  if (sessionID) {
+    const sessionMatches = workflows.filter((wf) => wf.session_id === sessionID)
+    if (sessionMatches.length === 1) return sessionMatches[0]
   }
 
   return null
@@ -291,7 +308,7 @@ export const Stratus: Plugin = async () => {
               }
 
               if (!wf) {
-                throw new Error(noActiveWorkflowReason)
+                throw new Error(unresolvedWorkflowReason)
               }
 
               // delegation_guard: check phase-agent matching
