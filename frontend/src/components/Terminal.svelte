@@ -143,30 +143,42 @@
       }
     })
 
-    // Clipboard support. xterm.js does not copy the selection to the system
-    // clipboard on its own, and plain Ctrl+C is forwarded to the shell as
-    // SIGINT. Interactive TUIs (opencode, claude code) also enable mouse
-    // reporting, so a normal drag is sent to the app instead of selecting
-    // text — hold Shift while dragging to force a local selection.
-    const copySelection = () => {
-      const sel = term.getSelection()
-      if (sel) navigator.clipboard?.writeText(sel).catch(() => {})
+    // Clipboard support. xterm selection is not DOM selection, so browser copy
+    // events must write the terminal selection explicitly. Plain Ctrl+C is left
+    // for the shell as SIGINT; Shift+drag can force local selection inside TUIs.
+    const writeSelectionToClipboardEvent = (e: ClipboardEvent) => {
+      const selection = term.getSelection()
+      if (!selection) return false
+      e.clipboardData?.setData('text/plain', selection)
+      e.preventDefault()
+      return true
     }
 
-    // Copy-on-select: as soon as a selection is made (Shift+drag inside a TUI,
-    // or a plain drag otherwise) it is mirrored to the system clipboard.
-    const onMouseUp = () => {
-      if (term.hasSelection()) copySelection()
+    const copySelectionWithBrowser = () => {
+      if (!term.hasSelection()) return false
+      term.focus()
+      if (document.execCommand('copy')) return true
+      const selection = term.getSelection()
+      if (selection) navigator.clipboard?.writeText(selection).catch(() => {})
+      return true
     }
-    container.addEventListener('mouseup', onMouseUp)
+
+    const onCopy = (e: ClipboardEvent) => {
+      writeSelectionToClipboardEvent(e)
+    }
+    container.addEventListener('copy', onCopy)
 
     // Explicit shortcuts: Ctrl+Shift+C copies the selection, Ctrl+Shift+V
     // pastes. Returning false stops xterm from forwarding the key to the shell.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+        copySelectionWithBrowser()
+        return false
+      }
+      if (e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
         if (term.hasSelection()) {
-          copySelection()
+          copySelectionWithBrowser()
           return false
         }
       }
@@ -235,7 +247,7 @@
       visObs.disconnect()
       viewport?.removeEventListener('scroll', onViewportScroll)
       window.removeEventListener('focus', onFocus)
-      container.removeEventListener('mouseup', onMouseUp)
+      container.removeEventListener('copy', onCopy)
       container.removeEventListener('paste', onPaste)
       container.removeEventListener('dragover', onDragOver)
       container.removeEventListener('dragleave', onDragLeave)
