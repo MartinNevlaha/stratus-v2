@@ -348,7 +348,7 @@ func Default() Config {
 		},
 		STT: STTConfig{
 			Endpoint: "http://localhost:8011",
-			Model:    "Systran/faster-whisper-large-v3",
+			Model:    "NaiveNeuron/whisper-large-v3-turbo-sk",
 		},
 		Guardian: GuardianConfig{
 			Enabled:                true,

@@ -24,10 +24,10 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/api"
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/hooks"
 	"github.com/MartinNevlaha/stratus-v2/insight"
-	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
@@ -43,7 +43,7 @@ import (
 const (
 	sttContainerName = "stratus-stt"
 	sttImage         = "ghcr.io/speaches-ai/speaches:latest-cpu"
-	sttDefaultModel  = "Systran/faster-whisper-large-v3"
+	sttDefaultModel  = "NaiveNeuron/whisper-large-v3-turbo-sk"
 	sttHost          = "http://localhost:8011"
 )
 
@@ -646,7 +646,7 @@ func cmdInit() {
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "Systran/faster-whisper-large-v3"
+    "model": "NaiveNeuron/whisper-large-v3-turbo-sk"
   }
 }
 `

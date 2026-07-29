@@ -18,7 +18,7 @@
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "Systran/faster-whisper-large-v3"
+    "model": "NaiveNeuron/whisper-large-v3-turbo-sk"
   },
   "guardian": {
     "enabled": true,

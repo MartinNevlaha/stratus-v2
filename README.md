@@ -430,7 +430,7 @@ WS     /api/terminal/ws        PTY terminal I/O
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "Systran/faster-whisper-large-v3"
+    "model": "NaiveNeuron/whisper-large-v3-turbo-sk"
   }
 }
 ```
@@ -458,13 +458,14 @@ The fastest way to give instructions to an AI agent is to just say them out loud
 3. Click again — audio is transcribed and injected at the terminal cursor
 4. Press Enter
 
-The container (`stratus-stt`) starts with `stratus serve` and stops when you exit. First launch pulls the model (~3 GB with the default `large-v3`); subsequent starts are instant.
+The container (`stratus-stt`) starts with `stratus serve` and stops when you exit. First launch pulls the model; subsequent starts are instant.
 
 | Model | Size | Speed | Use case |
 |-------|------|-------|----------|
 | `Systran/faster-whisper-small` | ~244 MB | ~1s | Fast iteration, quick prompts |
 | `Systran/faster-whisper-medium` | ~769 MB | ~2s | Longer dictation, technical terms |
-| `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Default — maximum accuracy, heavy accents |
+| `NaiveNeuron/whisper-large-v3-turbo-sk` | varies | ~4s | Default Slovak-tuned large-v3-turbo model |
+| `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Maximum accuracy, heavy accents |
 
 Set `stt.model` in `.stratus.json` to switch models. **Docker is only required for STT** — all other Stratus features work without it.
 
