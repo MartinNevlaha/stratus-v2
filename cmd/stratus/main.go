@@ -1409,7 +1409,9 @@ func writeHooks(projectRoot string) error {
 		{
 			event: "PreToolUse",
 			hooks: []hookDef{
-				{"Write|Edit|Bash|NotebookEdit|MultiEdit|Task", "stratus hook executor_routing_guard"},
+				// No executor_routing_guard here: cmdHook has never had a handler for
+				// it, so it registered a hook that spawned a process on every write and
+				// every delegation only to fall through to Allow.
 				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
 				{"Task", "stratus hook workflow_existence_guard"},
 				{"Task", "stratus hook delegation_guard"},

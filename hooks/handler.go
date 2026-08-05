@@ -16,13 +16,23 @@ type HookEvent struct {
 	SessionID     string         `json:"session_id"`
 	ToolName      string         `json:"tool_name,omitempty"`
 	ToolInput     map[string]any `json:"tool_input,omitempty"`
-	Extra         map[string]any `json:"-"`
+	// TranscriptPath points at the JSONL transcript of the agent the hook fired for.
+	TranscriptPath string `json:"transcript_path,omitempty"`
+	// TeammateName and TeamName are only set on Agent Teams events (TeammateIdle,
+	// TaskCreated, TaskCompleted).
+	TeammateName string         `json:"teammate_name,omitempty"`
+	TeamName     string         `json:"team_name,omitempty"`
+	Extra        map[string]any `json:"-"`
 }
 
 // Decision is the output written back to Claude Code.
 type Decision struct {
 	Continue bool   `json:"continue"`
 	Reason   string `json:"reason,omitempty"`
+	// Nudge redirects the agent instead of stopping it: Claude Code injects Reason
+	// into the agent's conversation and lets it keep working. Only meaningful for
+	// stop-like events (TeammateIdle); PreToolUse guards deny with Continue=false.
+	Nudge bool `json:"-"`
 }
 
 // Handler is a function that processes a hook event.
@@ -53,6 +63,22 @@ func Block(reason string) {
 	os.Exit(2)
 }
 
+// Nudge writes a stop-hook "block" decision and exits 0: Claude Code feeds reason
+// back into the agent's conversation as a message and the agent keeps working.
+//
+// This deliberately does not reuse Block. Claude Code reads `{"continue": false}`
+// as preventContinuation — it would stop the agent dead, which is the opposite of
+// redirecting it — and exit 2 is the plain blocking-error path.
+func Nudge(reason string) {
+	fmt.Println(string(nudgePayload(reason)))
+	os.Exit(0)
+}
+
+func nudgePayload(reason string) []byte {
+	data, _ := json.Marshal(map[string]string{"decision": "block", "reason": reason})
+	return data
+}
+
 func writeDecision(d Decision) {
 	data, _ := json.Marshal(d)
 	fmt.Println(string(data))
@@ -75,9 +101,12 @@ func Run(name string, handlers map[string]Handler) {
 	}
 
 	decision := h(event)
-	if decision.Continue {
+	switch {
+	case decision.Nudge:
+		Nudge(decision.Reason)
+	case decision.Continue:
 		Allow()
-	} else {
+	default:
 		Block(decision.Reason)
 	}
 }
