@@ -18,7 +18,7 @@
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "NaiveNeuron/whisper-large-v3-turbo-sk"
+    "model": "matoog/whisper-large-v3-turbo-sk-ct2"
   },
   "guardian": {
     "enabled": true,

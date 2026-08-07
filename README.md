@@ -430,7 +430,7 @@ WS     /api/terminal/ws        PTY terminal I/O
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "NaiveNeuron/whisper-large-v3-turbo-sk"
+    "model": "matoog/whisper-large-v3-turbo-sk-ct2"
   }
 }
 ```
@@ -464,7 +464,7 @@ The container (`stratus-stt`) starts with `stratus serve` and stops when you exi
 |-------|------|-------|----------|
 | `Systran/faster-whisper-small` | ~244 MB | ~1s | Fast iteration, quick prompts |
 | `Systran/faster-whisper-medium` | ~769 MB | ~2s | Longer dictation, technical terms |
-| `NaiveNeuron/whisper-large-v3-turbo-sk` | varies | ~4s | Default Slovak-tuned large-v3-turbo model |
+| `matoog/whisper-large-v3-turbo-sk-ct2` | varies | ~4s | Default Slovak-tuned large-v3-turbo model |
 | `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Maximum accuracy, heavy accents |
 
 Set `stt.model` in `.stratus.json` to switch models. **Docker is only required for STT** — all other Stratus features work without it.

@@ -348,7 +348,7 @@ func Default() Config {
 		},
 		STT: STTConfig{
 			Endpoint: "http://localhost:8011",
-			Model:    "NaiveNeuron/whisper-large-v3-turbo-sk",
+			Model:    "matoog/whisper-large-v3-turbo-sk-ct2",
 		},
 		Guardian: GuardianConfig{
 			Enabled:                true,

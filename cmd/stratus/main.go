@@ -43,7 +43,8 @@ import (
 const (
 	sttContainerName = "stratus-stt"
 	sttImage         = "ghcr.io/speaches-ai/speaches:latest-cpu"
-	sttDefaultModel  = "NaiveNeuron/whisper-large-v3-turbo-sk"
+	sttDefaultModel  = "matoog/whisper-large-v3-turbo-sk-ct2"
+	sttLegacySKModel = "NaiveNeuron/whisper-large-v3-turbo-sk"
 	sttHost          = "http://localhost:8011"
 )
 
@@ -251,6 +252,7 @@ func cmdServe() {
 	cfg.Insight.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.Insight.LLM)
 	cfg.Guardian.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.Guardian.LLM)
 	cfg.CodeAnalysis.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.CodeAnalysis.LLM)
+	cfg.STT.Model = normalizeSTTModel(cfg.STT.Model)
 
 	// Initialize Insight engine
 	var insightEngine *insight.Engine
@@ -468,10 +470,7 @@ func sttStart(model string) bool {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return false
 	}
-	// "whisper-1" is the OpenAI API alias; speaches needs the HuggingFace model ID.
-	if model == "" || model == "whisper-1" {
-		model = sttDefaultModel
-	}
+	model = normalizeSTTModel(model)
 
 	// Check existing container state.
 	out, _ := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", sttContainerName).Output()
@@ -507,6 +506,15 @@ func sttStart(model string) bool {
 	// POST /v1/models/{id} triggers download; subsequent calls are no-ops.
 	go sttInstallModel(sttHost, model)
 	return true
+}
+
+func normalizeSTTModel(model string) string {
+	// "whisper-1" is the OpenAI API alias; speaches needs a HuggingFace model ID.
+	// The previous Slovak default no longer appears in Speaches' model catalog.
+	if model == "" || model == "whisper-1" || model == sttLegacySKModel {
+		return sttDefaultModel
+	}
+	return model
 }
 
 // sttInstallModel waits for the speaches health endpoint then installs the model.
@@ -646,7 +654,7 @@ func cmdInit() {
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "NaiveNeuron/whisper-large-v3-turbo-sk"
+    "model": "matoog/whisper-large-v3-turbo-sk-ct2"
   }
 }
 `
