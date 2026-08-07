@@ -67,10 +67,10 @@ All phase transitions use: `curl -sS -X PUT $BASE/api/workflows/<id>/phase -H 'C
 Present task list, confirm with user. Transition to `implement`, then continue with implement below.
 
 ### spec — `discovery` (complex)
-Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis. Record delegation. Transition to `design`.
+Delegate to `delivery-strategic-architect` (Agent tool) — requirements analysis. Record delegation. Transition to `design`.
 
 ### spec — `design` (complex)
-Delegate to `delivery-system-architect` (Task tool) — component design, API contracts. Produce/update `docs/plans/<id>-design.md`. Record delegation. Transition to `plan`.
+Delegate to `delivery-system-architect` (Agent tool) — component design, API contracts. Produce/update `docs/plans/<id>-design.md`. Record delegation. Transition to `plan`.
 
 ### spec — `implement`
 Find first `pending`/`in_progress` task. Start it: `POST $BASE/api/workflows/<id>/tasks/<index>/start`. Route to delivery agent (same routing as /spec). Delegate, record, complete, repeat until all done. Transition to `verify`.
@@ -98,5 +98,5 @@ Inform user: "This workflow is already **<phase>** — nothing to resume."
 ## Constraints
 
 - **NEVER** use Write, Edit, or NotebookEdit on production source files directly.
-- Delegate ALL implementation work to delivery agents via Task tool.
+- Delegate ALL implementation work to delivery agents via Agent tool. `Task` is a legacy alias only.
 - Follow the same agent routing and governance rules as `/spec` and `/bug`.

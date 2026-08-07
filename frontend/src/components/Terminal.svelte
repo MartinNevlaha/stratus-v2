@@ -24,8 +24,11 @@
   let uploading = $state(false)
   let dragOver = $state(false)
   let toastMessage = $state<string | null>(null)
+  let hasSelection = $state(false)
+  let copyStatus = $state<string | null>(null)
 
   let fitTimer: ReturnType<typeof setTimeout> | null = null
+  let copyStatusTimer: ReturnType<typeof setTimeout> | null = null
 
   $effect(() => {
     const text = appState.pendingTerminalInput
@@ -76,6 +79,53 @@
       toastMessage = `Upload failed: ${e instanceof Error ? e.message : 'unknown error'}`
     } finally {
       uploading = false
+    }
+  }
+
+  function showCopyStatus(message: string) {
+    copyStatus = message
+    if (copyStatusTimer) clearTimeout(copyStatusTimer)
+    copyStatusTimer = setTimeout(() => {
+      copyStatus = null
+      copyStatusTimer = null
+    }, 1400)
+  }
+
+  function fallbackCopyText(text: string): boolean {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    textarea.style.top = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      return document.execCommand('copy')
+    } finally {
+      document.body.removeChild(textarea)
+    }
+  }
+
+  async function copySelection() {
+    const selection = term?.getSelection()
+    if (!selection) {
+      showCopyStatus('No selection')
+      return false
+    }
+
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(selection)
+      showCopyStatus('Copied')
+      return true
+    } catch {
+      if (fallbackCopyText(selection)) {
+        showCopyStatus('Copied')
+        return true
+      }
+      showCopyStatus('Copy failed')
+      return false
     }
   }
 
@@ -154,14 +204,9 @@
       return true
     }
 
-    const copySelectionWithBrowser = () => {
-      if (!term.hasSelection()) return false
-      term.focus()
-      if (document.execCommand('copy')) return true
-      const selection = term.getSelection()
-      if (selection) navigator.clipboard?.writeText(selection).catch(() => {})
-      return true
-    }
+    const selectionDisposable = term.onSelectionChange(() => {
+      hasSelection = term.hasSelection()
+    })
 
     const onCopy = (e: ClipboardEvent) => {
       writeSelectionToClipboardEvent(e)
@@ -173,12 +218,12 @@
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
-        copySelectionWithBrowser()
+        copySelection()
         return false
       }
       if (e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
         if (term.hasSelection()) {
-          copySelectionWithBrowser()
+          copySelection()
           return false
         }
       }
@@ -246,6 +291,7 @@
       resizeObs.disconnect()
       visObs.disconnect()
       viewport?.removeEventListener('scroll', onViewportScroll)
+      selectionDisposable.dispose()
       window.removeEventListener('focus', onFocus)
       container.removeEventListener('copy', onCopy)
       container.removeEventListener('paste', onPaste)
@@ -253,6 +299,7 @@
       container.removeEventListener('dragleave', onDragLeave)
       container.removeEventListener('drop', onDrop)
       if (fitTimer) clearTimeout(fitTimer)
+      if (copyStatusTimer) clearTimeout(copyStatusTimer)
     }
   })
 
@@ -320,6 +367,13 @@
     {#if error}
       <span class="error">{error}</span>
     {/if}
+    <span class="copy-hint">Drag to select · Ctrl+Shift+C</span>
+    {#if copyStatus}
+      <span class:copy-error={copyStatus === 'Copy failed'} class="copy-status">{copyStatus}</span>
+    {/if}
+    <button class="copy-btn" disabled={!hasSelection} onclick={() => copySelection()} title="Copy terminal selection">
+      Copy
+    </button>
     <div class="stt-slot">
       <SttButton onTranscript={handleTranscript} />
     </div>
@@ -376,8 +430,41 @@
   .error { color: #f85149; }
   .upload-status { color: #58a6ff; }
 
-  .stt-slot {
+  .copy-hint {
+    color: #6e7681;
     margin-left: auto;
+  }
+
+  .copy-status {
+    color: #3fb950;
+    font-weight: 600;
+  }
+
+  .copy-status.copy-error {
+    color: #f85149;
+  }
+
+  .copy-btn {
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #c9d1d9;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .copy-btn:hover:not(:disabled) {
+    border-color: #58a6ff;
+    color: #f0f6fc;
+  }
+
+  .copy-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .stt-slot {
     display: flex;
     align-items: center;
   }

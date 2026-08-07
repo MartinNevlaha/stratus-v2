@@ -190,6 +190,14 @@ function isDeliverySubagent(subagentType: string): boolean {
   return subagentType.startsWith("delivery-")
 }
 
+function delegatedAgentType(args: Record<string, unknown>): string | undefined {
+  for (const key of ["agent_type", "subagent_type", "type"]) {
+    const value = args[key]
+    if (typeof value === "string" && value) return value
+  }
+  return undefined
+}
+
 function isAgentAllowedInPhase(agentID: string, wtype: string, phase: string): boolean {
   const workflowAgents = phaseAgentAllowlist[wtype]
   if (!workflowAgents) return true
@@ -294,7 +302,7 @@ export const Stratus: Plugin = async () => {
 
           // workflow_existence_guard: block Task delegation without workflow
           if (toolName === "task") {
-            const subagentType = output.args["subagent_type"] as string | undefined
+            const subagentType = delegatedAgentType(output.args)
             const isDelivery = subagentType && isDeliverySubagent(subagentType)
 
             if (isDelivery) {

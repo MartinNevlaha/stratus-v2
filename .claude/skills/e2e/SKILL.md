@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # E2E Testing Workflow
 
-You are the **coordinator** for an autonomous E2E testing workflow using Playwright Test Agents. You orchestrate work by delegating to specialized Playwright agents via Task tool. You do NOT write test code directly — agents handle that.
+You are the **coordinator** for an autonomous E2E testing workflow using Playwright Test Agents. You orchestrate work by delegating to specialized Playwright agents via Agent tool. `Task` is a legacy alias only. You do NOT write test code directly — agents handle that.
 
 ## Prerequisites
 
@@ -78,7 +78,7 @@ phase: "plan"
 
 ### STEP 4 — Delegate to Planner
 
-Delegate to `delivery-strategic-architect` or `delivery-qa-engineer` (Task tool) with:
+Delegate to `delivery-strategic-architect` or `delivery-qa-engineer` (Agent tool) with:
 - The user's test scope from `$ARGUMENTS`
 - The seed test file location: `tests/seed.spec.ts`
 - The base URL from `.env.playwright.example` or `playwright.config.ts`
@@ -118,7 +118,7 @@ workflow_id: "<slug>"
 task_index: 0  # zero-based index
 ```
 
-2. Delegate to `delivery-qa-engineer` or `delivery-frontend-engineer` (Task tool) with the test plan
+2. Delegate to `delivery-qa-engineer` or `delivery-frontend-engineer` (Agent tool) with the test plan
 3. **MANDATORY:** Record with `mcp__stratus__delegate_agent`
 4. **MANDATORY:** Mark complete with `mcp__stratus__complete_task`:
 
@@ -144,7 +144,7 @@ phase: "heal"
 
 ### STEP 8 — Delegate to Debugger
 
-Delegate to `delivery-debugger` or `delivery-qa-engineer` (Task tool):
+Delegate to `delivery-debugger` or `delivery-qa-engineer` (Agent tool):
 - Tell it to run all tests and fix any failures
 - It will diagnose and fix issues
 

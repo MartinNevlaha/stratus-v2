@@ -181,7 +181,7 @@ Real-time metrics visualization for workflow performance:
 | Hook | Behaviour |
 |------|-----------|
 | `phase_guard` | Blocks invalid workflow phase transitions before they reach the DB |
-| `workflow_existence_guard` | Blocks Task delegation when the current session has no active workflow |
+| `workflow_existence_guard` | Blocks delivery-agent delegation when the current session has no active workflow |
 | `delegation_guard` | Applies delivery-agent delegation policy for the active session workflow |
 | `workflow_enforcer` | Ensures agent follows active workflow phase |
 | `watcher` | Re-indexes governance docs on every file write |

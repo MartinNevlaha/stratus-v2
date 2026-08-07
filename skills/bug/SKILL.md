@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Bug-Fixing Workflow
 
-You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized agents via the Task tool. You do NOT write production code directly.
+You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. You do NOT write production code directly.
 
 ## API Base
 
@@ -28,7 +28,7 @@ curl -sS -X POST $BASE/api/workflows \
 ```
 
 - Explore the codebase: Read error messages, stack traces, logs.
-- Delegate to `delivery-debugger` (Task tool) for root cause analysis.
+- Delegate to `delivery-debugger` (Agent tool) for root cause analysis.
 - Record delegation:
 
 ```bash
@@ -60,7 +60,7 @@ Route to the appropriate delivery agent:
 | CI/CD, infra | `delivery-devops-engineer` |
 | General | `delivery-implementation-expert` |
 
-Delegate via Task tool with diagnosis context, then record and transition:
+Delegate via Agent tool with diagnosis context, then record and transition:
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/bug-<slug>/delegate \
@@ -76,7 +76,7 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
 
 ## Phase 3: Review
 
-- Delegate to `delivery-code-reviewer` (Task tool) — verify fix quality and no regressions.
+- Delegate to `delivery-code-reviewer` (Agent tool) — verify fix quality and no regressions.
 - Record delegation.
 - If reviewer finds issues → fix loop: transition back to fix, re-fix, re-review (max 5 loops).
 - On pass, complete:
@@ -94,7 +94,7 @@ curl -sS -X PUT $BASE/api/workflows/bug-<slug>/phase \
 ## Rules
 
 - **NEVER** use Write, Edit, or NotebookEdit on production source files directly.
-- Delegate ALL implementation work to delivery agents via Task.
+- Delegate ALL implementation work to delivery agents via Agent tool. `Task` is a legacy alias only.
 - **ALWAYS get explicit user approval before Phase 2 (Fix).**
 - Max 5 fix loops — escalate to user if still broken after 5 attempts.
 - Check current state: `curl -sS $BASE/api/workflows/bug-<slug>`

@@ -41,12 +41,12 @@ Expected coordinator skills (installed by `stratus init`):
 
 Detect:
 - **Missing coordinator skill** — one of the 3 expected skills is absent
-- **Coordinator with `context: fork`** — CRITICAL: coordinator skills must run in the main context to use the Task tool for spawning delivery agents; subagents cannot spawn subagents
-- **Skill that bypasses Task tool** — body instructs the coordinator to write code directly instead of delegating
+- **Coordinator with `context: fork`** — CRITICAL: coordinator skills must run in the main context to use the Agent tool for spawning delivery agents; subagents cannot spawn subagents
+- **Skill that bypasses Agent tool** — body instructs the coordinator to write code directly instead of delegating
 
 For each user-added skill (anything beyond the 3 expected):
 - Does it use `context: fork` appropriately (research/read-only)? Fine.
-- Does it claim to orchestrate implementation without Task delegation? Flag it.
+- Does it claim to orchestrate implementation without Agent delegation? Flag it.
 
 ---
 
@@ -58,7 +58,7 @@ For each user-added skill (anything beyond the 3 expected):
 For each skill in `.claude/skills/` that is NOT in the above list:
 1. Read its `SKILL.md` — record `name`, `description`, `context` field
 2. Classify:
-   - `coordinator-compatible` — no `context: fork` (can use Task tool, can orchestrate)
+   - `coordinator-compatible` — no `context: fork` (can use Agent tool, can orchestrate)
    - `utility` — has `context: fork` (read-only, research, context-isolated)
 3. Search all `.claude/agents/*.md` files for any reference to this skill's name
 4. If no agent references it → **Integration Gap**
@@ -149,7 +149,7 @@ Scan ALL CLAUDE.md files:
 Use Glob pattern `**/CLAUDE.md` from the project root to find all instances.
 
 **Conflict detection** (existing behavior):
-- Does it instruct Claude to write code directly (bypassing Task delegation)?
+- Does it instruct Claude to write code directly (bypassing Agent delegation)?
 - Does it override or disable hook enforcement?
 - Does it conflict with coordinator rules (`/spec`, `/bug` must not write production code)?
 - Is the content a stub or outdated?
@@ -176,7 +176,7 @@ Examples of convention signals to look for:
 Classify each issue:
 
 - **CRITICAL** — breaks delegation enforcement (coordinator has `context: fork`, reviewer/debugger has write access, missing hooks)
-- **MAJOR** — inconsistent routing, agent overlap, coordinator bypasses Task tool, coordinator-compatible skill not referenced
+- **MAJOR** — inconsistent routing, agent overlap, coordinator bypasses Agent tool, coordinator-compatible skill not referenced
 - **MINOR** — missing optional files, naming issues, stub content, CLAUDE.md conflicts blocked by hooks, unintegrated utility skills, convention gaps
 
 ---

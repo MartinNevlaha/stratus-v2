@@ -14,8 +14,11 @@ import (
 type HookEvent struct {
 	HookEventName string         `json:"hook_event_name"`
 	SessionID     string         `json:"session_id"`
+	Cwd           string         `json:"cwd,omitempty"`
 	ToolName      string         `json:"tool_name,omitempty"`
 	ToolInput     map[string]any `json:"tool_input,omitempty"`
+	AgentID       string         `json:"agent_id,omitempty"`
+	AgentType     string         `json:"agent_type,omitempty"`
 	// TranscriptPath points at the JSONL transcript of the agent the hook fired for.
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	// TeammateName and TeamName are only set on Agent Teams events (TeammateIdle,

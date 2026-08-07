@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -19,6 +21,9 @@ func TestWorkflowExistenceGuardBlocksWithoutSessionWorkflow(t *testing.T) {
 	decision := WorkflowExistenceGuard(HookEvent{
 		ToolName:  "Task",
 		SessionID: "session-current",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+		},
 	})
 
 	if decision.Continue {
@@ -40,6 +45,9 @@ func TestWorkflowExistenceGuardAllowsExactSessionWorkflow(t *testing.T) {
 	decision := WorkflowExistenceGuard(HookEvent{
 		ToolName:  "Task",
 		SessionID: "session-current",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+		},
 	})
 
 	if !decision.Continue {
@@ -92,6 +100,65 @@ func TestDelegationGuardResolvesByExplicitWorkflowIDAmongParallel(t *testing.T) 
 
 	if !decision.Continue {
 		t.Fatalf("expected guard to allow backend-engineer under spec-a implement, got blocked: %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuardSupportsClaudeAgentToolAndAgentType(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-agent", "session_id": "sess", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Agent",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"agent_type": "delivery-backend-engineer",
+			"prompt":     "Implement task 0 for workflow spec-agent.",
+		},
+	})
+
+	if !decision.Continue {
+		t.Fatalf("expected Agent/agent_type delegation to be allowed, got blocked: %q", decision.Reason)
+	}
+}
+
+func TestWorkflowExistenceGuardIgnoresNonDeliveryAgent(t *testing.T) {
+	setDashboardState(t, dashboardState{Workflows: []map[string]any{}})
+
+	decision := WorkflowExistenceGuard(HookEvent{
+		ToolName:  "Agent",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"agent_type": "Explore",
+		},
+	})
+
+	if !decision.Continue {
+		t.Fatalf("expected non-delivery Agent delegation to bypass workflow guard, got blocked: %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuardAllowsStratusSelfRepoWhenAPIUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module github.com/MartinNevlaha/stratus-v2\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	t.Setenv("STRATUS_PORT", "1")
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Agent",
+		SessionID: "sess",
+		Cwd:       dir,
+		ToolInput: map[string]any{
+			"agent_type": "delivery-frontend-engineer",
+			"prompt":     "Fix Stratus self repo workflow spec-runtime-delegation-terminal-fix.",
+		},
+	})
+
+	if !decision.Continue {
+		t.Fatalf("expected Stratus self repo delegation to fail open when API is unavailable, got blocked: %q", decision.Reason)
 	}
 }
 
@@ -302,6 +369,24 @@ func TestPhaseGuardDoesNotBlockAcrossParallelWorkflows(t *testing.T) {
 	})
 	if !decision.Continue {
 		t.Fatalf("expected write to be allowed in session-a implement phase, got blocked: %q", decision.Reason)
+	}
+}
+
+func TestPhaseGuardUsesHookAgentType(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "session-a", "type": "spec", "phase": "verify"},
+		},
+	})
+
+	decision := PhaseGuard(HookEvent{
+		ToolName:  "Write",
+		SessionID: "session-a",
+		AgentType: "delivery-backend-engineer",
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected write to be blocked for delivery agent in verify phase")
 	}
 }
 

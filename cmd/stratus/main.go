@@ -1413,8 +1413,8 @@ func writeHooks(projectRoot string) error {
 				// it, so it registered a hook that spawned a process on every write and
 				// every delegation only to fall through to Allow.
 				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
-				{"Task", "stratus hook workflow_existence_guard"},
-				{"Task", "stratus hook delegation_guard"},
+				{"Agent|Task", "stratus hook workflow_existence_guard"},
+				{"Agent|Task", "stratus hook delegation_guard"},
 				{"Bash", "stratus hook bash_write_guard"},
 			},
 		},
@@ -1440,6 +1440,11 @@ func writeHooks(projectRoot string) error {
 
 	for _, d := range defs {
 		groups, _ := hooksSection[d.event].([]any)
+		if d.event == "PreToolUse" {
+			groups = removeStratusHook(groups, "stratus hook executor_routing_guard")
+			groups = removeStratusHook(groups, "stratus hook workflow_existence_guard")
+			groups = removeStratusHook(groups, "stratus hook delegation_guard")
+		}
 		for _, h := range d.hooks {
 			if hasStratusHook(groups, h.command) {
 				continue // already registered
@@ -1480,6 +1485,37 @@ func writeHooks(projectRoot string) error {
 		return err
 	}
 	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
+}
+
+func removeStratusHook(groups []any, command string) []any {
+	var kept []any
+	for _, g := range groups {
+		group, ok := g.(map[string]any)
+		if !ok {
+			kept = append(kept, g)
+			continue
+		}
+
+		hooksList, _ := group["hooks"].([]any)
+		var hookKept []any
+		for _, h := range hooksList {
+			entry, ok := h.(map[string]any)
+			if !ok {
+				hookKept = append(hookKept, h)
+				continue
+			}
+			if cmd, _ := entry["command"].(string); cmd == command {
+				continue
+			}
+			hookKept = append(hookKept, h)
+		}
+		if len(hookKept) == 0 {
+			continue
+		}
+		group["hooks"] = hookKept
+		kept = append(kept, group)
+	}
+	return kept
 }
 
 // hasStratusHook returns true when command is already present in the hook groups slice.

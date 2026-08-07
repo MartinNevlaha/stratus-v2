@@ -2,7 +2,7 @@
 
 ## Mandatory Workflow Registration
 
-**FORBIDDEN:** Delegating to delivery agents (via Task tool) without an active workflow.
+**FORBIDDEN:** Delegating to delivery agents (via Agent tool; `Task` legacy alias) without an active workflow.
 
 ### Why This Matters
 
@@ -13,7 +13,7 @@
 
 ### Required Pattern
 
-1. **Register workflow BEFORE first Task delegation:**
+1. **Register workflow BEFORE first delivery-agent delegation:**
    ```
    mcp__stratus__register_workflow
    - id: "<type>-<slug>"
@@ -38,7 +38,7 @@
 
 ### Enforcement
 
-- `WorkflowExistenceGuard`: Blocks Task delegation without active workflow (fail-closed)
+- `WorkflowExistenceGuard`: Blocks delivery-agent delegation without active workflow (fail-closed outside the Stratus self-repo development escape hatch)
 - `DelegationGuard`: Enforces phase-agent matching
 - Violations result in immediate block with error message
 
@@ -64,4 +64,4 @@ All guards require the Stratus API server to be running:
 stratus serve
 ```
 
-If the API is unreachable, guards will **block** operations (fail-closed) to prevent untracked changes.
+If the API is unreachable, guards will **block** operations (fail-closed) to prevent untracked changes, except while developing this Stratus repository itself.

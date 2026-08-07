@@ -15,7 +15,7 @@ import (
 const noActiveWorkflowReason = "No active workflow registered. Use mcp__stratus__register_workflow first."
 
 const unresolvedWorkflowReason = "No workflow could be resolved for this delegation. Register a workflow with mcp__stratus__register_workflow first. " +
-	"If several workflows are active in parallel, include the exact workflow ID in the Task prompt so the correct flow is selected."
+	"If several workflows are active in parallel, include the exact workflow ID in the Agent prompt so the correct flow is selected."
 
 // workflowIDRe matches an explicit workflow ID (spec-/bug-/e2e- prefixed) embedded in a
 // Task prompt. Mirrors the OpenCode plugin regex so both runtimes resolve identically.
@@ -73,7 +73,7 @@ func PhaseGuard(event HookEvent) Decision {
 	// During verify/review phase: block write tools for delivery agents
 	if (phase == "verify" && wtype == "spec") || (phase == "review" && wtype == "bug") {
 		writeTool := isWriteTool(event.ToolName)
-		if writeTool && isDeliveryAgent() {
+		if writeTool && isDeliveryAgent(event) {
 			return Decision{
 				Continue: false,
 				Reason:   "Write tools are not allowed during " + phase + " phase. Use Read/Grep/Glob only.",
@@ -84,15 +84,23 @@ func PhaseGuard(event HookEvent) Decision {
 	return Decision{Continue: true}
 }
 
-// WorkflowExistenceGuard blocks Task delegation when the current session has no active workflow.
+// WorkflowExistenceGuard blocks delivery-agent delegation when the current session has no active workflow.
 // FAIL-CLOSED: blocks if Stratus API is unreachable.
 func WorkflowExistenceGuard(event HookEvent) Decision {
-	if event.ToolName != "Task" {
+	if !isDelegationTool(event.ToolName) {
+		return Decision{Continue: true}
+	}
+
+	agentType := delegatedAgentType(event)
+	if !isDeliverySubagent(agentType) {
 		return Decision{Continue: true}
 	}
 
 	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
+		if isStratusSelfRepo(event) {
+			return Decision{Continue: true}
+		}
 		return Decision{
 			Continue: false,
 			Reason:   "Cannot verify workflow: " + err.Error() + ". Ensure Stratus server is running (stratus serve).",
@@ -108,21 +116,24 @@ func WorkflowExistenceGuard(event HookEvent) Decision {
 	return Decision{Continue: true}
 }
 
-// DelegationGuard prevents spawning write-capable Task agents without an active workflow.
+// DelegationGuard prevents spawning write-capable delivery agents without an active workflow.
 // FAIL-CLOSED: blocks if Stratus API is unreachable.
 // Also enforces phase-agent matching: delivery agents can only be delegated in allowed phases.
 func DelegationGuard(event HookEvent) Decision {
-	if event.ToolName != "Task" {
+	if !isDelegationTool(event.ToolName) {
 		return Decision{Continue: true}
 	}
 
-	subagentType, _ := event.ToolInput["subagent_type"].(string)
+	subagentType := delegatedAgentType(event)
 	if !isDeliverySubagent(subagentType) {
 		return Decision{Continue: true}
 	}
 
 	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
+		if isStratusSelfRepo(event) {
+			return Decision{Continue: true}
+		}
 		return Decision{
 			Continue: false,
 			Reason:   "Cannot verify workflow: " + err.Error() + ". Ensure Stratus server is running (stratus serve).",
@@ -192,7 +203,7 @@ func BashWriteGuard(event HookEvent) Decision {
 	}
 
 	// Only applies to delivery agents
-	if !isDeliveryAgent() {
+	if !isDeliveryAgent(event) {
 		return Decision{Continue: true}
 	}
 
@@ -204,6 +215,9 @@ func BashWriteGuard(event HookEvent) Decision {
 	// Check for active workflow
 	wf, err := fetchWorkflowForSessionStrict(event.SessionID)
 	if err != nil {
+		if isStratusSelfRepo(event) {
+			return Decision{Continue: true}
+		}
 		return Decision{
 			Continue: false,
 			Reason:   "Cannot verify workflow: " + err.Error() + ". Ensure Stratus server is running (stratus serve).",
@@ -290,16 +304,66 @@ func isWriteTool(name string) bool {
 	return writeTools[name]
 }
 
+func isDelegationTool(toolName string) bool {
+	return toolName == "Agent" || toolName == "Task"
+}
+
+func delegatedAgentType(event HookEvent) string {
+	for _, key := range []string{"agent_type", "subagent_type", "type"} {
+		if v, ok := event.ToolInput[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // isDeliverySubagent returns true for subagent types that perform write operations.
 func isDeliverySubagent(subagentType string) bool {
 	return strings.HasPrefix(subagentType, "delivery-")
 }
 
 // isDeliveryAgent checks if the current process is running as a delivery agent.
-func isDeliveryAgent() bool {
-	// Heuristic: check if CLAUDE_AGENT_ID env var is set and starts with "delivery-"
-	agentID := os.Getenv("CLAUDE_AGENT_ID")
-	return isDeliverySubagent(agentID)
+func isDeliveryAgent(event HookEvent) bool {
+	if event.AgentType != "" {
+		return isDeliverySubagent(event.AgentType)
+	}
+	// Fallback for older Claude Code builds that exposed only environment state.
+	return isDeliverySubagent(os.Getenv("CLAUDE_AGENT_ID"))
+}
+
+func isStratusSelfRepo(event HookEvent) bool {
+	for _, dir := range candidateProjectDirs(event) {
+		if dir == "" {
+			continue
+		}
+		if dirHasStratusModule(dir) {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateProjectDirs(event HookEvent) []string {
+	var dirs []string
+	dirs = append(dirs, event.Cwd, os.Getenv("CLAUDE_PROJECT_DIR"))
+	if wd, err := os.Getwd(); err == nil {
+		dirs = append(dirs, wd)
+	}
+	return dirs
+}
+
+func dirHasStratusModule(dir string) bool {
+	for {
+		data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+		if err == nil && strings.Contains(string(data), "module github.com/MartinNevlaha/stratus-v2") {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 type dashboardState struct {
@@ -409,7 +473,7 @@ func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map
 	return nil, nil
 }
 
-// getTaskText concatenates the free-text fields of a Task tool call for workflow-ID matching.
+// getTaskText concatenates the free-text fields of an Agent/Task tool call for workflow-ID matching.
 func getTaskText(toolInput map[string]any) string {
 	var parts []string
 	for _, key := range []string{"prompt", "command", "description"} {

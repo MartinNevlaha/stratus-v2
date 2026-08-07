@@ -1,5 +1,5 @@
 ---
-description: "Complex spec workflow coordinator (discovery → design → plan → implement → verify → learn → complete). Orchestrates work by delegating to specialized delivery agents via @mention. Use for auth, databases, integrations, architecture."
+description: "Complex spec workflow coordinator (discovery → design → governance → plan → implement → verify → learn → complete). Orchestrates work by delegating to specialized delivery agents via @mention. Use for auth, databases, integrations, architecture."
 ---
 
 # Spec-Driven Development (Complex)
@@ -89,7 +89,15 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -d '{"agent_id": "<agent-name>"}'
 ```
 
-**Governance check** — delegate to `@delivery-governance-checker` with prompt: "Review design document at docs/plans/<slug>-design.md for governance compliance."
+Transition to governance before review:
+
+```bash
+curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "governance"}'
+```
+
+**Governance check** — delegate to `@delivery-governance-checker` with prompt: "Review design document at docs/plans/<slug>-design.md for governance compliance under workflow <slug>."
 
 ```bash
 curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
@@ -99,12 +107,12 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
 
 If checker returns `[must_update]` findings → address them in the design doc before transitioning to plan.
 
-Transition to plan:
+Transition to plan after governance passes:
 
 ```bash
 curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
   -H 'Content-Type: application/json' \
-  -d '{"phase": "Plan"}'
+  -d '{"phase": "plan"}'
 ```
 
 ---
@@ -115,7 +123,7 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 
 Using the design document, create an ordered implementation plan:
 
-1. Write the plan to `docs/plans/<slug>.md`
+1. Write the plan to `docs/plans/<slug>-plan.md`
 2. Break work into ordered tasks
 3. Set tasks:
 
@@ -163,7 +171,7 @@ Route to the appropriate delivery agent via `@mention` based on task type:
 | General/unclear | `@delivery-implementation-expert` |
 
 For each delegation:
-1. Invoke the agent via `@agent-name` with full task context and reference to the design doc
+1. Invoke the agent via `@agent-name` with full task context, exact workflow ID, task index/title, and references to `docs/plans/<slug>-design.md` and `docs/plans/<slug>-plan.md`
 2. Record the delegation:
 
 ```bash

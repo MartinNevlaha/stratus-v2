@@ -32,6 +32,8 @@ Stratus server must be running: `stratus serve`
 
 You MUST follow the phases in strict order. Each phase has mandatory MCP tool calls that MUST be executed. Do NOT skip any step. Do NOT proceed to the next phase without completing all mandatory calls in the current phase.
 
+Every Agent delegation MUST include a complete brief: workflow ID, phase, task index/title when applicable, goal, non-goals, relevant files, design document path, plan document path, expected output, and verification command. Include the exact workflow ID in the Agent prompt so guard hooks can disambiguate parallel workflows.
+
 ---
 
 ## Phase 1: Discovery
@@ -65,7 +67,7 @@ phase: "discovery"
 
 ### STEP 3 — Codebase Exploration
 
-Delegate to the `Explore` agent via Task tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+Delegate to the `Explore` agent via Agent tool (`agent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
 - Identify existing conventions, utilities, and abstractions that should be reused
 - Map dependencies and integration points that the implementation will touch
@@ -77,7 +79,7 @@ Additionally, call `mcp__stratus__retrieve` with the requirement keywords and `c
 
 ### STEP 4 — Strategic Analysis
 
-Delegate to `delivery-strategic-architect` (Task tool) — requirements analysis, constraints, technology landscape.
+Delegate to `delivery-strategic-architect` (Agent tool) — requirements analysis, constraints, technology landscape.
 
 **MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
 
@@ -134,7 +136,7 @@ phase: "governance"
 
 > 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
-Delegate to `delivery-code-reviewer` (Task tool) to review design for governance compliance.
+Delegate to `delivery-code-reviewer` (Agent tool) to review design for governance compliance. Include `docs/plans/<slug>-design.md` and explicit governance criteria.
 
 **MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
 
@@ -162,7 +164,7 @@ phase: "plan"
 
 > 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
 
-Delegate to the `Plan` subagent via Task tool (`subagent_type: "Plan"`). Pass full context:
+Delegate to the `Plan` subagent via Agent tool (`agent_type: "Plan"`). Pass full context:
 - The design document from `docs/plans/<slug>-design.md`
 - The original requirement from `$ARGUMENTS`
 - Key files and architecture constraints surfaced during discovery and design phases
@@ -170,7 +172,7 @@ Delegate to the `Plan` subagent via Task tool (`subagent_type: "Plan"`). Pass fu
 The Plan agent will return a concrete, ordered implementation plan with individual tasks and critical files.
 
 Use the Plan output to:
-1. Write the plan to `docs/plans/<slug>.md`
+1. Write the plan to `docs/plans/<slug>-plan.md`
 2. Extract the ordered task list
 
 Present plan, design doc, and task list to the user via AskUserQuestion.
@@ -212,7 +214,7 @@ workflow_id: "<slug>"
 task_index: 0  # zero-based index
 ```
 
-2. Delegate via Task tool with full context from the design doc
+2. Delegate via Agent tool with full context from `docs/plans/<slug>-design.md` and `docs/plans/<slug>-plan.md`
 3. **MANDATORY:** Record with `mcp__stratus__delegate_agent`
 4. **MANDATORY:** Mark complete with `mcp__stratus__complete_task`:
 
@@ -238,7 +240,7 @@ phase: "verify"
 
 > 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
-Delegate to `delivery-code-reviewer` (Task tool) — spec compliance, code quality, security, test adequacy.
+Delegate to `delivery-code-reviewer` (Agent tool) — spec compliance, code quality, security, test adequacy. Include design doc, plan doc, completed tasks, and verification results.
 
 **MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
 
@@ -336,7 +338,7 @@ phase: "complete"
 ## Rules
 
 - **NEVER** use Write, Edit, or NotebookEdit on production source files directly.
-- Delegate ALL implementation work to delivery agents via Task.
+- Delegate ALL implementation work to delivery agents via Agent tool.
 - Doc/config files (`*.md`, `*.json`, `*.yaml`, `*.toml`) are exceptions — you may edit them.
 - **ALWAYS** call `mcp__stratus__register_workflow` as the very first action.
 - **ALWAYS** call `mcp__stratus__transition_phase` before starting each new phase.
@@ -350,7 +352,7 @@ phase: "complete"
 
 If any workflow MCP tool call returns an error, you MUST resolve it before continuing. **NEVER rationalize away an API error as "a limitation" or "not important" and proceed anyway.**
 
-- Error says "plan not defined" → write the plan to `docs/plans/<slug>.md` and set it via the API, then retry the transition
+- Error says "plan not defined" → write the plan to `docs/plans/<slug>-plan.md` and set it via the API, then retry the transition
 - Error says "tasks not defined" → create the task list and set it, then retry
 - Any other error → read the message, fix the prerequisite, retry
 

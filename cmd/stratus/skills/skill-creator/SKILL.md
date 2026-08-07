@@ -274,7 +274,7 @@ Take `best_description` from the JSON output and update the skill's SKILL.md fro
 
 When the user is using OpenCode (or asks about OpenCode compatibility), adapt the following:
 
-- **Running test cases**: OpenCode uses subagents similarly to Claude Code. The Task tool works the same way.
+- **Running test cases**: OpenCode uses the Task tool for subagents; Claude Code uses Agent tool with `agent_type`.
 - **Agent files**: OpenCode agents use a different frontmatter format (see below). If the user asks about creating an agent alongside the skill, generate both formats.
 - **Skills location**: Skills are stored in `.claude/skills/` for both Claude Code and OpenCode targets.
 - **Description optimization**: Requires `claude` CLI which may not be available. Skip if not found.

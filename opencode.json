@@ -17,6 +17,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-backend-engineer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -26,6 +27,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-code-reviewer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -35,6 +37,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-database-engineer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -44,6 +47,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-debugger.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -53,6 +57,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-devops-engineer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -62,6 +67,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-frontend-engineer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -71,6 +77,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-governance-checker.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -80,6 +87,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-implementation-expert.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -89,6 +97,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-mobile-engineer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -98,6 +107,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-qa-engineer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -107,6 +117,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-strategic-architect.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -116,6 +127,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-system-architect.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },
@@ -125,6 +137,7 @@
       "model": "openai/gpt-5.5",
       "prompt": "{file:.opencode/agents/delivery-ux-designer.md}",
       "tools": {
+        "grep": true,
         "read": true
       }
     },

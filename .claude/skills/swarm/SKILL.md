@@ -37,7 +37,7 @@ curl -sS -X POST $BASE/api/workflows \
 
 ### 1a. Explore — built-in Explore agent
 
-**Delegate to the built-in `Explore` agent** (Task tool, `subagent_type: "Explore"`) with thoroughness `"very thorough"`:
+**Delegate to the built-in `Explore` agent** (Agent tool, `agent_type: "Explore"`) with thoroughness `"very thorough"`:
 
 Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
@@ -51,7 +51,7 @@ Do NOT write code during exploration.
 
 Pass the Explore agent's findings as context.
 
-**Delegate to `delivery-system-architect`** (Task tool) with prompt:
+**Delegate to `delivery-system-architect`** (Agent tool) with prompt:
 - Task breakdown, dependencies, domain assignment
 - Component boundaries and API contracts
 - Data models and integration points
@@ -65,7 +65,7 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
 
 ### 1c. UX Design — `delivery-ux-designer` (if needed)
 
-**Only if the feature has significant UI/UX components**, delegate to `delivery-ux-designer` (Task tool):
+**Only if the feature has significant UI/UX components**, delegate to `delivery-ux-designer` (Agent tool):
 
 - Component hierarchy and design system integration
 - User flow and interaction patterns
@@ -81,7 +81,7 @@ Skip this step for backend-only, infra, or database-focused work.
 
 ### 1d. Plan — built-in Plan agent
 
-**Delegate to the built-in `Plan` agent** (Task tool, `subagent_type: "Plan"`):
+**Delegate to the built-in `Plan` agent** (Agent tool, `agent_type: "Plan"`):
 
 Pass full context:
 - The requirement from `$ARGUMENTS`
@@ -179,12 +179,12 @@ curl -sS -X POST $BASE/api/swarm/missions/<mission-id>/dispatch
 
 Use this to include the correct tickets in each worker's prompt below.
 
-### 2c. Spawn Task agents — as BACKGROUND tasks (parallel)
+### 2c. Spawn Agent workers — as BACKGROUND tasks (parallel)
 
-For **each worker**, send a Task call with `run_in_background: true` in a **single message**.
+For **each worker**, send an Agent call with `run_in_background: true` in a **single message**.
 This launches all workers in parallel AND keeps you (the lead) free to monitor progress.
 
-Each worker Task prompt MUST include:
+Each worker Agent prompt MUST include:
 
 1. The `worker_instructions` field from the spawn response (this contains the complete swarm protocol with pre-filled worker ID, worktree, branch, and mission)
 2. The list of assigned tickets with full descriptions
@@ -307,7 +307,7 @@ Summarize to the user: what was implemented, which workers contributed, any issu
 ## Constraints
 
 - **NEVER** use Write, Edit, or Bash on production source files directly.
-- Delegate ALL implementation work to delivery agents via Task tool.
+- Delegate ALL implementation work to delivery agents via Agent tool. `Task` is a legacy alias only.
 - Always get user approval after the plan phase before spawning workers.
 - The `[SWARM]` prefix in the workflow title is mandatory — it's how the Overview dashboard identifies swarm workflows.
 - Each worker operates in its own git worktree — do NOT share worktrees between workers.

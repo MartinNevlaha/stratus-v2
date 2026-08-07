@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Bug-Fixing Workflow
 
-You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized agents via the Task tool. You do NOT write production code directly.
+You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. You do NOT write production code directly.
 
 ## Prerequisites
 
@@ -17,6 +17,8 @@ Stratus server must be running: `stratus serve`
 ## MANDATORY EXECUTION PROTOCOL
 
 You MUST follow the phases in strict order. Each phase has mandatory MCP tool calls that MUST be executed. Do NOT skip any step. Do NOT proceed to the next phase without completing all mandatory calls in the current phase.
+
+Every Agent delegation MUST include a complete brief: workflow ID, phase, bug symptoms, diagnosis context, affected files, goal, non-goals, expected output, and verification command. Include the exact workflow ID in the Agent prompt so guard hooks can disambiguate parallel workflows.
 
 ---
 
@@ -42,7 +44,7 @@ session_id: "${CLAUDE_SESSION_ID}"
 ### STEP 2 — Explore & Diagnose
 
 - Explore the codebase: Read error messages, stack traces, logs.
-- Delegate to `delivery-debugger` (Task tool) for root cause analysis.
+- Delegate to `delivery-debugger` (Agent tool) for root cause analysis.
 - **MANDATORY:** Record delegation using `mcp__stratus__delegate_agent`:
 
 ```
@@ -75,7 +77,7 @@ Based on the debugger's diagnosis, **intelligently assess** the fix complexity:
 
 ### STEP 4 — Plan (if COMPLEX)
 
-If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Task tool, `subagent_type: "Plan"`):
+If the bug is **COMPLEX**, delegate to the built-in `Plan` agent (Agent tool, `agent_type: "Plan"`):
 
 Pass full context:
 - The bug description from `$ARGUMENTS`
@@ -127,7 +129,7 @@ Route to the appropriate delivery agent:
 | Mobile, React Native | `delivery-mobile-engineer` |
 | General | `delivery-implementation-expert` |
 
-1. Delegate via Task tool with diagnosis context
+1. Delegate via Agent tool with complete diagnosis context
 2. **MANDATORY:** Record with `mcp__stratus__delegate_agent`: `workflow_id: "bug-<slug>"`, `agent_id: "<agent-name>"`
 
 ### MANDATORY: Transition to Review
@@ -147,7 +149,7 @@ phase: "review"
 
 > 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
-- Delegate to `delivery-code-reviewer` (Task tool) — verify fix quality and no regressions.
+- Delegate to `delivery-code-reviewer` (Agent tool) — verify fix quality and no regressions. Include diagnosis, fix summary, affected files, and verification results.
 - **MANDATORY:** Record delegation with `mcp__stratus__delegate_agent`:
 
 ```
@@ -189,7 +191,7 @@ Summarize what was fixed. **MANDATORY:** Save a memory event with key findings u
 ## Rules
 
 - **NEVER** use Write, Edit, or NotebookEdit on production source files directly.
-- Delegate ALL implementation work to delivery agents via Task.
+- Delegate ALL implementation work to delivery agents via Agent tool.
 - **ALWAYS** call `mcp__stratus__register_workflow` as the very first action.
 - **ALWAYS** call `mcp__stratus__transition_phase` before starting each new phase.
 - **ALWAYS** call `mcp__stratus__delegate_agent` for every delivery agent delegation.
