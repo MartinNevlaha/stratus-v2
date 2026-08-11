@@ -1483,8 +1483,10 @@ func writeHooks(projectRoot string) error {
 	// Register statusLine non-destructively (preserve user customisation).
 	if _, ok := settings["statusLine"]; !ok {
 		settings["statusLine"] = map[string]any{
-			"type":    "command",
-			"command": `bash -c 'input=$(cat); echo "$input" | stratus statusline'`,
+			"type":            "command",
+			"command":         "stratus statusline",
+			"padding":         0,
+			"refreshInterval": 5,
 		}
 	}
 

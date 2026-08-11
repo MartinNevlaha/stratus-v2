@@ -28,7 +28,7 @@ var phaseAgentAllowlist = map[string]map[string][]string{
 		"fix": {
 			"delivery-backend-engineer", "delivery-frontend-engineer", "delivery-database-engineer",
 			"delivery-devops-engineer", "delivery-mobile-engineer", "delivery-implementation-expert",
-			"delivery-ux-designer",
+			"delivery-ux-designer", "delivery-qa-engineer",
 		},
 		"review": {"delivery-code-reviewer"},
 	},
@@ -41,7 +41,7 @@ var phaseAgentAllowlist = map[string]map[string][]string{
 		"implement": {
 			"delivery-backend-engineer", "delivery-frontend-engineer", "delivery-database-engineer",
 			"delivery-devops-engineer", "delivery-mobile-engineer", "delivery-implementation-expert",
-			"delivery-ux-designer",
+			"delivery-ux-designer", "delivery-qa-engineer",
 		},
 		"verify":   {"delivery-code-reviewer"},
 		"learn":    {},

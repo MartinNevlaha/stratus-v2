@@ -221,6 +221,12 @@ func TestDelegationGuardPhaseAgentMatching(t *testing.T) {
 			shouldAllow: false,
 		},
 		{
+			name:        "bug fix allows qa-engineer",
+			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "fix"},
+			subagent:    "delivery-qa-engineer",
+			shouldAllow: true,
+		},
+		{
 			name:        "bug review allows code-reviewer",
 			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "review"},
 			subagent:    "delivery-code-reviewer",
@@ -230,6 +236,12 @@ func TestDelegationGuardPhaseAgentMatching(t *testing.T) {
 			name:        "spec implement allows backend-engineer",
 			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "implement"},
 			subagent:    "delivery-backend-engineer",
+			shouldAllow: true,
+		},
+		{
+			name:        "spec implement allows qa-engineer",
+			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "implement"},
+			subagent:    "delivery-qa-engineer",
 			shouldAllow: true,
 		},
 		{

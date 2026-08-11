@@ -23,7 +23,6 @@ const (
 	ansiBlue        = "\x1b[34m"
 	ansiBrightWhite = "\x1b[97m"
 	ansiRed         = "\x1b[31m"
-	nbsp            = "\u00a0" // non-breaking space prevents terminal trimming
 )
 
 // slInput is the JSON Claude Code sends on stdin to the statusline command.
@@ -31,6 +30,7 @@ type slInput struct {
 	Workspace struct {
 		CurrentDir string `json:"current_dir"`
 	} `json:"workspace"`
+	CWD   string `json:"cwd"`
 	Model struct {
 		DisplayName string `json:"display_name"`
 		ID          string `json:"id"`
@@ -40,11 +40,12 @@ type slInput struct {
 		TotalDurationMS float64 `json:"total_duration_ms"`
 	} `json:"cost"`
 	ContextWindow struct {
-		ContextWindowSize int `json:"context_window_size"`
+		ContextWindowSize int     `json:"context_window_size"`
+		UsedPercentage    float64 `json:"used_percentage"`
 		CurrentUsage      struct {
-			InputTokens               int `json:"input_tokens"`
-			CacheReadInputTokens      int `json:"cache_read_input_tokens"`
-			CacheCreationInputTokens  int `json:"cache_creation_input_tokens"`
+			InputTokens              int `json:"input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		} `json:"current_usage"`
 	} `json:"context_window"`
 }
@@ -101,28 +102,44 @@ func fetchStratusState(base string) *slDashboard {
 
 // formatStatusline assembles the full status line from all segments.
 func formatStatusline(in slInput, state *slDashboard) string {
-	cwd := in.Workspace.CurrentDir
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-
+	cwd := statusCWD(in)
 	sep := ansiDim + " | " + ansiReset
-	var parts []string
-	for _, s := range []string{
-		fmtGit(cwd),
-		fmtModel(in),
-		fmtCost(in),
-		fmtDuration(in),
-		fmtContext(in),
-		fmtStratus(state),
-	} {
+
+	var first []string
+	for _, s := range []string{fmtModel(in), fmtDir(cwd), fmtGit(cwd)} {
 		if s != "" {
-			parts = append(parts, s)
+			first = append(first, s)
 		}
 	}
-	out := ansiReset + strings.Join(parts, sep)
-	// Replace regular spaces with non-breaking spaces to prevent terminal trimming.
-	return strings.ReplaceAll(out, " ", nbsp)
+
+	var second []string
+	for _, s := range []string{fmtContext(in), fmtCost(in), fmtDuration(in), fmtStratus(state)} {
+		if s != "" {
+			second = append(second, s)
+		}
+	}
+
+	if len(first) == 0 && len(second) == 0 {
+		return ""
+	}
+	if len(second) == 0 {
+		return ansiReset + strings.Join(first, sep)
+	}
+	if len(first) == 0 {
+		return ansiReset + strings.Join(second, sep)
+	}
+	return ansiReset + strings.Join(first, sep) + "\n" + strings.Join(second, sep)
+}
+
+func statusCWD(in slInput) string {
+	if in.Workspace.CurrentDir != "" {
+		return in.Workspace.CurrentDir
+	}
+	if in.CWD != "" {
+		return in.CWD
+	}
+	cwd, _ := os.Getwd()
+	return cwd
 }
 
 // fmtGit returns the current git branch in magenta, or "" if not in a repo.
@@ -137,7 +154,7 @@ func fmtGit(cwd string) string {
 	if branch == "" || branch == "HEAD" {
 		return ""
 	}
-	return ansiMagenta + "⎇ " + branch + ansiReset
+	return ansiMagenta + "🌿 " + branch + ansiReset
 }
 
 // fmtModel returns the model display name in cyan, or "" if not set.
@@ -146,7 +163,20 @@ func fmtModel(in slInput) string {
 	if name == "" {
 		return ""
 	}
-	return ansiCyan + name + ansiReset
+	return ansiCyan + "[" + name + "]" + ansiReset
+}
+
+// fmtDir returns the current directory basename in the shape used by the Claude docs.
+func fmtDir(cwd string) string {
+	dir := strings.TrimRight(cwd, string(os.PathSeparator))
+	if dir == "" {
+		return ""
+	}
+	base := dir
+	if idx := strings.LastIndex(dir, string(os.PathSeparator)); idx >= 0 && idx+1 < len(dir) {
+		base = dir[idx+1:]
+	}
+	return ansiBrightWhite + "📁 " + base + ansiReset
 }
 
 // fmtCost returns the formatted session cost in green, or "" if zero.
@@ -154,7 +184,7 @@ func fmtCost(in slInput) string {
 	if in.Cost.TotalCostUSD == 0 {
 		return ""
 	}
-	return ansiGreen + fmt.Sprintf("$%.2f", in.Cost.TotalCostUSD) + ansiReset
+	return ansiYellow + fmt.Sprintf("$%.2f", in.Cost.TotalCostUSD) + ansiReset
 }
 
 // fmtDuration returns the session duration in yellow, or "" if zero.
@@ -174,20 +204,35 @@ func fmtDuration(in slInput) string {
 	} else {
 		dur = fmt.Sprintf("%dm", totalMins)
 	}
-	return ansiYellow + dur + ansiReset
+	return ansiDim + "⏱️ " + dur + ansiReset
 }
 
-// fmtContext returns the context window usage percentage in blue, or "" if not set.
+// fmtContext returns a Claude-docs-style context usage bar.
 func fmtContext(in slInput) string {
-	size := in.ContextWindow.ContextWindowSize
-	if size == 0 {
-		return ""
+	pct := in.ContextWindow.UsedPercentage
+	if pct == 0 && in.ContextWindow.ContextWindowSize > 0 {
+		used := in.ContextWindow.CurrentUsage.InputTokens +
+			in.ContextWindow.CurrentUsage.CacheReadInputTokens +
+			in.ContextWindow.CurrentUsage.CacheCreationInputTokens
+		pct = float64(used) / float64(in.ContextWindow.ContextWindowSize) * 100
 	}
-	used := in.ContextWindow.CurrentUsage.InputTokens +
-		in.ContextWindow.CurrentUsage.CacheReadInputTokens +
-		in.ContextWindow.CurrentUsage.CacheCreationInputTokens
-	pct := float64(used) / float64(size) * 100
-	return ansiBlue + fmt.Sprintf("Ctx: %.1f%%", pct) + ansiReset
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+
+	barColor := ansiGreen
+	if pct >= 90 {
+		barColor = ansiRed
+	} else if pct >= 70 {
+		barColor = ansiYellow
+	}
+
+	filled := int(pct) / 10
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
+	return barColor + bar + ansiReset + fmt.Sprintf(" %.0f%% context", pct)
 }
 
 // fmtStratus returns the stratus workflow status segment.
