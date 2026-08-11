@@ -113,12 +113,14 @@ func TestTeammateIdle_AlreadyNudgedInSameSegment_DoesNotLoop(t *testing.T) {
 	}
 }
 
-func TestTeammateIdle_NewAssignmentAfterNudge_NudgesAgain(t *testing.T) {
+// An ignored nudge still buys the next assignment a fresh one — the cap, not the
+// assignment boundary, is what bounds the hook.
+func TestTeammateIdle_NewAssignmentAfterIgnoredNudge_NudgesAgain(t *testing.T) {
 	transcript := writeTranscript(t,
 		inbound("<teammate-message teammate_id=\"team-lead\">Do task T6</teammate-message>"),
 		toolCall("Edit"),
 		inbound("TeammateIdle hook error: "+teammateIdleNudgeMarker+" call SendMessage"),
-		toolCall("SendMessage"),
+		assistantText("T6 is done, I will just say so here."),
 		inbound("<teammate-message teammate_id=\"team-lead\">Now do T9</teammate-message>"),
 		toolCall("Write"),
 		assistantText("T9 done."),
@@ -127,7 +129,71 @@ func TestTeammateIdle_NewAssignmentAfterNudge_NudgesAgain(t *testing.T) {
 	decision := TeammateIdle(idleEvent(transcript))
 
 	if !decision.Nudge {
-		t.Fatalf("a fresh assignment gets a fresh nudge, got %#v", decision)
+		t.Fatalf("a fresh assignment after an ignored nudge gets a fresh nudge, got %#v", decision)
+	}
+}
+
+// The loop this hook used to produce: a teammate reports, the lead acknowledges,
+// the teammate runs one verification command and goes idle. The acknowledgement
+// is indistinguishable from a new assignment, so before the fix it wiped the
+// record of the report and the teammate was nudged to report what it had already
+// reported — forever.
+func TestTeammateIdle_AckAfterReport_DoesNotNudge(t *testing.T) {
+	transcript := writeTranscript(t,
+		inbound("<teammate-message teammate_id=\"team-lead\">Do task T6</teammate-message>"),
+		toolCall("Edit"),
+		toolCall("SendMessage"),
+		inbound("<teammate-message teammate_id=\"team-lead\">Thanks, got it.</teammate-message>"),
+		toolCall("Bash"),
+		assistantText("Confirmed the migration applied."),
+	)
+
+	decision := TeammateIdle(idleEvent(transcript))
+
+	if decision.Nudge {
+		t.Fatalf("a teammate that already reported must not be nudged after an ack, got %#v", decision)
+	}
+}
+
+// A teammate that reported after being nudged is trusted from then on: further
+// inbound messages must not resurrect the nudge.
+func TestTeammateIdle_ReportedAfterNudge_DoesNotNudgeAgain(t *testing.T) {
+	transcript := writeTranscript(t,
+		inbound("<teammate-message teammate_id=\"team-lead\">Do task T6</teammate-message>"),
+		toolCall("Edit"),
+		inbound("TeammateIdle hook error: "+teammateIdleNudgeMarker+" call SendMessage"),
+		toolCall("SendMessage"),
+		inbound("<teammate-message teammate_id=\"team-lead\">Thanks.</teammate-message>"),
+		toolCall("Bash"),
+		assistantText("Standing by."),
+	)
+
+	decision := TeammateIdle(idleEvent(transcript))
+
+	if decision.Nudge {
+		t.Fatalf("the report after the nudge settles the debt, got %#v", decision)
+	}
+}
+
+// Hard stop: two nudges is all one transcript ever gets, however many
+// assignments arrive afterwards.
+func TestTeammateIdle_NudgeCapReached_Allows(t *testing.T) {
+	transcript := writeTranscript(t,
+		inbound("<teammate-message teammate_id=\"team-lead\">Do task T6</teammate-message>"),
+		toolCall("Edit"),
+		inbound("TeammateIdle hook error: "+teammateIdleNudgeMarker+" call SendMessage"),
+		inbound("<teammate-message teammate_id=\"team-lead\">Now do T9</teammate-message>"),
+		toolCall("Write"),
+		inbound("TeammateIdle hook error: "+teammateIdleNudgeMarker+" call SendMessage"),
+		inbound("<teammate-message teammate_id=\"team-lead\">Now do T12</teammate-message>"),
+		toolCall("Write"),
+		assistantText("T12 done, still not sending anything."),
+	)
+
+	decision := TeammateIdle(idleEvent(transcript))
+
+	if decision.Nudge {
+		t.Fatalf("nudges must be capped at %d per transcript, got %#v", maxTeammateNudges, decision)
 	}
 }
 

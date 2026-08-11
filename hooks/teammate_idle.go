@@ -19,6 +19,14 @@ const teammateIdleNudgeReason = teammateIdleNudgeMarker + " Plain text you write
 	"ran and verified, stated separately from what you assumed, plus anything that blocked or " +
 	"failed. Send it even if the answer is \"done, nothing to report\"."
 
+// maxTeammateNudges caps how many nudges one transcript may ever receive. The
+// per-assignment guard alone is not enough: every inbound message counts as a new
+// assignment, so a lead that merely acknowledges a report resets it and the hook
+// nudges an agent that already reported — repeatedly. A teammate that ignored two
+// nudges will not be moved by a third, and the coordinator sees the idle event
+// anyway.
+const maxTeammateNudges = 2
+
 // workTools are the tools whose use means the teammate produced something the
 // coordinator is waiting on. Read-only lookups (Read/Grep/Glob) are excluded: a
 // teammate that only re-read files to answer a stale echo owes nobody a report.
@@ -46,37 +54,48 @@ func TeammateIdle(event HookEvent) Decision {
 		return Decision{Continue: true}
 	}
 
-	seg, err := scanIdleSegment(event.TranscriptPath)
+	scan, err := scanIdleTranscript(event.TranscriptPath)
 	if err != nil {
 		return Decision{Continue: true}
 	}
 
-	// Reported, owed nothing, or already told once — let it rest.
-	if seg.sentMessage || seg.workActions == 0 || seg.alreadyNudged {
+	// Told twice already — a third time is spam, and spam masks the idle events
+	// of teammates that really are stuck.
+	if scan.nudges >= maxTeammateNudges {
+		return Decision{Continue: true}
+	}
+
+	// Reported, owed nothing, or already told once for this assignment.
+	if scan.sentMessage || scan.workActions == 0 || scan.nudgedSinceAssignment {
 		return Decision{Continue: true}
 	}
 
 	return Decision{Nudge: true, Reason: teammateIdleNudgeReason}
 }
 
-// idleSegment summarises what the teammate did since its most recent assignment.
-type idleSegment struct {
-	sentMessage   bool
-	alreadyNudged bool
-	workActions   int
+// idleScan summarises the transcript for the nudge decision. workActions and
+// nudgedSinceAssignment cover only the trailing segment (since the last inbound
+// message); nudges and sentMessage deliberately survive that reset.
+type idleScan struct {
+	nudges                int
+	sentMessage           bool
+	nudgedSinceAssignment bool
+	workActions           int
 }
 
-// scanIdleSegment walks the transcript and keeps only the trailing segment — the
-// stretch since the last inbound message. Each new assignment resets the state,
-// so a teammate that ignored one nudge still gets a fresh one for the next task.
-func scanIdleSegment(path string) (idleSegment, error) {
+// scanIdleTranscript walks the whole transcript. Work is counted per assignment,
+// so a teammate that ignored one nudge still gets a fresh one for the next task —
+// but the total nudge count and the fact that the teammate reported at all are
+// kept across assignments, because an inbound message is just as likely to be an
+// acknowledgement of the last report as it is a new task.
+func scanIdleTranscript(path string) (idleScan, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return idleSegment{}, err
+		return idleScan{}, err
 	}
 	defer file.Close()
 
-	var seg idleSegment
+	var scan idleScan
 	scanner := bufio.NewScanner(file)
 	// Transcript lines carry whole tool results and can be far longer than the
 	// 64KB default; without this a big line ends the scan early and the hook
@@ -103,11 +122,17 @@ func scanIdleSegment(path string) (idleSegment, error) {
 				continue
 			}
 			if strings.Contains(text, teammateIdleNudgeMarker) {
-				seg.alreadyNudged = true
+				scan.nudges++
+				scan.nudgedSinceAssignment = true
+				// A nudge asks for a report the teammate has not sent yet, so any
+				// earlier report no longer excuses it.
+				scan.sentMessage = false
 				continue
 			}
 			if strings.Contains(text, "<teammate-message") {
-				seg = idleSegment{} // new assignment — start counting again
+				// New assignment: only the per-segment counters restart.
+				scan.nudgedSinceAssignment = false
+				scan.workActions = 0
 			}
 		case "assistant":
 			var blocks []struct {
@@ -122,16 +147,16 @@ func scanIdleSegment(path string) (idleSegment, error) {
 					continue
 				}
 				if b.Name == "SendMessage" {
-					seg.sentMessage = true
+					scan.sentMessage = true
 				}
 				if workTools[b.Name] {
-					seg.workActions++
+					scan.workActions++
 				}
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return idleSegment{}, err
+		return idleScan{}, err
 	}
-	return seg, nil
+	return scan, nil
 }
