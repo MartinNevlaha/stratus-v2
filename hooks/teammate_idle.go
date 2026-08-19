@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -54,7 +56,14 @@ func TeammateIdle(event HookEvent) Decision {
 		return Decision{Continue: true}
 	}
 
-	scan, err := scanIdleTranscript(event.TranscriptPath)
+	// transcript_path is the COORDINATOR's — the hook runs in the lead's process.
+	// Judging that file judges the lead, not the teammate that went idle.
+	transcript, ok := teammateTranscript(event)
+	if !ok {
+		return Decision{Continue: true}
+	}
+
+	scan, err := scanIdleTranscript(transcript)
 	if err != nil {
 		return Decision{Continue: true}
 	}
@@ -71,6 +80,80 @@ func TeammateIdle(event HookEvent) Decision {
 	}
 
 	return Decision{Nudge: true, Reason: teammateIdleNudgeReason}
+}
+
+// teammateTranscript resolves the JSONL transcript of the teammate this event
+// fired for.
+//
+// Claude Code documents the TeammateIdle payload as "JSON with teammate_name and
+// team_name"; the transcript_path it carries is the common session field, which
+// for a hook running in the coordinator's process is the COORDINATOR's transcript.
+// Reading it made every verdict a statement about the lead: measured over 269 real
+// idle points on 2026-08-19 the hook agreed with the lead's state 269/269 — it
+// nudged teammates that had already reported (up to 14 in a row, each answered with
+// a duplicate report) and stayed silent for the ones that had finished in plain text.
+//
+// Teammate transcripts live beside the session file, one directory per session:
+//
+//	<dir>/<session>.jsonl                                     coordinator
+//	<dir>/<session>/subagents/agent-a<name>-<hash>.jsonl       teammate
+//	<dir>/<session>/subagents/agent-a<name>-<hash>.meta.json   {"name": "<name>", …}
+//
+// meta.json carries the authoritative name; the filename is the fallback for
+// transcripts written without one. Returns false when nothing matches, which is
+// the fail-open path — silence is better than judging a stranger's transcript.
+func teammateTranscript(event HookEvent) (string, bool) {
+	path := event.TranscriptPath
+	// Already an agent transcript (or a future Claude Code that passes the right
+	// file): take it as given.
+	if strings.Contains(filepath.ToSlash(filepath.Dir(path)), "/subagents") {
+		return path, true
+	}
+
+	dir := filepath.Join(
+		filepath.Dir(path),
+		strings.TrimSuffix(filepath.Base(path), ".jsonl"),
+		"subagents",
+	)
+
+	if metas, err := filepath.Glob(filepath.Join(dir, "*.meta.json")); err == nil {
+		for _, meta := range metas {
+			raw, err := os.ReadFile(meta)
+			if err != nil {
+				continue
+			}
+			var parsed struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(raw, &parsed) != nil || parsed.Name != event.TeammateName {
+				continue
+			}
+			transcript := strings.TrimSuffix(meta, ".meta.json") + ".jsonl"
+			if _, err := os.Stat(transcript); err == nil {
+				return transcript, true
+			}
+		}
+	}
+
+	// No sidecar: fall back to the filename, newest first. Both spellings are
+	// tried because the "a" is an id prefix, not part of the name.
+	for _, pattern := range []string{"agent-a" + event.TeammateName + "-*.jsonl", "agent-" + event.TeammateName + "-*.jsonl"} {
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil || len(matches) == 0 {
+			continue
+		}
+		sort.Slice(matches, func(i, j int) bool {
+			a, errA := os.Stat(matches[i])
+			b, errB := os.Stat(matches[j])
+			if errA != nil || errB != nil {
+				return matches[i] < matches[j]
+			}
+			return a.ModTime().After(b.ModTime())
+		})
+		return matches[0], true
+	}
+
+	return "", false
 }
 
 // idleScan summarises the transcript for the nudge decision. workActions and
