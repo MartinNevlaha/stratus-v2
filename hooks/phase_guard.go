@@ -249,16 +249,24 @@ func BashWriteGuard(event HookEvent) Decision {
 	return Decision{Continue: true}
 }
 
+// fdDupRe matches descriptor duplication (`2>&1`, `1>&2`, `>&2`). It redirects one
+// stream into another -- nothing reaches disk -- so it must not read as a redirect.
+var fdDupRe = regexp.MustCompile(`\d?>&\d`)
+
 // isWriteBashCommand detects write operations in bash commands.
 func isWriteBashCommand(cmd string) bool {
 	// Normalize whitespace: replace tabs with spaces for consistent pattern matching
 	normalizedCmd := strings.ReplaceAll(cmd, "\t", " ")
+	// Drop descriptor duplication first. `pytest ... 2>&1 | tail` is how this repo's
+	// suites are run, and reading its `2>&1` as a file redirect denied a reviewer every
+	// command it needed. A real redirect into a FILE still matches below.
+	normalizedCmd = fdDupRe.ReplaceAllString(normalizedCmd, " ")
 	lowerCmd := strings.ToLower(normalizedCmd)
 
 	// Check write patterns FIRST - explicit redirects, file modifications, git write ops
 	writePatterns := []string{
 		" > ", " >> ", ">|",
-		" 1>", " 2>", " &>", "2>&1",
+		" 1>", " 2>", " &>",
 		"sed -i", "awk -i",
 		"tee ",
 		"install ",

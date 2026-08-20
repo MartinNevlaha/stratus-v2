@@ -515,7 +515,10 @@ func TestIsWriteBashCommand(t *testing.T) {
 		{"cmd 1>out.txt", true},
 		{"cmd 2>err.txt", true},
 		{"cmd &>all.txt", true},
-		{"cmd 2>&1", true},
+		// Inverted 2026-08-20: `2>&1` duplicates a descriptor, it does not write a file.
+		// The old expectation denied every `pytest ... 2>&1 | tail` a reviewer ran.
+		{"cmd 2>&1", false},
+		{"cmd > out.txt 2>&1", true}, // ...but a real redirect next to it still writes
 		{"sed -i 's/foo/bar/' file.txt", true},
 		{"git commit -m 'msg'", true},
 		{"git push origin main", true},
@@ -561,6 +564,37 @@ func TestIsWriteBashCommand(t *testing.T) {
 				t.Errorf("isWriteBashCommand(%q) = %v, expected %v", tt.cmd, result, tt.expected)
 			}
 		})
+	}
+}
+
+// `2>&1` duplicates a file descriptor -- nothing reaches disk. Reading it as a write
+// denied the reviewer every command it actually needed: `pytest ... 2>&1 | tail` is the
+// documented way to run this repo's suites. Measured live 2026-08-20.
+func TestIsWriteBashCommandTreatsDescriptorDuplicationAsReadOnly(t *testing.T) {
+	readOnly := []string{
+		".venv/bin/python -m pytest tests/unit/research/ -q 2>&1 | tail -15",
+		"go test ./... 2>&1 | tail -5",
+		"cd uvo-admin && pnpm test -- --maxWorkers=4 2>&1 | tail -20",
+		"git diff --stat 2>&1",
+		"grep -rn TODO . 1>&2",
+	}
+	for _, cmd := range readOnly {
+		if isWriteBashCommand(cmd) {
+			t.Errorf("isWriteBashCommand(%q) = true, want false (fd duplication is not a write)", cmd)
+		}
+	}
+
+	// Redirecting into a FILE is still a write, descriptor duplication next to it or not.
+	stillWrites := []string{
+		"pytest -q > results.txt",
+		"pytest -q > results.txt 2>&1",
+		"go build ./... &> build.log",
+		"echo hi >> notes.md",
+	}
+	for _, cmd := range stillWrites {
+		if !isWriteBashCommand(cmd) {
+			t.Errorf("isWriteBashCommand(%q) = false, want true (writes a file)", cmd)
+		}
 	}
 }
 
