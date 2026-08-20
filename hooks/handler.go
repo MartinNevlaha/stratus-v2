@@ -62,8 +62,20 @@ func Allow() {
 
 // Block writes a block response with reason and exits 2.
 func Block(reason string) {
-	writeDecision(Decision{Continue: false, Reason: reason})
+	writeBlock(os.Stdout, os.Stderr, reason)
 	os.Exit(2)
+}
+
+// writeBlock emits a denial on BOTH channels. Claude Code reads stderr when a PreToolUse
+// hook exits 2; a reason that only ever reached stdout arrived at the agent as
+// "hook error: No stderr output" -- a denial with no text, which it cannot act on and
+// answers by ending its turn. The stdout JSON stays for runtimes that parse it instead.
+func writeBlock(stdout, stderr io.Writer, reason string) {
+	data, _ := json.Marshal(Decision{Continue: false, Reason: reason})
+	fmt.Fprintln(stdout, string(data))
+	if reason != "" {
+		fmt.Fprintln(stderr, reason)
+	}
 }
 
 // Nudge writes a stop-hook "block" decision and exits 0: Claude Code feeds reason

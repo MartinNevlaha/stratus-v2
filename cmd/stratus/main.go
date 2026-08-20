@@ -847,7 +847,7 @@ Prompts written to .opencode/prompts/:
   playwright-test-healer.md`
 
 	const ocPlugin = `Plugin written to .opencode/plugin/stratus.ts:
-  phase_guard              — blocks write tools during verify/review phases
+  phase_guard              — blocks writes during verify/review (read-only bash allowed)
   workflow_existence_guard — requires active workflow for Task delegation
   delegation_guard         — enforces phase-agent matching for delivery agents
   bash_write_guard         — blocks bash write commands for delivery agents without workflow
@@ -859,7 +859,7 @@ Prompts written to .opencode/prompts/:
   error-handling        — consistent error patterns`
 
 	const ccHooks = `Hooks registered in .claude/settings.json:
-  PreToolUse  phase_guard              — blocks write tools during review/verify
+  PreToolUse  phase_guard              — blocks writes during review/verify (read-only bash allowed)
   PreToolUse  workflow_existence_guard — requires session-scoped active workflow for Task delegation
   PreToolUse  delegation_guard         — applies delivery-agent delegation policy and phase-agent matching
   PreToolUse  bash_write_guard         — blocks file-modifying bash commands for delivery agents without workflow

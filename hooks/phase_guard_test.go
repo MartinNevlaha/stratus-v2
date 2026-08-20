@@ -402,6 +402,108 @@ func TestPhaseGuardUsesHookAgentType(t *testing.T) {
 	}
 }
 
+// A reviewer that cannot run the tests cannot verify what it reviews. `Bash` sits in
+// isWriteTool alongside Write/Edit, so the review/verify guard used to deny every Bash
+// call a delivery agent made -- `git diff` and `pytest` included. The phase guard must
+// judge the COMMAND, the way BashWriteGuard already does, not the tool name.
+func TestPhaseGuardAllowsReadOnlyBashForReviewerInReviewPhase(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "bug-x", "session_id": "session-a", "type": "bug", "phase": "review"},
+		},
+	})
+
+	for _, cmd := range []string{
+		"git diff --stat",
+		"git status --short",
+		"pytest tests/unit -q",
+		"grep -rn TODO .",
+	} {
+		decision := PhaseGuard(HookEvent{
+			ToolName:  "Bash",
+			SessionID: "session-a",
+			AgentType: "delivery-code-reviewer",
+			ToolInput: map[string]any{"command": cmd},
+		})
+		if !decision.Continue {
+			t.Fatalf("expected read-only %q to be allowed in review phase, got blocked: %q", cmd, decision.Reason)
+		}
+	}
+}
+
+func TestPhaseGuardBlocksWriteBashInReviewPhase(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "bug-x", "session_id": "session-a", "type": "bug", "phase": "review"},
+		},
+	})
+
+	for _, cmd := range []string{
+		"git commit -m wip",
+		"sed -i s/a/b/ file.go",
+		"rm -rf build",
+	} {
+		decision := PhaseGuard(HookEvent{
+			ToolName:  "Bash",
+			SessionID: "session-a",
+			AgentType: "delivery-code-reviewer",
+			ToolInput: map[string]any{"command": cmd},
+		})
+		if decision.Continue {
+			t.Fatalf("expected write command %q to stay blocked in review phase", cmd)
+		}
+	}
+}
+
+// The same split has to hold for spec/verify, and Write/Edit must not become reachable.
+func TestPhaseGuardKeepsBlockingFileToolsInVerifyPhase(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "session-a", "type": "spec", "phase": "verify"},
+		},
+	})
+
+	readOnly := PhaseGuard(HookEvent{
+		ToolName:  "Bash",
+		SessionID: "session-a",
+		AgentType: "delivery-code-reviewer",
+		ToolInput: map[string]any{"command": "go test ./..."},
+	})
+	if !readOnly.Continue {
+		t.Fatalf("expected `go test` to be allowed in verify phase, got blocked: %q", readOnly.Reason)
+	}
+
+	for _, tool := range []string{"Write", "Edit", "MultiEdit", "NotebookEdit"} {
+		decision := PhaseGuard(HookEvent{
+			ToolName:  tool,
+			SessionID: "session-a",
+			AgentType: "delivery-code-reviewer",
+		})
+		if decision.Continue {
+			t.Fatalf("expected %s to stay blocked in verify phase", tool)
+		}
+	}
+}
+
+// A Bash call with no command at all must not slip through as "read-only".
+func TestPhaseGuardBlocksBashWithoutCommandInReviewPhase(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "bug-x", "session_id": "session-a", "type": "bug", "phase": "review"},
+		},
+	})
+
+	decision := PhaseGuard(HookEvent{
+		ToolName:  "Bash",
+		SessionID: "session-a",
+		AgentType: "delivery-code-reviewer",
+		ToolInput: map[string]any{},
+	})
+	if decision.Continue {
+		t.Fatalf("expected a Bash call with no command to stay blocked")
+	}
+}
+
 func TestIsWriteBashCommand(t *testing.T) {
 	tests := []struct {
 		cmd      string

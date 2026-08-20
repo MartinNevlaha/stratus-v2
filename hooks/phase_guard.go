@@ -70,13 +70,29 @@ func PhaseGuard(event HookEvent) Decision {
 	phase, _ := state["phase"].(string)
 	wtype, _ := state["type"].(string)
 
-	// During verify/review phase: block write tools for delivery agents
+	// During verify/review phase: block write tools for delivery agents.
+	//
+	// Bash is judged by its COMMAND, not by its name. A reviewer that cannot run
+	// `git diff` or the test suite cannot verify what it reviews -- it can only assert
+	// that the code reads correctly, which is the failure mode this whole phase exists
+	// to prevent. isWriteBashCommand is the same split BashWriteGuard already applies.
 	if (phase == "verify" && wtype == "spec") || (phase == "review" && wtype == "bug") {
-		writeTool := isWriteTool(event.ToolName)
-		if writeTool && isDeliveryAgent(event) {
+		if isWriteTool(event.ToolName) && isDeliveryAgent(event) {
+			if event.ToolName == "Bash" {
+				command, _ := event.ToolInput["command"].(string)
+				// An absent command is unknown, not read-only -- stay fail-closed.
+				if command != "" && !isWriteBashCommand(command) {
+					return Decision{Continue: true}
+				}
+				return Decision{
+					Continue: false,
+					Reason: "This bash command writes, and writes are not allowed during " + phase +
+						" phase: " + command + ". Read-only commands (git diff/log/status, tests, grep) are allowed.",
+				}
+			}
 			return Decision{
 				Continue: false,
-				Reason:   "Write tools are not allowed during " + phase + " phase. Use Read/Grep/Glob only.",
+				Reason:   "Write tools are not allowed during " + phase + " phase. Use Read/Grep/Glob or read-only Bash.",
 			}
 		}
 	}
