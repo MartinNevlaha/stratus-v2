@@ -79,9 +79,8 @@ func TestDelegationGuardUsesExactSessionWorkflow(t *testing.T) {
 }
 
 func TestDelegationGuardResolvesByExplicitWorkflowIDAmongParallel(t *testing.T) {
-	// Two parallel workflows sharing one session. spec-a is in implement (backend allowed),
-	// spec-b is in verify (backend NOT allowed). The task prompt names spec-a, so the guard
-	// must resolve spec-a and allow — not pick spec-b by list order.
+	// Two parallel workflows sharing one session. The task prompt names spec-a, so the
+	// guard must resolve spec-a — not pick spec-b by list order.
 	setDashboardState(t, dashboardState{
 		Workflows: []map[string]any{
 			{"id": "spec-b", "session_id": "sess", "type": "spec", "phase": "verify"},
@@ -189,103 +188,21 @@ func TestDelegationGuardAmbiguousParallelBlocks(t *testing.T) {
 	}
 }
 
-func TestDelegationGuardPhaseAgentMatching(t *testing.T) {
+func TestDelegationGuardAllowsAnyDeliveryAgentInAnyPhase(t *testing.T) {
+	// Phase-agent matching was removed: a registered workflow is the only requirement.
+	// Coordinators pick the agent; the guard no longer second-guesses that choice.
 	tests := []struct {
-		name        string
-		workflow    map[string]any
-		subagent    string
-		shouldAllow bool
+		name     string
+		workflow map[string]any
+		subagent string
 	}{
-		{
-			name:        "bug analyze allows debugger",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "analyze"},
-			subagent:    "delivery-debugger",
-			shouldAllow: true,
-		},
-		{
-			name:        "bug analyze blocks backend-engineer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "analyze"},
-			subagent:    "delivery-backend-engineer",
-			shouldAllow: false,
-		},
-		{
-			name:        "bug fix allows backend-engineer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "fix"},
-			subagent:    "delivery-backend-engineer",
-			shouldAllow: true,
-		},
-		{
-			name:        "bug fix blocks code-reviewer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "fix"},
-			subagent:    "delivery-code-reviewer",
-			shouldAllow: false,
-		},
-		{
-			name:        "bug fix allows qa-engineer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "fix"},
-			subagent:    "delivery-qa-engineer",
-			shouldAllow: true,
-		},
-		{
-			name:        "bug review allows code-reviewer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "review"},
-			subagent:    "delivery-code-reviewer",
-			shouldAllow: true,
-		},
-		{
-			name:        "spec implement allows backend-engineer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "implement"},
-			subagent:    "delivery-backend-engineer",
-			shouldAllow: true,
-		},
-		{
-			name:        "spec implement allows qa-engineer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "implement"},
-			subagent:    "delivery-qa-engineer",
-			shouldAllow: true,
-		},
-		{
-			name:        "spec verify allows code-reviewer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "verify"},
-			subagent:    "delivery-code-reviewer",
-			shouldAllow: true,
-		},
-		{
-			name:        "spec verify blocks backend-engineer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "verify"},
-			subagent:    "delivery-backend-engineer",
-			shouldAllow: false,
-		},
-		{
-			name:        "non-delivery agent always allowed",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "plan"},
-			subagent:    "Explore",
-			shouldAllow: true,
-		},
-		{
-			name:        "unknown workflow type allows all",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "unknown", "phase": "any"},
-			subagent:    "delivery-backend-engineer",
-			shouldAllow: true,
-		},
-		{
-			name:        "spec governance allows code-reviewer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "governance"},
-			subagent:    "delivery-code-reviewer",
-			shouldAllow: true,
-		},
-		{
-			name:        "spec design allows strategic-architect",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "design"},
-			subagent:    "delivery-strategic-architect",
-			shouldAllow: true,
-		},
-		{
-			name:        "spec design blocks backend-engineer",
-			workflow:    map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "design"},
-			subagent:    "delivery-backend-engineer",
-			shouldAllow: false,
-		},
+		{"bug analyze with backend-engineer", map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "analyze"}, "delivery-backend-engineer"},
+		{"bug fix with code-reviewer", map[string]any{"id": "wf", "session_id": "sess", "type": "bug", "phase": "fix"}, "delivery-code-reviewer"},
+		{"spec verify with backend-engineer", map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "verify"}, "delivery-backend-engineer"},
+		{"spec design with backend-engineer", map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "design"}, "delivery-backend-engineer"},
+		{"spec learn with qa-engineer", map[string]any{"id": "wf", "session_id": "sess", "type": "spec", "phase": "learn"}, "delivery-qa-engineer"},
+		{"e2e setup with frontend-engineer", map[string]any{"id": "wf", "session_id": "sess", "type": "e2e", "phase": "setup"}, "delivery-frontend-engineer"},
+		{"unknown workflow type", map[string]any{"id": "wf", "session_id": "sess", "type": "unknown", "phase": "any"}, "delivery-backend-engineer"},
 	}
 
 	for _, tt := range tests {
@@ -302,8 +219,8 @@ func TestDelegationGuardPhaseAgentMatching(t *testing.T) {
 				},
 			})
 
-			if decision.Continue != tt.shouldAllow {
-				t.Fatalf("expected shouldAllow=%v, got Continue=%v, Reason=%q", tt.shouldAllow, decision.Continue, decision.Reason)
+			if !decision.Continue {
+				t.Fatalf("expected delegation to be allowed, got blocked: %q", decision.Reason)
 			}
 		})
 	}

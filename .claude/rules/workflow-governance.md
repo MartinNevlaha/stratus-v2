@@ -39,23 +39,18 @@
 ### Enforcement
 
 - `WorkflowExistenceGuard`: Blocks delivery-agent delegation without active workflow (fail-closed outside the Stratus self-repo development escape hatch)
-- `DelegationGuard`: Enforces phase-agent matching
+- `DelegationGuard`: Requires a resolvable workflow for delivery-agent delegation
 - Violations result in immediate block with error message
 
-## Phase-Agent Matching
+## Agent Choice Per Phase
 
-Delivery agents are only allowed in specific phases:
+Hooks do NOT restrict which delivery agent may run in which phase — the coordinator
+picks the agent that fits the work. The phase-agent allowlist was removed because it
+denied legitimate delegations mid-phase.
 
-| Workflow | Phase | Allowed Agents |
-|----------|-------|----------------|
-| bug | analyze | delivery-debugger, delivery-strategic-architect |
-| bug | fix | delivery-*-engineer, delivery-implementation-expert |
-| bug | review | delivery-code-reviewer |
-| spec | plan | delivery-strategic-architect, delivery-system-architect |
-| spec | implement | delivery-*-engineer, delivery-implementation-expert |
-| spec | verify | delivery-code-reviewer |
-
-Attempting to delegate an agent outside its allowed phase will be blocked.
+Phase discipline is still enforced where it matters: `PhaseGuard` blocks write tools
+for delivery agents during `spec/verify` and `bug/review`, so a reviewer cannot edit
+what it reviews.
 
 ## Stratus Server Requirement
 

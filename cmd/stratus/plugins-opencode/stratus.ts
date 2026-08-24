@@ -23,50 +23,6 @@ const unresolvedWorkflowReason =
   "No workflow could be resolved for this delegation. Register a workflow with /spec or /bug first. " +
   "If several workflows are active in parallel, include the exact workflow ID in the Task prompt so the correct flow is selected."
 
-const phaseAgentAllowlist: Record<string, Record<string, string[]>> = {
-  bug: {
-    analyze: ["delivery-debugger", "delivery-strategic-architect", "delivery-system-architect", "plan", "explore"],
-    fix: [
-      "delivery-backend-engineer",
-      "delivery-frontend-engineer",
-      "delivery-database-engineer",
-      "delivery-devops-engineer",
-      "delivery-mobile-engineer",
-      "delivery-implementation-expert",
-      "delivery-ux-designer",
-      "delivery-qa-engineer",
-    ],
-    review: ["delivery-code-reviewer"],
-  },
-  spec: {
-    plan: ["delivery-strategic-architect", "delivery-system-architect", "plan", "explore"],
-    discovery: ["delivery-debugger", "delivery-strategic-architect", "explore"],
-    design: ["delivery-strategic-architect", "delivery-system-architect", "delivery-ux-designer"],
-    governance: ["delivery-code-reviewer", "delivery-governance-checker"],
-    accept: [],
-    implement: [
-      "delivery-backend-engineer",
-      "delivery-frontend-engineer",
-      "delivery-database-engineer",
-      "delivery-devops-engineer",
-      "delivery-mobile-engineer",
-      "delivery-implementation-expert",
-      "delivery-ux-designer",
-      "delivery-qa-engineer",
-    ],
-    verify: ["delivery-code-reviewer"],
-    learn: [],
-    complete: [],
-  },
-  e2e: {
-    setup: ["delivery-qa-engineer"],
-    plan: ["delivery-strategic-architect", "plan"],
-    generate: ["delivery-qa-engineer", "delivery-frontend-engineer"],
-    heal: ["delivery-debugger", "delivery-qa-engineer"],
-    complete: [],
-  },
-}
-
 interface Workflow {
   id: string
   type: string
@@ -200,21 +156,6 @@ function delegatedAgentType(args: Record<string, unknown>): string | undefined {
   return undefined
 }
 
-function isAgentAllowedInPhase(agentID: string, wtype: string, phase: string): boolean {
-  const workflowAgents = phaseAgentAllowlist[wtype]
-  if (!workflowAgents) return true
-  const allowedAgents = workflowAgents[phase]
-  if (!allowedAgents) return true
-  return allowedAgents.includes(agentID)
-}
-
-function getAllowedAgentsForPhase(wtype: string, phase: string): string[] {
-  const workflowAgents = phaseAgentAllowlist[wtype]
-  if (!workflowAgents) return ["(any)"]
-  const agents = workflowAgents[phase]
-  return agents ?? ["(any)"]
-}
-
 function isWriteBashCommand(cmd: string): boolean {
   const normalizedCmd = cmd.replace(/\t/g, " ")
   const lowerCmd = normalizedCmd.toLowerCase()
@@ -319,17 +260,6 @@ export const Stratus: Plugin = async () => {
 
               if (!wf) {
                 throw new Error(unresolvedWorkflowReason)
-              }
-
-              // delegation_guard: check phase-agent matching
-              const phase = wf.phase
-              const wtype = wf.type
-
-              if (subagentType && !isAgentAllowedInPhase(subagentType, wtype, phase)) {
-                const allowed = getAllowedAgentsForPhase(wtype, phase)
-                throw new Error(
-                  `Agent "${subagentType}" is not allowed in phase "${phase}" (workflow type: ${wtype}). Allowed agents: ${allowed.join(", ")}`,
-                )
               }
             }
           }

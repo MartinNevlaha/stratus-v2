@@ -21,41 +21,6 @@ const unresolvedWorkflowReason = "No workflow could be resolved for this delegat
 // Task prompt. Mirrors the OpenCode plugin regex so both runtimes resolve identically.
 var workflowIDRe = regexp.MustCompile(`\b(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}\b`)
 
-// phaseAgentAllowlist defines which delivery agents are allowed in each phase per workflow type.
-var phaseAgentAllowlist = map[string]map[string][]string{
-	"bug": {
-		"analyze": {"delivery-debugger", "delivery-strategic-architect", "delivery-system-architect", "Plan", "Explore"},
-		"fix": {
-			"delivery-backend-engineer", "delivery-frontend-engineer", "delivery-database-engineer",
-			"delivery-devops-engineer", "delivery-mobile-engineer", "delivery-implementation-expert",
-			"delivery-ux-designer", "delivery-qa-engineer",
-		},
-		"review": {"delivery-code-reviewer"},
-	},
-	"spec": {
-		"plan":       {"delivery-strategic-architect", "delivery-system-architect", "Plan", "Explore"},
-		"discovery":  {"delivery-debugger", "delivery-strategic-architect", "Explore"},
-		"design":     {"delivery-strategic-architect", "delivery-system-architect", "delivery-ux-designer"},
-		"governance": {"delivery-code-reviewer", "delivery-governance-checker"},
-		"accept":     {},
-		"implement": {
-			"delivery-backend-engineer", "delivery-frontend-engineer", "delivery-database-engineer",
-			"delivery-devops-engineer", "delivery-mobile-engineer", "delivery-implementation-expert",
-			"delivery-ux-designer", "delivery-qa-engineer",
-		},
-		"verify":   {"delivery-code-reviewer"},
-		"learn":    {},
-		"complete": {},
-	},
-	"e2e": {
-		"setup":    {"delivery-qa-engineer"},
-		"plan":     {"delivery-strategic-architect", "Plan"},
-		"generate": {"delivery-qa-engineer", "delivery-frontend-engineer"},
-		"heal":     {"delivery-debugger", "delivery-qa-engineer"},
-		"complete": {},
-	},
-}
-
 // PhaseGuard blocks disallowed tools during certain workflow phases.
 func PhaseGuard(event HookEvent) Decision {
 	if event.ToolName == "" {
@@ -134,7 +99,10 @@ func WorkflowExistenceGuard(event HookEvent) Decision {
 
 // DelegationGuard prevents spawning write-capable delivery agents without an active workflow.
 // FAIL-CLOSED: blocks if Stratus API is unreachable.
-// Also enforces phase-agent matching: delivery agents can only be delegated in allowed phases.
+//
+// It deliberately does NOT restrict which agent may run in which phase. The allowlist it
+// used to carry blocked coordinators from picking an agent they legitimately needed, and
+// a wrong denial mid-phase costs more than the ordering it enforced.
 func DelegationGuard(event HookEvent) Decision {
 	if !isDelegationTool(event.ToolName) {
 		return Decision{Continue: true}
@@ -162,47 +130,7 @@ func DelegationGuard(event HookEvent) Decision {
 		}
 	}
 
-	phase, _ := wf["phase"].(string)
-	wtype, _ := wf["type"].(string)
-
-	if !isAgentAllowedInPhase(subagentType, wtype, phase) {
-		allowed := getAllowedAgentsForPhase(wtype, phase)
-		return Decision{
-			Continue: false,
-			Reason: fmt.Sprintf("Agent %q is not allowed in phase %q (workflow type: %s). Allowed agents: %v",
-				subagentType, phase, wtype, allowed),
-		}
-	}
-
 	return Decision{Continue: true}
-}
-
-// isAgentAllowedInPhase checks if the agent is allowed in the current phase.
-func isAgentAllowedInPhase(agentID, wtype, phase string) bool {
-	workflowAgents, ok := phaseAgentAllowlist[wtype]
-	if !ok {
-		return true
-	}
-	allowedAgents, ok := workflowAgents[phase]
-	if !ok {
-		return true
-	}
-	for _, a := range allowedAgents {
-		if a == agentID {
-			return true
-		}
-	}
-	return false
-}
-
-// getAllowedAgentsForPhase returns the list of allowed agents for a phase.
-func getAllowedAgentsForPhase(wtype, phase string) []string {
-	if workflowAgents, ok := phaseAgentAllowlist[wtype]; ok {
-		if agents, ok := workflowAgents[phase]; ok {
-			return agents
-		}
-	}
-	return []string{"(any)"}
 }
 
 // WorkflowEnforcer nudges the coordinator when idle between phases.

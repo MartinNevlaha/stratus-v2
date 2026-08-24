@@ -849,7 +849,7 @@ Prompts written to .opencode/prompts/:
 	const ocPlugin = `Plugin written to .opencode/plugin/stratus.ts:
   phase_guard              — blocks writes during verify/review (read-only bash allowed)
   workflow_existence_guard — requires active workflow for Task delegation
-  delegation_guard         — enforces phase-agent matching for delivery agents
+  delegation_guard         — requires an active workflow for delivery-agent delegation
   bash_write_guard         — blocks bash write commands for delivery agents without workflow
   watcher                  — queues modified files for vexor reindexing`
 
@@ -861,7 +861,7 @@ Prompts written to .opencode/prompts/:
 	const ccHooks = `Hooks registered in .claude/settings.json:
   PreToolUse  phase_guard              — blocks writes during review/verify (read-only bash allowed)
   PreToolUse  workflow_existence_guard — requires session-scoped active workflow for Task delegation
-  PreToolUse  delegation_guard         — applies delivery-agent delegation policy and phase-agent matching
+  PreToolUse  delegation_guard         — requires an active workflow for delivery-agent delegation
   PreToolUse  bash_write_guard         — blocks file-modifying bash commands for delivery agents without workflow
   PostToolUse watcher                  — queues modified files for vexor reindexing
 
