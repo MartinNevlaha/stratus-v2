@@ -93,7 +93,7 @@ func newPrefetchServer(t *testing.T, database *db.DB) *Server {
 	t.Helper()
 	return &Server{
 		db:          database,
-		vexor:       vexor.New("__nonexistent_vexor_binary__", "", 1),
+		vexor:       vexor.New("__nonexistent_vexor_binary__", "", 1, 1),
 		projectRoot: t.TempDir(),
 	}
 }

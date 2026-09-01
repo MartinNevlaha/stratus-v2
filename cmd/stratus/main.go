@@ -230,7 +230,7 @@ func cmdServe() {
 	// Insight toggle, and no-op cost is negligible when nobody subscribes.
 	eventBus := events.NewInMemoryBus(1000)
 	coord.SetEventBus(eventBus)
-	vexorClient := vexor.New(cfg.Vexor.BinaryPath, cfg.Vexor.Model, cfg.Vexor.TimeoutSec)
+	vexorClient := vexor.New(cfg.Vexor.BinaryPath, cfg.Vexor.Model, cfg.Vexor.TimeoutSec, cfg.Vexor.IndexTimeoutSec)
 	hub := api.NewHub()
 	termMgr := terminal.NewManager()
 
@@ -650,7 +650,8 @@ func cmdInit() {
   "vexor": {
     "binary_path": "vexor",
     "model": "nomic-embed-text-v1.5",
-    "timeout_sec": 15
+    "timeout_sec": 15,
+    "index_timeout_sec": 600
   },
   "stt": {
     "endpoint": "http://localhost:8011",

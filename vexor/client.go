@@ -23,13 +23,14 @@ type Result struct {
 
 // Client wraps the vexor binary.
 type Client struct {
-	binaryPath string
-	model      string
-	timeout    time.Duration
+	binaryPath   string
+	model        string
+	timeout      time.Duration
+	indexTimeout time.Duration
 }
 
 // New creates a new Vexor client.
-func New(binaryPath, model string, timeoutSec int) *Client {
+func New(binaryPath, model string, timeoutSec, indexTimeoutSec int) *Client {
 	if binaryPath == "" {
 		binaryPath = "vexor"
 	}
@@ -39,10 +40,14 @@ func New(binaryPath, model string, timeoutSec int) *Client {
 	if timeoutSec <= 0 {
 		timeoutSec = 15
 	}
+	if indexTimeoutSec <= 0 {
+		indexTimeoutSec = 600
+	}
 	return &Client{
-		binaryPath: binaryPath,
-		model:      model,
-		timeout:    time.Duration(timeoutSec) * time.Second,
+		binaryPath:   binaryPath,
+		model:        model,
+		timeout:      time.Duration(timeoutSec) * time.Second,
+		indexTimeout: time.Duration(indexTimeoutSec) * time.Second,
 	}
 }
 
@@ -86,13 +91,13 @@ func (c *Client) Search(query string, topK int, mode string) ([]Result, error) {
 // compatibility but ignored — vexor index does not support incremental
 // file-level indexing.
 func (c *Client) Index(_ []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), c.indexTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, c.binaryPath, "index")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		if ctx.Err() != nil {
-			return fmt.Errorf("vexor index timeout after 120s")
+			return fmt.Errorf("vexor index timeout after %v", c.indexTimeout)
 		}
 		return fmt.Errorf("vexor index: %w\n%s", err, out)
 	}

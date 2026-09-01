@@ -14,7 +14,8 @@
   "vexor": {
     "binary_path": "vexor",
     "model": "nomic-embed-text-v1.5",
-    "timeout_sec": 15
+    "timeout_sec": 15,
+    "index_timeout_sec": 600
   },
   "stt": {
     "endpoint": "http://localhost:8011",

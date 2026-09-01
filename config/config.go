@@ -317,9 +317,10 @@ func ValidLanguage(s string) bool {
 }
 
 type VexorConfig struct {
-	BinaryPath string `json:"binary_path"`
-	Model      string `json:"model"`
-	TimeoutSec int    `json:"timeout_sec"`
+	BinaryPath      string `json:"binary_path"`
+	Model           string `json:"model"`
+	TimeoutSec      int    `json:"timeout_sec"`
+	IndexTimeoutSec int    `json:"index_timeout_sec"`
 }
 
 type STTConfig struct {
@@ -342,9 +343,10 @@ func Default() Config {
 			MaxRetries:  3,
 		},
 		Vexor: VexorConfig{
-			BinaryPath: "vexor",
-			Model:      "nomic-embed-text-v1.5",
-			TimeoutSec: 15,
+			BinaryPath:      "vexor",
+			Model:           "nomic-embed-text-v1.5",
+			TimeoutSec:      15,
+			IndexTimeoutSec: 600,
 		},
 		STT: STTConfig{
 			Endpoint: "http://localhost:8011",

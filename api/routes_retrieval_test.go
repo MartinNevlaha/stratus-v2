@@ -27,7 +27,7 @@ func newRetrievalWikiPage(id, pageType, title, content string, stalenessScore fl
 func newRetrievalServer(t *testing.T, database *db.DB) *Server {
 	t.Helper()
 	// Use a binary name that will never exist so Available() returns false without panicking.
-	return &Server{db: database, vexor: vexor.New("__nonexistent_vexor_binary__", "", 1)}
+	return &Server{db: database, vexor: vexor.New("__nonexistent_vexor_binary__", "", 1, 1)}
 }
 
 func TestHandleRetrieve_InvalidCorpus(t *testing.T) {
