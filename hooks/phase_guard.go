@@ -14,8 +14,19 @@ import (
 
 const noActiveWorkflowReason = "No active workflow registered. Use mcp__stratus__register_workflow first."
 
-const unresolvedWorkflowReason = "No workflow could be resolved for this delegation. Register a workflow with mcp__stratus__register_workflow first. " +
-	"If several workflows are active in parallel, include the exact workflow ID in the Agent prompt so the correct flow is selected."
+const unresolvedWorkflowReason = "WORKFLOW_NOT_RESOLVED: No workflow could be resolved for this delegation. " +
+	"If several workflows are active in parallel, pass the exact workflow_id as structured tool input."
+
+const (
+	workflowNotFoundErr      = "WORKFLOW_NOT_FOUND"
+	workflowNotResolvedErr   = "WORKFLOW_NOT_RESOLVED"
+	ambiguousWorkflowErr     = "AMBIGUOUS_WORKFLOW"
+	workflowIDMismatchErr    = "WORKFLOW_ID_MISMATCH"
+	resolutionExplicitTool   = "explicit_tool"
+	resolutionExplicitPrompt = "explicit_prompt"
+	resolutionSession        = "session_fallback"
+	resolutionGlobal         = "global_fallback"
+)
 
 // workflowIDRe matches an explicit workflow ID (spec-/bug-/e2e- prefixed) embedded in a
 // Task prompt. Mirrors the OpenCode plugin regex so both runtimes resolve identically.
@@ -79,6 +90,9 @@ func WorkflowExistenceGuard(event HookEvent) Decision {
 
 	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
+		if isWorkflowResolutionError(err) {
+			return Decision{Continue: false, Reason: err.Error()}
+		}
 		if isStratusSelfRepo(event) {
 			return Decision{Continue: true}
 		}
@@ -115,6 +129,9 @@ func DelegationGuard(event HookEvent) Decision {
 
 	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
+		if isWorkflowResolutionError(err) {
+			return Decision{Continue: false, Reason: err.Error()}
+		}
 		if isStratusSelfRepo(event) {
 			return Decision{Continue: true}
 		}
@@ -181,6 +198,15 @@ func BashWriteGuard(event HookEvent) Decision {
 // stream into another -- nothing reaches disk -- so it must not read as a redirect.
 var fdDupRe = regexp.MustCompile(`\d?>&\d`)
 
+// devNullRe matches a redirect into /dev/null (`2>/dev/null`, `>/dev/null`, `&> /dev/null`,
+// `>> /dev/null`). The stream is discarded, so nothing reaches disk. Without this, the write
+// pattern " 2>" below matched `grep ... 2>/dev/null` and -- because write patterns are tested
+// before the read-only ones -- denied a reviewer a plain grep. Measured live 2026-09-01.
+//
+// The trailing group keeps the boundary: `>> /dev/null/notes.md` writes a real file and must
+// still read as a write, so /dev/null only counts when nothing path-like follows it.
+var devNullRe = regexp.MustCompile(`\d?&?>>?\s*/dev/null(\s|;|\||&|$)`)
+
 // isWriteBashCommand detects write operations in bash commands.
 func isWriteBashCommand(cmd string) bool {
 	// Normalize whitespace: replace tabs with spaces for consistent pattern matching
@@ -189,6 +215,8 @@ func isWriteBashCommand(cmd string) bool {
 	// suites are run, and reading its `2>&1` as a file redirect denied a reviewer every
 	// command it needed. A real redirect into a FILE still matches below.
 	normalizedCmd = fdDupRe.ReplaceAllString(normalizedCmd, " ")
+	// Same reasoning for /dev/null: discarding a stream is not a write.
+	normalizedCmd = devNullRe.ReplaceAllString(normalizedCmd, " $1")
 	lowerCmd := strings.ToLower(normalizedCmd)
 
 	// Check write patterns FIRST - explicit redirects, file modifications, git write ops
@@ -322,6 +350,40 @@ type dashboardState struct {
 	Workflows []map[string]any `json:"workflows"`
 }
 
+type workflowResolutionError struct {
+	Code        string
+	RequestedID string
+	PromptID    string
+	Source      string
+	SessionID   string
+	Candidates  []string
+}
+
+func (e *workflowResolutionError) Error() string {
+	parts := []string{e.Code}
+	if e.RequestedID != "" {
+		parts = append(parts, "requested: "+e.RequestedID)
+	}
+	if e.PromptID != "" {
+		parts = append(parts, "prompt: "+e.PromptID)
+	}
+	if e.Source != "" {
+		parts = append(parts, "source: "+e.Source)
+	}
+	if e.SessionID != "" {
+		parts = append(parts, "session_id: "+e.SessionID)
+	}
+	if len(e.Candidates) > 0 {
+		parts = append(parts, "candidates: "+strings.Join(e.Candidates, ", "))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func isWorkflowResolutionError(err error) bool {
+	_, ok := err.(*workflowResolutionError)
+	return ok
+}
+
 // fetchWorkflowForSession returns the active workflow for the exact Claude session.
 func fetchWorkflowForSession(sessionID string) map[string]any {
 	wf, _ := fetchWorkflowForSessionStrict(sessionID)
@@ -350,18 +412,9 @@ func fetchWorkflowForSessionStrict(sessionID string) (map[string]any, error) {
 	return nil, nil
 }
 
-// fetchWorkflowForTaskStrict resolves the workflow a Task delegation belongs to. It mirrors
-// the OpenCode plugin: an explicit workflow ID in the task prompt is the most reliable signal
-// and the only one that disambiguates parallel workflows sharing a session. FAIL-CLOSED:
-// returns an error if the Stratus API is unreachable.
-//
-// Resolution order:
-//  1. Workflow ID present in the task text (unique match, or the session-owned one).
-//  2. Prefix-form ID (spec-/bug-/e2e-) not yet in dashboard state, fetched by ID.
-//  3. Session ownership — only when it resolves to a single workflow.
-//
-// When several workflows match without a disambiguating ID, it returns nil rather than
-// picking by list order, so parallel flows never mix.
+// fetchWorkflowForTaskStrict resolves the workflow a Task delegation belongs to.
+// Explicit structured workflow_id is authoritative; prompt text is only a compatibility
+// fallback. It never falls through from a bad explicit ID to some active workflow.
 func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map[string]any, error) {
 	state, err := fetchDashboardStateStrict()
 	if err != nil {
@@ -375,54 +428,153 @@ func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map
 		}
 	}
 
-	taskText := getTaskText(toolInput)
-
-	// 1. Explicit workflow ID embedded in the task text.
-	var textMatches []map[string]any
-	for _, wf := range workflows {
-		if id, _ := wf["id"].(string); id != "" && strings.Contains(taskText, id) {
-			textMatches = append(textMatches, wf)
-		}
-	}
-	if len(textMatches) == 1 {
-		return textMatches[0], nil
-	}
-	if len(textMatches) > 1 {
-		// Multiple IDs in the prompt: prefer one owned by this session; else ambiguous.
-		for _, wf := range textMatches {
-			if s, _ := wf["session_id"].(string); sessionID != "" && s == sessionID {
-				return wf, nil
-			}
-		}
-		return nil, nil
-	}
-
-	// 2. Prefix-form ID not present in dashboard state.
-	if id := workflowIDRe.FindString(taskText); id != "" {
-		wf, err := fetchWorkflowByID(id)
-		if err != nil {
-			return nil, err
-		}
-		if wf != nil {
-			return wf, nil
+	toolID := workflowIDFromToolInput(toolInput)
+	promptIDs := workflowIDsFromPrompt(toolInput, workflows)
+	promptID := singleWorkflowID(promptIDs)
+	if toolID != "" && promptHasDifferentWorkflowID(promptIDs, toolID) {
+		return nil, &workflowResolutionError{
+			Code:        workflowIDMismatchErr,
+			RequestedID: toolID,
+			PromptID:    strings.Join(promptIDs, ", "),
+			Source:      resolutionExplicitTool,
+			SessionID:   sessionID,
+			Candidates:  workflowIDs(workflows),
 		}
 	}
 
-	// 3. Session ownership — only when it resolves to a single workflow. Picking the first
-	//    of several session-mates is exactly what let parallel flows mix.
+	if toolID != "" {
+		return requireExactWorkflow(toolID, resolutionExplicitTool, sessionID, workflows)
+	}
+	if promptID != "" {
+		return requireExactWorkflow(promptID, resolutionExplicitPrompt, sessionID, workflows)
+	}
+
 	if sessionID != "" {
-		var sessionMatches []map[string]any
-		for _, wf := range workflows {
-			if s, _ := wf["session_id"].(string); s == sessionID {
-				sessionMatches = append(sessionMatches, wf)
-			}
-		}
+		sessionMatches := workflowsForSession(workflows, sessionID)
 		if len(sessionMatches) == 1 {
 			return sessionMatches[0], nil
 		}
+		if len(sessionMatches) > 1 {
+			return nil, &workflowResolutionError{
+				Code:       ambiguousWorkflowErr,
+				Source:     resolutionSession,
+				SessionID:  sessionID,
+				Candidates: workflowIDs(sessionMatches),
+			}
+		}
 	}
 
-	return nil, nil
+	if len(workflows) == 1 {
+		return workflows[0], nil
+	}
+	if len(workflows) > 1 {
+		return nil, &workflowResolutionError{
+			Code:       ambiguousWorkflowErr,
+			Source:     resolutionGlobal,
+			SessionID:  sessionID,
+			Candidates: workflowIDs(workflows),
+		}
+	}
+
+	return nil, &workflowResolutionError{Code: workflowNotResolvedErr, SessionID: sessionID}
+}
+
+func requireExactWorkflow(id, source, sessionID string, candidates []map[string]any) (map[string]any, error) {
+	if wf := workflowByID(candidates, id); wf != nil {
+		return wf, nil
+	}
+	wf, err := fetchWorkflowByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if wf == nil {
+		return nil, &workflowResolutionError{
+			Code:        workflowNotFoundErr,
+			RequestedID: id,
+			Source:      source,
+			SessionID:   sessionID,
+			Candidates:  workflowIDs(candidates),
+		}
+	}
+	return wf, nil
+}
+
+func workflowIDFromToolInput(toolInput map[string]any) string {
+	if toolInput == nil {
+		return ""
+	}
+	if id, ok := toolInput["workflow_id"].(string); ok {
+		return strings.TrimSpace(id)
+	}
+	return ""
+}
+
+func workflowIDsFromPrompt(toolInput map[string]any, workflows []map[string]any) []string {
+	taskText := getTaskText(toolInput)
+	if taskText == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var ids []string
+	for _, wf := range workflows {
+		if id, _ := wf["id"].(string); id != "" && strings.Contains(taskText, id) {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range workflowIDRe.FindAllString(taskText, -1) {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func singleWorkflowID(ids []string) string {
+	if len(ids) == 1 {
+		return ids[0]
+	}
+	return ""
+}
+
+func promptHasDifferentWorkflowID(ids []string, toolID string) bool {
+	for _, id := range ids {
+		if id != toolID {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowByID(workflows []map[string]any, id string) map[string]any {
+	for _, wf := range workflows {
+		if got, _ := wf["id"].(string); got == id {
+			return wf
+		}
+	}
+	return nil
+}
+
+func workflowsForSession(workflows []map[string]any, sessionID string) []map[string]any {
+	var matches []map[string]any
+	for _, wf := range workflows {
+		if s, _ := wf["session_id"].(string); s == sessionID {
+			matches = append(matches, wf)
+		}
+	}
+	return matches
+}
+
+func workflowIDs(workflows []map[string]any) []string {
+	ids := make([]string, 0, len(workflows))
+	for _, wf := range workflows {
+		if id, _ := wf["id"].(string); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // getTaskText concatenates the free-text fields of an Agent/Task tool call for workflow-ID matching.

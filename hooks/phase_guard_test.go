@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -26,11 +27,8 @@ func TestWorkflowExistenceGuardBlocksWithoutSessionWorkflow(t *testing.T) {
 		},
 	})
 
-	if decision.Continue {
-		t.Fatalf("expected guard to block when no session workflow exists")
-	}
-	if decision.Reason != unresolvedWorkflowReason {
-		t.Fatalf("unexpected reason: %q", decision.Reason)
+	if !decision.Continue {
+		t.Fatalf("expected single global workflow fallback to allow, got blocked: %q", decision.Reason)
 	}
 }
 
@@ -70,11 +68,104 @@ func TestDelegationGuardUsesExactSessionWorkflow(t *testing.T) {
 		},
 	})
 
-	if decision.Continue {
-		t.Fatalf("expected delegation guard to block when only another session has a workflow")
+	if !decision.Continue {
+		t.Fatalf("expected single global workflow fallback to allow, got blocked: %q", decision.Reason)
 	}
-	if decision.Reason != unresolvedWorkflowReason {
-		t.Fatalf("unexpected reason: %q", decision.Reason)
+}
+
+func TestDelegationGuardStructuredWorkflowIDWinsOverGlobalActiveRegression(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-dev-gpu-sluzby-na-prod", "session_id": "session-b", "type": "spec", "phase": "implement"},
+			{"id": "spec-research-editor-undo-redo", "session_id": "session-a", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	wf, err := fetchWorkflowForTaskStrict(map[string]any{
+		"subagent_type": "delivery-frontend-engineer",
+		"workflow_id":   "spec-research-editor-undo-redo",
+		"prompt":        "Implement task 4.",
+	}, "session-a")
+	if err != nil {
+		t.Fatalf("expected structured workflow_id to resolve, got error: %v", err)
+	}
+	if id, _ := wf["id"].(string); id != "spec-research-editor-undo-redo" {
+		t.Fatalf("expected spec-research-editor-undo-redo, got %q", id)
+	}
+}
+
+func TestDelegationGuardWorkflowIDMismatchBlocks(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "sess", "type": "spec", "phase": "implement"},
+			{"id": "spec-b", "session_id": "sess", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Task",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-frontend-engineer",
+			"workflow_id":   "spec-a",
+			"prompt":        "Workflow ID: spec-b\nImplement task 4.",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected mismatch to block")
+	}
+	if !strings.Contains(decision.Reason, workflowIDMismatchErr) || !strings.Contains(decision.Reason, "requested: spec-a") || !strings.Contains(decision.Reason, "prompt: spec-b") {
+		t.Fatalf("expected mismatch diagnostics, got %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuardMissingExplicitWorkflowDoesNotFallback(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-dev-gpu-sluzby-na-prod", "session_id": "session-b", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Task",
+		SessionID: "session-a",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-frontend-engineer",
+			"workflow_id":   "spec-does-not-exist",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected missing explicit workflow_id to block")
+	}
+	if !strings.Contains(decision.Reason, workflowNotFoundErr) || strings.Contains(decision.Reason, resolutionGlobal) {
+		t.Fatalf("expected not-found without global fallback, got %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuardAmbiguousSessionCandidatesBlocks(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "sess", "type": "spec", "phase": "implement"},
+			{"id": "spec-b", "session_id": "sess", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Task",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-frontend-engineer",
+			"prompt":        "Implement task 4.",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected ambiguous session candidates to block")
+	}
+	if !strings.Contains(decision.Reason, ambiguousWorkflowErr) || !strings.Contains(decision.Reason, resolutionSession) {
+		t.Fatalf("expected session ambiguity diagnostics, got %q", decision.Reason)
 	}
 }
 
@@ -183,8 +274,8 @@ func TestDelegationGuardAmbiguousParallelBlocks(t *testing.T) {
 	if decision.Continue {
 		t.Fatalf("expected guard to block on ambiguous parallel state")
 	}
-	if decision.Reason != unresolvedWorkflowReason {
-		t.Fatalf("unexpected reason: %q", decision.Reason)
+	if !strings.Contains(decision.Reason, ambiguousWorkflowErr) || !strings.Contains(decision.Reason, resolutionGlobal) {
+		t.Fatalf("expected global ambiguity diagnostics, got %q", decision.Reason)
 	}
 }
 
@@ -590,11 +681,24 @@ func setDashboardState(t *testing.T, state dashboardState) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/dashboard/state" {
-			http.NotFound(w, r)
+		if r.URL.Path == "/api/dashboard/state" {
+			_ = json.NewEncoder(w).Encode(state)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(state)
+		if strings.HasPrefix(r.URL.Path, "/api/workflows/") {
+			id, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/workflows/"))
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			for _, wf := range state.Workflows {
+				if got, _ := wf["id"].(string); got == id {
+					_ = json.NewEncoder(w).Encode(wf)
+					return
+				}
+			}
+		}
+		http.NotFound(w, r)
 	}))
 	t.Cleanup(server.Close)
 
@@ -607,4 +711,36 @@ func setDashboardState(t *testing.T, state dashboardState) {
 		t.Fatalf("split host/port: %v", err)
 	}
 	t.Setenv("STRATUS_PORT", port)
+}
+
+// Redirecting a stream to /dev/null discards it -- nothing reaches disk, so it is not a
+// write. Measured live 2026-09-01: `grep -rn "..." --include=*.py uvo_rag_api/ 2>/dev/null
+// | head -80` was denied twice to a reviewer in verify phase, because the write pattern
+// " 2>" is tested BEFORE the read-only pattern "grep ". Same class as the `2>&1` inversion
+// above, one step further: the fix there normalized descriptor duplication only.
+func TestIsWriteBashCommandTreatsDevNullRedirectAsReadOnly(t *testing.T) {
+	readOnly := []string{
+		`grep -rn "MISSING_VALUE" --include=*.py uvo_rag_api/ tests/ 2>/dev/null | head -80`,
+		"find . -name '*.go' 2>/dev/null",
+		"cat missing.txt 2> /dev/null",
+		"ls /nope &>/dev/null",
+		"pytest -q >/dev/null 2>&1",
+	}
+	for _, cmd := range readOnly {
+		if isWriteBashCommand(cmd) {
+			t.Errorf("isWriteBashCommand(%q) = true, want false (/dev/null discards, it does not write)", cmd)
+		}
+	}
+
+	// A redirect into a real FILE is still a write, /dev/null elsewhere or not.
+	stillWrites := []string{
+		"pytest -q > results.txt 2>/dev/null",
+		"go build ./... 2>/dev/null > build.log",
+		"echo hi >> /dev/null/notes.md",
+	}
+	for _, cmd := range stillWrites {
+		if !isWriteBashCommand(cmd) {
+			t.Errorf("isWriteBashCommand(%q) = false, want true (writes a file)", cmd)
+		}
+	}
 }

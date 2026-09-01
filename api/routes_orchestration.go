@@ -31,7 +31,7 @@ var domainKeywords = map[string]string{
 	"auth": "backend", "oauth": "backend", "jwt": "backend", "login": "backend",
 	"database": "database", "db": "database", "sql": "database", "query": "database", "migration": "database",
 	"schema": "database",
-	"test": "qa", "spec": "qa", "coverage": "qa", "playwright": "qa",
+	"test":   "qa", "spec": "qa", "coverage": "qa", "playwright": "qa",
 	"deploy": "devops", "docker": "devops", "ci": "devops", "kubernetes": "devops", "infra": "devops",
 	"mobile": "mobile", "ios": "mobile", "android": "mobile",
 }
@@ -396,17 +396,96 @@ func (s *Server) handleTransitionPhase(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRecordDelegation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		AgentID string `json:"agent_id"`
+		AgentID    string `json:"agent_id"`
+		WorkflowID string `json:"workflow_id"`
+		Phase      string `json:"phase"`
+		TaskIndex  *int   `json:"task_index"`
+		SessionID  string `json:"session_id"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
+	}
+	if body.WorkflowID != "" && body.WorkflowID != id {
+		jsonErrCode(w, http.StatusBadRequest, "WORKFLOW_ID_MISMATCH", "workflow_id does not match URL workflow", map[string]any{
+			"requested_workflow_id": body.WorkflowID,
+			"resolved_workflow_id":  id,
+			"resolution_source":     "explicit_tool",
+			"candidates":            []string{id, body.WorkflowID},
+		})
+		return
+	}
+	current, err := s.coordinator.Get(id)
+	if err != nil {
+		jsonErrCode(w, http.StatusNotFound, "WORKFLOW_NOT_FOUND", err.Error(), map[string]any{
+			"requested_workflow_id": id,
+			"resolution_source":     "explicit_tool",
+			"candidates":            []string{},
+		})
+		return
+	}
+	if current.Aborted || current.Phase == orchestration.PhaseComplete {
+		jsonErrCode(w, http.StatusBadRequest, "WORKFLOW_NOT_RESOLVED", "workflow is not active", map[string]any{
+			"requested_workflow_id": id,
+			"resolution_source":     "explicit_tool",
+			"candidates":            []string{id},
+		})
+		return
+	}
+	if body.SessionID != "" && current.SessionID != "" && body.SessionID != current.SessionID {
+		jsonErrCode(w, http.StatusForbidden, "WORKFLOW_SESSION_MISMATCH", "session does not own workflow", map[string]any{
+			"requested_workflow_id": id,
+			"resolution_source":     "explicit_tool",
+			"session_id":            body.SessionID,
+			"candidates":            []string{id},
+		})
+		return
+	}
+	if body.Phase != "" && body.Phase != string(current.Phase) {
+		jsonErrCode(w, http.StatusBadRequest, "WORKFLOW_PHASE_MISMATCH", "workflow phase does not match delegation phase", map[string]any{
+			"requested_workflow_id": id,
+			"resolution_source":     "explicit_tool",
+			"requested_phase":       body.Phase,
+			"resolved_phase":        current.Phase,
+			"candidates":            []string{id},
+		})
+		return
+	}
+	if body.TaskIndex != nil {
+		idx := *body.TaskIndex
+		if idx < 0 || idx >= len(current.Tasks) {
+			jsonErrCode(w, http.StatusBadRequest, "WORKFLOW_TASK_NOT_IN_PROGRESS", "task index out of range", map[string]any{
+				"requested_workflow_id": id,
+				"resolution_source":     "explicit_tool",
+				"task_index":            idx,
+				"candidates":            []string{id},
+			})
+			return
+		}
+		if current.Tasks[idx].Status != "in_progress" {
+			jsonErrCode(w, http.StatusBadRequest, "WORKFLOW_TASK_NOT_IN_PROGRESS", "task is not in_progress", map[string]any{
+				"requested_workflow_id": id,
+				"resolution_source":     "explicit_tool",
+				"task_index":            idx,
+				"task_status":           current.Tasks[idx].Status,
+				"candidates":            []string{id},
+			})
+			return
+		}
 	}
 	state, err := s.coordinator.RecordDelegation(id, body.AgentID)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.emitEvent(events.EventAgentSpawned, "orchestration", map[string]any{
+		"requested_workflow_id": body.WorkflowID,
+		"resolved_workflow_id":  id,
+		"resolution_source":     "explicit_tool",
+		"session_id":            body.SessionID,
+		"agent_id":              body.AgentID,
+		"task_index":            body.TaskIndex,
+	})
 	s.hub.BroadcastJSON("workflow_updated", state)
 	json200(w, state)
 }

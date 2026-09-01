@@ -36,10 +36,24 @@
    - agent_id: "delivery-<role>"
    ```
 
+4. **Pass workflow identity as structured data:**
+   ```
+   workflow_id: "<id>"
+   phase: "<current-phase>"
+   task_index: <zero-based task index>
+   session_id: "${CLAUDE_SESSION_ID}"
+   ```
+
+   `workflow_id` is authoritative. A prompt line such as `Workflow ID: <id>` is
+   only a compatibility fallback and audit hint. If structured `workflow_id` and
+   prompt text disagree, Stratus must block with `WORKFLOW_ID_MISMATCH` rather
+   than choosing either value.
+
 ### Enforcement
 
 - `WorkflowExistenceGuard`: Blocks delivery-agent delegation without active workflow (fail-closed outside the Stratus self-repo development escape hatch)
 - `DelegationGuard`: Requires a resolvable workflow for delivery-agent delegation
+- Explicit workflow IDs are resolved before session or global active workflow fallback
 - Violations result in immediate block with error message
 
 ## Agent Choice Per Phase

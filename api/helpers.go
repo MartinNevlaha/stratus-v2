@@ -17,6 +17,16 @@ func jsonErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+func jsonErrCode(w http.ResponseWriter, status int, code, msg string, fields map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	body := map[string]any{"code": code, "error": msg}
+	for k, v := range fields {
+		body[k] = v
+	}
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 func decodeBody(r *http.Request, v any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(r.Body).Decode(v)

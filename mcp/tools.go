@@ -8,6 +8,7 @@ import (
 	"net/http"
 	neturl "net/url"
 	"strconv"
+	"strings"
 )
 
 // RegisterTools registers Stratus MCP tools on the server.
@@ -162,28 +163,15 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 		Description: "Get delivery phase briefing, active workflows, and delegation instructions.",
 		InputSchema: obj(
 			opt("workflow_id", "string", "Specific workflow ID (omit for latest active)"),
+			opt("session_id", "string", "Coordinator session ID for session-scoped workflow resolution"),
 		),
 		Handler: func(args map[string]any) (any, error) {
-			var wfID string
-
-			if id, ok := args["workflow_id"].(string); ok && id != "" {
-				wfID = id
-			} else {
-				dash, err := client.get("/api/dashboard/state", nil)
-				if err != nil {
-					return nil, err
-				}
-				if m, ok := dash.(map[string]any); ok {
-					if workflows, ok := m["workflows"].([]any); ok && len(workflows) > 0 {
-						if w, ok := workflows[0].(map[string]any); ok {
-							wfID, _ = w["id"].(string)
-						}
-					}
-				}
+			wfID, err := resolveDispatchWorkflowID(client, args)
+			if err != nil {
+				return nil, err
 			}
-
 			if wfID == "" {
-				return map[string]any{"workflows": []any{}, "message": "no active workflows"}, nil
+				return map[string]any{"workflows": []any{}, "code": "WORKFLOW_NOT_RESOLVED", "message": "no active workflows"}, nil
 			}
 
 			result, err := client.get(fmt.Sprintf("/api/workflows/%s/dispatch", wfID), nil)
@@ -777,6 +765,79 @@ func (c *apiClient) put(path string, body any) (any, error) {
 	return c.decodeResponse(resp, "PUT", path)
 }
 
+func resolveDispatchWorkflowID(client *apiClient, args map[string]any) (string, error) {
+	if id, ok := args["workflow_id"].(string); ok && strings.TrimSpace(id) != "" {
+		return strings.TrimSpace(id), nil
+	}
+
+	dash, err := client.get("/api/dashboard/state", nil)
+	if err != nil {
+		return "", err
+	}
+	workflows := dashboardWorkflows(dash)
+	if len(workflows) == 0 {
+		return "", nil
+	}
+
+	if sessionID, ok := args["session_id"].(string); ok && strings.TrimSpace(sessionID) != "" {
+		matches := workflowsForDispatchSession(workflows, strings.TrimSpace(sessionID))
+		if len(matches) == 1 {
+			return workflowID(matches[0]), nil
+		}
+		if len(matches) > 1 {
+			return "", fmt.Errorf("AMBIGUOUS_WORKFLOW: source: session_fallback\nsession_id: %s\ncandidates: %s", sessionID, strings.Join(dispatchWorkflowIDs(matches), ", "))
+		}
+	}
+
+	if len(workflows) == 1 {
+		return workflowID(workflows[0]), nil
+	}
+	return "", fmt.Errorf("AMBIGUOUS_WORKFLOW: source: global_fallback\ncandidates: %s", strings.Join(dispatchWorkflowIDs(workflows), ", "))
+}
+
+func dashboardWorkflows(dash any) []map[string]any {
+	m, ok := dash.(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, ok := m["workflows"].([]any)
+	if !ok {
+		return nil
+	}
+	workflows := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if wf, ok := item.(map[string]any); ok {
+			workflows = append(workflows, wf)
+		}
+	}
+	return workflows
+}
+
+func workflowsForDispatchSession(workflows []map[string]any, sessionID string) []map[string]any {
+	var matches []map[string]any
+	for _, wf := range workflows {
+		if s, _ := wf["session_id"].(string); s == sessionID {
+			matches = append(matches, wf)
+		}
+	}
+	return matches
+}
+
+func dispatchWorkflowIDs(workflows []map[string]any) []string {
+	ids := make([]string, 0, len(workflows))
+	for _, wf := range workflows {
+		if id := workflowID(wf); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func workflowID(workflow map[string]any) string {
+	id, _ := workflow["id"].(string)
+	return id
+}
+
 // decodeResponse checks the HTTP status code before decoding JSON.
 func (c *apiClient) decodeResponse(resp *http.Response, method, path string) (any, error) {
 	result, err := decodeJSON(resp.Body)
@@ -896,4 +957,3 @@ func convertTasksArg(v any) ([]string, error) {
 	}
 	return nil, nil
 }
-
