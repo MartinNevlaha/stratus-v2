@@ -129,6 +129,15 @@
     }
   }
 
+  async function copyAll() {
+    if (!term) return
+    const previous = term.getSelection()
+    term.selectAll()
+    const copied = await copySelection()
+    term.clearSelection()
+    if (!copied && previous) showCopyStatus('Copy failed')
+  }
+
   onMount(() => {
     term = new Terminal({
       theme: {
@@ -141,6 +150,11 @@
       fontSize: 14,
       cursorBlink: true,
       scrollback: 5000,
+      // TUIs (Claude Code, OpenCode) enable mouse reporting (DECSET ?1002/?1003/
+      // ?1006), which makes xterm forward drags to the app instead of selecting.
+      // xterm's escape hatch is Shift+drag on Linux/Windows, Alt+drag on macOS —
+      // but the macOS one is opt-in.
+      macOptionClickForcesSelection: true,
     })
 
     fitAddon = new FitAddon()
@@ -213,27 +227,45 @@
     }
     container.addEventListener('copy', onCopy)
 
-    // Explicit shortcuts: Ctrl+Shift+C copies the selection, Ctrl+Shift+V
-    // pastes. Returning false stops xterm from forwarding the key to the shell.
+    // Explicit shortcuts. Ctrl+Shift+C is deliberately NOT used: Chrome reserves
+    // it for Inspect Element and the page cannot preventDefault it. Copy is bound
+    // to Ctrl+Insert, Ctrl+Alt+C, and Ctrl+C-with-a-selection (the selection is
+    // cleared afterwards so the next Ctrl+C reaches the shell as SIGINT).
+    // Returning false stops xterm from forwarding the key to the shell.
+    const pasteFromClipboard = () => {
+      navigator.clipboard?.readText().then((text) => {
+        if (text && ws?.readyState === WebSocket.OPEN) {
+          autoScroll = true
+          ws.send(JSON.stringify({ type: 'input', data: { id: sessionId, data: text } }))
+        }
+      }).catch(() => showCopyStatus('Paste failed'))
+    }
+
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
-      if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+      const isC = e.key === 'C' || e.key === 'c'
+      const isV = e.key === 'V' || e.key === 'v'
+
+      // Copy: Ctrl+Insert (classic), Ctrl+Alt+C, Cmd+C on macOS.
+      if ((e.ctrlKey && e.key === 'Insert') ||
+          (e.ctrlKey && e.altKey && !e.shiftKey && isC) ||
+          (e.metaKey && !e.ctrlKey && !e.altKey && isC)) {
         copySelection()
         return false
       }
-      if (e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
-        if (term.hasSelection()) {
-          copySelection()
-          return false
-        }
+
+      // Ctrl+C copies when something is selected, otherwise falls through to
+      // the shell as SIGINT.
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && isC && term.hasSelection()) {
+        copySelection().then(() => term.clearSelection())
+        return false
       }
-      if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
-        navigator.clipboard?.readText().then((text) => {
-          if (text && ws?.readyState === WebSocket.OPEN) {
-            autoScroll = true
-            ws.send(JSON.stringify({ type: 'input', data: { id: sessionId, data: text } }))
-          }
-        }).catch(() => {})
+
+      // Paste: Shift+Insert (classic), Ctrl+Shift+V, Ctrl+Alt+V.
+      if ((e.shiftKey && e.key === 'Insert') ||
+          (e.ctrlKey && e.shiftKey && isV) ||
+          (e.ctrlKey && e.altKey && !e.shiftKey && isV)) {
+        pasteFromClipboard()
         return false
       }
       return true
@@ -367,12 +399,15 @@
     {#if error}
       <span class="error">{error}</span>
     {/if}
-    <span class="copy-hint">Drag to select · Ctrl+Shift+C</span>
+    <span class="copy-hint">Shift+drag to select · Ctrl+Insert to copy</span>
     {#if copyStatus}
       <span class:copy-error={copyStatus === 'Copy failed'} class="copy-status">{copyStatus}</span>
     {/if}
-    <button class="copy-btn" disabled={!hasSelection} onclick={() => copySelection()} title="Copy terminal selection">
+    <button class="copy-btn" disabled={!hasSelection} onclick={() => copySelection()} title="Copy terminal selection (Ctrl+Insert / Ctrl+Alt+C)">
       Copy
+    </button>
+    <button class="copy-btn" onclick={() => copyAll()} title="Copy the entire scrollback buffer">
+      Copy all
     </button>
     <div class="stt-slot">
       <SttButton onTranscript={handleTranscript} />
