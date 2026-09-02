@@ -55,6 +55,9 @@
 - `DelegationGuard`: Requires a resolvable workflow for delivery-agent delegation
 - Explicit workflow IDs are resolved before session or global active workflow fallback
 - Violations result in immediate block with error message
+- Every denial is recorded: a JSONL line in `<data_dir>/hook_denials.jsonl` and an event of
+  type `hook_denial` in the timeline (searchable via `mcp__stratus__search`). Check it when
+  a delegated agent ends its turn without delivering — the block reason only reaches the agent.
 
 ## Agent Choice Per Phase
 

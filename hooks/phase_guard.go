@@ -37,43 +37,74 @@ func PhaseGuard(event HookEvent) Decision {
 	if event.ToolName == "" {
 		return Decision{Continue: true}
 	}
-
-	state := fetchActiveWorkflow(event.SessionID)
-	if state == nil {
-		return Decision{Continue: true} // no active workflow
+	if !isWriteTool(event.ToolName) || !isDeliveryAgent(event) {
+		return Decision{Continue: true}
 	}
 
-	phase, _ := state["phase"].(string)
-	wtype, _ := state["type"].(string)
+	// A session can own several workflows at once, so "the" active workflow may not
+	// exist. Block only when EVERY candidate is in a write-restricted phase -- then the
+	// denial is right whichever one the agent belongs to. If any candidate is in another
+	// phase we cannot tell them apart, and a wrong denial costs more than a missed guard.
+	blocking := blockingWorkflow(phaseGuardCandidates(event.SessionID))
+	if blocking == nil {
+		return Decision{Continue: true}
+	}
 
-	// During verify/review phase: block write tools for delivery agents.
-	//
+	phase, _ := blocking["phase"].(string)
+	wfID, _ := blocking["id"].(string)
+	origin := " (workflow " + wfID + ", phase " + phase + ")"
+
 	// Bash is judged by its COMMAND, not by its name. A reviewer that cannot run
 	// `git diff` or the test suite cannot verify what it reviews -- it can only assert
 	// that the code reads correctly, which is the failure mode this whole phase exists
 	// to prevent. isWriteBashCommand is the same split BashWriteGuard already applies.
-	if (phase == "verify" && wtype == "spec") || (phase == "review" && wtype == "bug") {
-		if isWriteTool(event.ToolName) && isDeliveryAgent(event) {
-			if event.ToolName == "Bash" {
-				command, _ := event.ToolInput["command"].(string)
-				// An absent command is unknown, not read-only -- stay fail-closed.
-				if command != "" && !isWriteBashCommand(command) {
-					return Decision{Continue: true}
-				}
-				return Decision{
-					Continue: false,
-					Reason: "This bash command writes, and writes are not allowed during " + phase +
-						" phase: " + command + ". Read-only commands (git diff/log/status, tests, grep) are allowed.",
-				}
-			}
-			return Decision{
-				Continue: false,
-				Reason:   "Write tools are not allowed during " + phase + " phase. Use Read/Grep/Glob or read-only Bash.",
-			}
+	var decision Decision
+	if event.ToolName == "Bash" {
+		command, _ := event.ToolInput["command"].(string)
+		// An absent command is unknown, not read-only -- stay fail-closed.
+		if command != "" && !isWriteBashCommand(command) {
+			return Decision{Continue: true}
+		}
+		decision = Decision{
+			Continue: false,
+			Reason: "This bash command writes, and writes are not allowed during " + phase +
+				" phase" + origin + ": " + command + ". Read-only commands (git diff/log/status, tests, grep) are allowed.",
+		}
+	} else {
+		decision = Decision{
+			Continue: false,
+			Reason:   "Write tools are not allowed during " + phase + " phase" + origin + ". Use Read/Grep/Glob or read-only Bash.",
 		}
 	}
 
-	return Decision{Continue: true}
+	auditDenial(event, "phase_guard", decision.Reason, map[string]any{
+		"workflow_id": wfID,
+		"phase":       phase,
+	})
+	return decision
+}
+
+// isBlockingPhase reports whether a workflow is in a phase where delivery agents must
+// not write: a spec under verification or a bug under review cannot be edited by the
+// same agent that is judging it.
+func isBlockingPhase(wf map[string]any) bool {
+	phase, _ := wf["phase"].(string)
+	wtype, _ := wf["type"].(string)
+	return (phase == "verify" && wtype == "spec") || (phase == "review" && wtype == "bug")
+}
+
+// blockingWorkflow returns a workflow to deny against only when every candidate is in a
+// blocking phase; otherwise nil (ambiguous -- do not guess).
+func blockingWorkflow(candidates []map[string]any) map[string]any {
+	if len(candidates) == 0 {
+		return nil
+	}
+	for _, wf := range candidates {
+		if !isBlockingPhase(wf) {
+			return nil
+		}
+	}
+	return candidates[0]
 }
 
 // WorkflowExistenceGuard blocks delivery-agent delegation when the current session has no active workflow.
@@ -91,21 +122,16 @@ func WorkflowExistenceGuard(event HookEvent) Decision {
 	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
 		if isWorkflowResolutionError(err) {
-			return Decision{Continue: false, Reason: err.Error()}
+			return blockAudited(event, "workflow_existence_guard", err.Error(), nil)
 		}
 		if isStratusSelfRepo(event) {
 			return Decision{Continue: true}
 		}
-		return Decision{
-			Continue: false,
-			Reason:   "Cannot verify workflow: " + err.Error() + ". Ensure Stratus server is running (stratus serve).",
-		}
+		return blockAudited(event, "workflow_existence_guard",
+			"Cannot verify workflow: "+err.Error()+". Ensure Stratus server is running (stratus serve).", nil)
 	}
 	if wf == nil {
-		return Decision{
-			Continue: false,
-			Reason:   unresolvedWorkflowReason,
-		}
+		return blockAudited(event, "workflow_existence_guard", unresolvedWorkflowReason, nil)
 	}
 
 	return Decision{Continue: true}
@@ -130,24 +156,26 @@ func DelegationGuard(event HookEvent) Decision {
 	wf, err := fetchWorkflowForTaskStrict(event.ToolInput, event.SessionID)
 	if err != nil {
 		if isWorkflowResolutionError(err) {
-			return Decision{Continue: false, Reason: err.Error()}
+			return blockAudited(event, "delegation_guard", err.Error(), nil)
 		}
 		if isStratusSelfRepo(event) {
 			return Decision{Continue: true}
 		}
-		return Decision{
-			Continue: false,
-			Reason:   "Cannot verify workflow: " + err.Error() + ". Ensure Stratus server is running (stratus serve).",
-		}
+		return blockAudited(event, "delegation_guard",
+			"Cannot verify workflow: "+err.Error()+". Ensure Stratus server is running (stratus serve).", nil)
 	}
 	if wf == nil {
-		return Decision{
-			Continue: false,
-			Reason:   unresolvedWorkflowReason,
-		}
+		return blockAudited(event, "delegation_guard", unresolvedWorkflowReason, nil)
 	}
 
 	return Decision{Continue: true}
+}
+
+// blockAudited returns a denial and records it, so a coordinator can find out later which
+// tool call was refused and why -- the Reason string alone only ever reaches the agent.
+func blockAudited(event HookEvent, hookName, reason string, refs map[string]any) Decision {
+	auditDenial(event, hookName, reason, refs)
+	return Decision{Continue: false, Reason: reason}
 }
 
 // WorkflowEnforcer nudges the coordinator when idle between phases.
@@ -179,16 +207,12 @@ func BashWriteGuard(event HookEvent) Decision {
 		if isStratusSelfRepo(event) {
 			return Decision{Continue: true}
 		}
-		return Decision{
-			Continue: false,
-			Reason:   "Cannot verify workflow: " + err.Error() + ". Ensure Stratus server is running (stratus serve).",
-		}
+		return blockAudited(event, "bash_write_guard",
+			"Cannot verify workflow: "+err.Error()+". Ensure Stratus server is running (stratus serve).", nil)
 	}
 	if wf == nil {
-		return Decision{
-			Continue: false,
-			Reason:   noActiveWorkflowReason + " Delivery agents must have an active workflow to execute write commands.",
-		}
+		return blockAudited(event, "bash_write_guard",
+			noActiveWorkflowReason+" Delivery agents must have an active workflow to execute write commands.", nil)
 	}
 
 	return Decision{Continue: true}
@@ -207,6 +231,21 @@ var fdDupRe = regexp.MustCompile(`\d?>&\d`)
 // still read as a write, so /dev/null only counts when nothing path-like follows it.
 var devNullRe = regexp.MustCompile(`\d?&?>>?\s*/dev/null(\s|;|\||&|$)`)
 
+// redirectWritePatterns are shell syntax fragments that always write, matched literally.
+var redirectWritePatterns = []string{
+	" > ", " >> ", ">|",
+	" 1>", " 2>", " &>",
+	"sed -i", "awk -i",
+}
+
+// writeCommandRe matches file-modifying commands on word boundaries. The git alternative
+// skips leading global flags and their values, so it matches `git -C /repo commit` but not
+// `git worktree add` -- a scratch tree is not a repository write, and a reviewer needs one
+// to compare against a baseline.
+var writeCommandRe = regexp.MustCompile(
+	`\b(?:tee|install|rmdir|rm|mkdir|mv|cp|dd|touch|chmod|chown|truncate)\b` +
+		`|\bgit\s+(?:-\S+\s+(?:\S+\s+)?)*(?:add|commit|push|merge|rebase|cherry-pick|reset)\b`)
+
 // isWriteBashCommand detects write operations in bash commands.
 func isWriteBashCommand(cmd string) bool {
 	// Normalize whitespace: replace tabs with spaces for consistent pattern matching
@@ -219,24 +258,17 @@ func isWriteBashCommand(cmd string) bool {
 	normalizedCmd = devNullRe.ReplaceAllString(normalizedCmd, " $1")
 	lowerCmd := strings.ToLower(normalizedCmd)
 
-	// Check write patterns FIRST - explicit redirects, file modifications, git write ops
-	writePatterns := []string{
-		" > ", " >> ", ">|",
-		" 1>", " 2>", " &>",
-		"sed -i", "awk -i",
-		"tee ",
-		"install ",
-		"git add", "git commit", "git push", "git merge", "git rebase", "git cherry-pick", "git reset",
-		"rm ", "rmdir ", "mv ", "mkdir ", "touch ",
-		"chmod ", "chown ",
-		"cp ",
-		"dd ",
-		"truncate ",
-	}
-	for _, p := range writePatterns {
+	// Check write patterns FIRST - explicit redirects, file modifications, git write ops.
+	for _, p := range redirectWritePatterns {
 		if strings.Contains(lowerCmd, p) {
 			return true
 		}
+	}
+	// Command names are matched on word boundaries, not as substrings: " dd " lived
+	// inside "git worktree add --detach" and denied a reviewer the baseline tree it needs
+	// to tell a regression from a pre-existing failure (measured 2026-09-02).
+	if writeCommandRe.MatchString(lowerCmd) {
+		return true
 	}
 
 	// Check read-only patterns BEFORE generic redirect check
@@ -612,19 +644,20 @@ func fetchWorkflowByID(id string) (map[string]any, error) {
 	return wf, nil
 }
 
-// fetchActiveWorkflow queries the local Stratus API for the active workflow state.
+// phaseGuardCandidates returns every workflow the calling session might be acting for.
 //
 // Matching priority:
-//  1. Exact session_id match — preferred and unambiguous (multiple concurrent windows).
-//  2. Single active workflow — last-resort fallback for resumed sessions whose session_id
-//     changed, or when CLAUDE_SESSION_ID was unavailable; safe only because there is
-//     exactly one flow to bind to.
+//  1. All workflows whose session_id matches — a session can have several registered at
+//     once, so this is a SET, not a single flow. Returning whichever came first bound the
+//     agent to a foreign phase and denied legitimate writes (measured 2026-09-02).
+//  2. A single active workflow — last-resort fallback for resumed sessions whose
+//     session_id changed, or when CLAUDE_SESSION_ID was unavailable; safe only because
+//     there is exactly one flow to bind to.
 //
 // When several workflows run in parallel and none is owned by this session, we do NOT
-// guess. Binding the session to whichever flow happens to be first would gate its writes
-// against the wrong phase (the flows "mix"). Returning nil keeps PhaseGuard best-effort
-// (it simply does not block) rather than blocking legitimate work under a foreign phase.
-func fetchActiveWorkflow(sessionID string) map[string]any {
+// guess: nil keeps PhaseGuard best-effort (it simply does not block) rather than gating
+// writes against the wrong phase.
+func phaseGuardCandidates(sessionID string) []map[string]any {
 	state := fetchDashboardState()
 	if state == nil {
 		return nil
@@ -637,21 +670,25 @@ func fetchActiveWorkflow(sessionID string) map[string]any {
 		}
 	}
 
-	// 1. Exact session match is unambiguous — always prefer it.
 	if sessionID != "" {
-		for _, wf := range workflows {
-			if s, _ := wf["session_id"].(string); s == sessionID {
-				return wf
-			}
+		if matches := workflowsForSession(workflows, sessionID); len(matches) > 0 {
+			return matches
 		}
 	}
 
-	// 2. No session match: fall back only when a single workflow is active.
 	if len(workflows) == 1 {
-		return workflows[0]
+		return workflows
 	}
+	return nil
+}
 
-	// 3. Ambiguous (multiple parallel workflows, none owned by this session) → don't guess.
+// fetchActiveWorkflow returns the single workflow this session is unambiguously acting
+// for, or nil when the session owns several (or none).
+func fetchActiveWorkflow(sessionID string) map[string]any {
+	candidates := phaseGuardCandidates(sessionID)
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
 	return nil
 }
 

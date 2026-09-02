@@ -744,3 +744,69 @@ func TestIsWriteBashCommandTreatsDevNullRedirectAsReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// N1: one session can own several workflows at once. Judging an agent by whichever
+// of them happens to be first denied a `fix`-phase engineer its first Edit because a
+// sibling bug workflow sat in `review`. Measured live 2026-09-02.
+func TestPhaseGuardAllowsWhenSessionHasMixedPhases(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "bug-x", "session_id": "session-a", "type": "bug", "phase": "review"},
+			{"id": "spec-y", "session_id": "session-a", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := PhaseGuard(HookEvent{
+		ToolName:  "Edit",
+		SessionID: "session-a",
+		AgentType: "delivery-backend-engineer",
+		ToolInput: map[string]any{"file_path": "/tmp/x.go"},
+	})
+	if !decision.Continue {
+		t.Fatalf("expected allow when the session also owns a non-blocking workflow, got %q", decision.Reason)
+	}
+}
+
+func TestPhaseGuardBlocksWhenAllSessionWorkflowsAreBlocking(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "bug-x", "session_id": "session-a", "type": "bug", "phase": "review"},
+			{"id": "bug-y", "session_id": "session-a", "type": "bug", "phase": "review"},
+		},
+	})
+
+	decision := PhaseGuard(HookEvent{
+		ToolName:  "Write",
+		SessionID: "session-a",
+		AgentType: "delivery-code-reviewer",
+		ToolInput: map[string]any{"file_path": "/tmp/x.go"},
+	})
+	if decision.Continue {
+		t.Fatalf("expected block when every workflow of the session is in a blocking phase")
+	}
+	if !strings.Contains(decision.Reason, "bug-x") {
+		t.Errorf("expected reason to name the blocking workflow, got %q", decision.Reason)
+	}
+}
+
+// N3: "dd " matched the substring inside "add --detach", so a reviewer could not
+// create the baseline worktree it needs to tell a regression from a pre-existing failure.
+func TestIsWriteBashCommandWordBoundaries(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"git worktree add --detach /tmp/baseline abc123", false},
+		{"git worktree list", false},
+		{"echo confirm", false},
+		{"dd if=/dev/zero of=file", true},
+		{"git add -A", true},
+		{"git -C /repo commit -m x", true},
+		{"rmdir olddir", true},
+	}
+	for _, tt := range tests {
+		if got := isWriteBashCommand(tt.cmd); got != tt.want {
+			t.Errorf("isWriteBashCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+		}
+	}
+}
