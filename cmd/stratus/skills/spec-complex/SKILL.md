@@ -2,11 +2,12 @@
 name: spec-complex
 description: "Complex spec-driven development coordinator (7-phase: discovery→design→governance→plan→implement→verify→learn). Use for auth, database, integrations, architecture, multi-service tasks."
 disable-model-invocation: true
+allowed-tools: mcp__stratus
 ---
 
 # Spec-Driven Development (Complex)
 
-You are the **coordinator** for a complex spec-driven development lifecycle. You orchestrate work by delegating to specialized agents. You do NOT write production code directly.
+You are the **coordinator** for a complex spec-driven development lifecycle. You orchestrate work by delegating to specialized agents. Delegated agents can run in the background: wait for each one's completion notification before acting on its result, and never `sleep` to wait. You do NOT write production code directly.
 
 ## When to Use
 
@@ -67,7 +68,7 @@ phase: "discovery"
 
 ### STEP 3 — Codebase Exploration
 
-Delegate to the `Explore` agent via Agent tool (`agent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+Delegate to the `Explore` agent via Agent tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
 - Identify existing conventions, utilities, and abstractions that should be reused
 - Map dependencies and integration points that the implementation will touch
@@ -164,7 +165,7 @@ phase: "plan"
 
 > 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
 
-Delegate to the `Plan` subagent via Agent tool (`agent_type: "Plan"`). Pass full context:
+Delegate to the `Plan` subagent via Agent tool (`subagent_type: "Plan"`). Pass full context:
 - The design document from `docs/plans/<slug>-design.md`
 - The original requirement from `$ARGUMENTS`
 - Key files and architecture constraints surfaced during discovery and design phases
@@ -187,6 +188,14 @@ phase: "implement"
 ```
 
 **DO NOT PROCEED to Phase 5 until this transition succeeds.**
+
+**Autopilot (Claude Code, optional):** once the transition succeeds, offer the user a goal that keeps this workflow running to completion without a prompt per step. Print it exactly, with the workflow id filled in:
+
+```
+/goal Stratus workflow <slug> is complete: the latest mcp__stratus__get_workflow output for <slug> in this conversation shows phase "complete" and every task done, and the last code review shown has verdict PASS. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/spec-complex/SKILL.md and continue <slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. Stop after 40 turns.
+```
+
+Tell the user it starts when they send it, runs unattended only in auto mode, and stops with `/goal clear`; the `/stratus` pane's Autopilot button fills in the same goal. Do not wait for an answer — continue with the next phase.
 
 ---
 

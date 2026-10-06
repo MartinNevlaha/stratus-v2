@@ -2,11 +2,12 @@
 name: spec
 description: "Spec-driven development coordinator (plan→implement→verify→learn). Orchestrates work by delegating to specialized agents."
 disable-model-invocation: true
+allowed-tools: mcp__stratus
 ---
 
 # Spec-Driven Development
 
-You are the **coordinator** for a spec-driven development workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. You do NOT write production code directly.
+You are the **coordinator** for a spec-driven development workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. Delegated agents can run in the background: wait for each one's completion notification before acting on its result, and never `sleep` to wait. You do NOT write production code directly.
 
 ## Prerequisites
 
@@ -44,7 +45,7 @@ complexity: "simple"   # /spec is always simple; use /spec-complex for complex w
 
 ### STEP 2 — Codebase Exploration
 
-Delegate to the `Explore` agent via Agent tool (`agent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
+Delegate to the `Explore` agent via Agent tool (`subagent_type: "Explore"`) with thoroughness `"very thorough"`. Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
 - Identify existing conventions, utilities, and abstractions that should be reused
 - Map dependencies and integration points that the implementation will touch
@@ -68,7 +69,7 @@ If findings require updates → share with user and adjust requirements before p
 
 ### STEP 4 — Task Planning
 
-Delegate to the `Plan` subagent via Agent tool (`agent_type: "Plan"`). Pass full context:
+Delegate to the `Plan` subagent via Agent tool (`subagent_type: "Plan"`). Pass full context:
 - The requirement from `$ARGUMENTS`
 - Key files, directories, and patterns discovered by the Explore agent
 - Relevant architecture, patterns, and constraints
@@ -90,6 +91,14 @@ phase: "implement"
 ```
 
 **DO NOT PROCEED to Phase 2 until this transition succeeds.**
+
+**Autopilot (Claude Code, optional):** once the transition succeeds, offer the user a goal that keeps this workflow running to completion without a prompt per step. Print it exactly, with the workflow id filled in:
+
+```
+/goal Stratus workflow <slug> is complete: the latest mcp__stratus__get_workflow output for <slug> in this conversation shows phase "complete" and every task done, and the last code review shown has verdict PASS. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/resume/SKILL.md and continue <slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. Stop after 40 turns.
+```
+
+Tell the user it starts when they send it, runs unattended only in auto mode, and stops with `/goal clear`; the `/stratus` pane's Autopilot button fills in the same goal. Do not wait for an answer — continue with the next phase.
 
 ---
 

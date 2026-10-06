@@ -1,7 +1,7 @@
 BINARY := stratus
 INSTALL_DIR := $(shell go env GOPATH)/bin
 
-.PHONY: build install dev dev-frontend dev-backend clean release
+.PHONY: build install dev dev-frontend dev-backend clean release eval-plugin
 
 ## build: build frontend + Go binary (output: ./stratus)
 build:
@@ -29,6 +29,11 @@ dev-backend:
 ## dev-frontend: run only Vite dev server (frontend iteration without backend)
 dev-frontend:
 	cd frontend && npm run dev
+
+## eval-plugin: run the stratus plugin's eval suite (evals/stratus); calls the model on your account
+##   usage: make eval-plugin ARGS="--runs 1 --ablation none --max-cost-usd 5"
+eval-plugin:
+	./scripts/plugin-eval.sh $(ARGS)
 
 ## clean: remove build artifacts
 clean:

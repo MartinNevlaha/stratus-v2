@@ -2,6 +2,7 @@
 name: create-architecture
 description: "Design system architecture and produce ADRs, component diagrams, and interface definitions for: \"$ARGUMENTS\""
 context: fork
+agent: delivery-system-architect
 ---
 
 # Create Architecture

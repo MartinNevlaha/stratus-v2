@@ -252,9 +252,6 @@
         "mcp-serve"
       ],
       "enabled": true,
-      "environment": {
-        "STRATUS_EXECUTOR": "oc"
-      },
       "type": "local"
     }
   },

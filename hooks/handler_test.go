@@ -2,7 +2,6 @@ package hooks
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -11,7 +10,11 @@ import (
 // stdout made every block arrive as "hook error: No stderr output" -- an error with no
 // text, which the agent cannot act on and answers by ending its turn. A silent guard is
 // indistinguishable from a crashed one, so the reason MUST reach stderr.
-func TestWriteBlockPutsReasonOnStderr(t *testing.T) {
+//
+// Stdout must stay free of {"continue": false}: Claude Code reads stdout JSON even on
+// exit 2, and continue=false stops the agent outright instead of blocking the one tool
+// call, so it never sees the reason or gets to adapt.
+func TestWriteBlockPutsReasonOnStderrOnly(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	reason := "Write tools are not allowed during review phase. Use Read/Grep/Glob only."
 
@@ -20,17 +23,8 @@ func TestWriteBlockPutsReasonOnStderr(t *testing.T) {
 	if !strings.Contains(stderr.String(), reason) {
 		t.Fatalf("reason missing from stderr; got %q", stderr.String())
 	}
-
-	// The stdout payload stays as it was: some runtimes read the JSON instead.
-	var decision Decision
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &decision); err != nil {
-		t.Fatalf("stdout is not the decision JSON: %v (%q)", err, stdout.String())
-	}
-	if decision.Continue {
-		t.Fatalf("expected continue=false in the stdout payload")
-	}
-	if decision.Reason != reason {
-		t.Fatalf("stdout reason = %q, want %q", decision.Reason, reason)
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got %q", stdout.String())
 	}
 }
 

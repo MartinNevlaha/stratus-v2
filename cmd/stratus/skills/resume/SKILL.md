@@ -2,6 +2,7 @@
 name: resume
 description: "Resume an interrupted spec or bug workflow from where it left off. Use when the user asks to continue, resume, or pick up a paused workflow."
 disable-model-invocation: true
+allowed-tools: mcp__stratus
 argument-hint: "[workflow-id]"
 ---
 

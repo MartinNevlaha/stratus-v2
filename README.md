@@ -17,7 +17,7 @@
 
 ## What it is
 
-Stratus gives your AI coding assistant a persistent brain, a structured workflow engine, and the ability to coordinate multiple agents working in parallel — all visible from a live dashboard. It runs as a local server alongside Claude Code or OpenCode and exposes 15 MCP tools that agents use to remember, retrieve, and coordinate.
+Stratus gives your AI coding assistant a persistent brain, a structured workflow engine, and the ability to coordinate multiple agents working in parallel — all visible from a live dashboard. It runs as a local server alongside Claude Code or OpenCode and exposes 35 MCP tools that agents use to remember, retrieve, and coordinate.
 
 ### Why it matters
 
@@ -56,7 +56,8 @@ Out of the box, Claude Code and OpenCode have no memory across sessions, no stru
 - **Bug workflow**: `analyze → fix → review → complete` (review loops back to fix)
 - **E2E workflow**: `setup → plan → generate → heal → complete` (heal loops back to generate)
 - **Task tracking** — per-workflow task list with progress visible in dashboard
-- **Guard hooks** — `phase_guard` blocks invalid transitions, `workflow_existence_guard` requires a registered workflow before delegation, `delegation_guard` enforces agent rules
+- **Guard hooks** — `phase_guard` blocks writes during verify/review and holds architects to `docs/`, `workflow_existence_guard` requires a registered workflow before delegation, `delegation_guard` enforces agent rules
+- **Autopilot (Claude Code)** — once the plan is approved, the coordinators offer a [`/goal`](https://code.claude.com/docs/en/goal) that keeps the workflow running to completion, judged on `get_workflow` output and the review verdict; the `/stratus` pane's **▶ Autopilot** button fills in the same goal for you to send
 
 ### Multi-Agent Swarm
 
@@ -74,7 +75,7 @@ Out of the box, Claude Code and OpenCode have no memory across sessions, no stru
 - Checkpoints after each worker — resume interrupted missions from last checkpoint
 - Decomposition strategy tracking: `file-based` / `feature-based` / `risk-based` / `domain-based`
 
-### Delivery Agents (13)
+### Delivery Agents (14)
 Pre-configured, automatically written to `.claude/agents/` or `.opencode/agents/`:
 
 | Agent | Speciality |
@@ -92,6 +93,7 @@ Pre-configured, automatically written to `.claude/agents/` or `.opencode/agents/
 | `delivery-ux-designer` | UX, accessibility, design systems |
 | `delivery-debugger` | Root cause analysis, bug hunting |
 | `delivery-implementation-expert` | Mixed/general implementation |
+| `delivery-skill-creator` | Creates, evaluates and tunes skills |
 
 ### Playwright Test Agents (E2E)
 
@@ -180,11 +182,13 @@ Real-time metrics visualization for workflow performance:
 ### Hooks
 | Hook | Behaviour |
 |------|-----------|
-| `phase_guard` | Blocks invalid workflow phase transitions before they reach the DB |
+| `phase_guard` | Blocks delivery-agent writes during `spec/verify` and `bug/review`, and holds architects to Markdown under `docs/` |
 | `workflow_existence_guard` | Blocks delivery-agent delegation when the current session has no active workflow |
-| `delegation_guard` | Applies delivery-agent delegation policy for the active session workflow |
-| `workflow_enforcer` | Ensures agent follows active workflow phase |
-| `watcher` | Re-indexes governance docs on every file write |
+| `delegation_guard` | Applies delivery-agent delegation policy for the active session workflow and records the delegation |
+| `bash_write_guard` | Blocks file-writing Bash commands from delivery agents without an active workflow |
+| `watcher` | Queues written files for Vexor re-indexing |
+| `session_start` | Registers the session and tells it which workflows are active |
+| `teammate_idle` / `task_completed` | Agent-team hooks: nudge an idle teammate to report back |
 
 ---
 
@@ -224,7 +228,8 @@ make install     # builds frontend + Go binary → GOPATH/bin
 
 ```bash
 # 1. Initialize in your project
-#    Writes .stratus.json, .mcp.json, .claude/{skills,agents,rules,settings.json}
+#    Writes .stratus.json, .mcp.json, .claude/{skills,agents,rules,settings.json} and three
+#    Claude Code plugins in .claude/skills: stratus (the hooks), mdview and stratus-hud
 cd your-project
 stratus init                    # Claude Code (default)
 stratus init --target opencode  # OpenCode
@@ -246,7 +251,7 @@ open http://localhost:41777
 /e2e create tests for the login flow
 ```
 
-Hooks are registered automatically — no manual `.claude/settings.json` edits needed.
+Hooks ship in the `stratus` plugin and register automatically — no manual `.claude/settings.json` edits needed.
 
 ---
 
@@ -290,9 +295,9 @@ Hooks are registered automatically — no manual `.claude/settings.json` edits n
 
 ---
 
-## MCP Tools (15)
+## MCP Tools
 
-Registered in `.mcp.json` (Claude Code) or `opencode.json` (OpenCode) by `stratus init`:
+Registered in `.mcp.json` (Claude Code) or `opencode.json` (OpenCode) by `stratus init`. The server exposes 35 tools; the core ones:
 
 | Tool | Description |
 |------|-------------|
@@ -480,8 +485,8 @@ db/                 SQLite wrapper — all queries in one package
 orchestration/      Pure phase state machine (spec + bug + e2e workflows)
 swarm/              Swarm engine: worktree manager, dispatch, signal bus, store
 api/                HTTP server, all REST routes, WebSocket hub, SPA handler
-mcp/                MCP stdio server (JSON-RPC, 15 tools) — thin HTTP proxy
-hooks/              Hook handlers: phase_guard, workflow_existence_guard, delegation_guard, workflow_enforcer
+mcp/                MCP stdio server (JSON-RPC, 35 tools) — thin HTTP proxy
+hooks/              Hook handlers: phase_guard, workflow_existence_guard, delegation_guard, bash_write_guard, watcher, session_start
 terminal/           PTY session management + WebSocket I/O (creack/pty + xterm.js)
 vexor/              CLI wrapper for Vexor code embedding
 frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
@@ -489,7 +494,7 @@ frontend/           Svelte 5 + TypeScript + xterm.js dashboard (Vite)
 
 **Key design principles:**
 - **MCP is a thin proxy** — `mcp/` never touches the DB directly; it translates JSON-RPC calls into HTTP requests to the API server
-- **Hooks are stateless** — read JSON from stdin, write `{"continue": bool}` to stdout, exit 0 or 2; fail-open on any parse error
+- **Hooks are stateless** — read JSON from stdin; allow with `{"continue": true}` and exit 0, block with the reason on stderr and exit 2, or add context through `hookSpecificOutput`; fail-open on any parse error
 - **State machine is pure** — `orchestration/state.go` defines `validTransitions`; every phase change is validated before any DB write
 - **Single SQLite connection** — `db.DB` is the shared connection passed to all subsystems; no connection pools, no ORMs
 

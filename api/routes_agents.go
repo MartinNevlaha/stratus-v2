@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 
 	"github.com/MartinNevlaha/stratus-v2/agents"
 )
@@ -12,6 +13,30 @@ import (
 type agentsResponse struct {
 	ClaudeCode []*agents.AgentDef `json:"claude_code"`
 	OpenCode   []*agents.AgentDef `json:"opencode"`
+}
+
+// validName matches the agent and skill names the dashboard may create, change or delete:
+// a plain file or directory name, never a path ("..", "a/b").
+var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+// ccAgentDir returns .claude/agents when it holds the named agent, or "".
+func (s *Server) ccAgentDir(name string) string {
+	dir := s.projectRoot + "/.claude/agents"
+	if validName.MatchString(name) && pathExists(dir+"/"+name+".md") {
+		return dir
+	}
+	return ""
+}
+
+// ccSkillDir returns .claude/skills when it holds the named skill, or "". A skill is a
+// directory with a SKILL.md: .claude/skills also holds the stratus, mdview and stratus-hud
+// plugins, which the skill handlers must never read, rewrite or delete.
+func (s *Server) ccSkillDir(name string) string {
+	dir := s.projectRoot + "/.claude/skills"
+	if validName.MatchString(name) && pathExists(dir+"/"+name+"/SKILL.md") {
+		return dir
+	}
+	return ""
 }
 
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
@@ -32,8 +57,8 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if name == "" {
-		jsonErr(w, http.StatusBadRequest, "missing name")
+	if !validName.MatchString(name) {
+		jsonErr(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
@@ -45,9 +70,10 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 
 	detail := agentDetail{Name: name}
 
-	ccPath := s.projectRoot + "/.claude/agents/" + name + ".md"
-	if a, err := agents.ParseAgentFile(ccPath); err == nil {
-		detail.ClaudeCode = a
+	if dir := s.ccAgentDir(name); dir != "" {
+		if a, err := agents.ParseAgentFile(dir + "/" + name + ".md"); err == nil {
+			detail.ClaudeCode = a
+		}
 	}
 
 	ocPath := s.projectRoot + "/.opencode/agents/" + name + ".md"
@@ -85,8 +111,8 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" {
-		jsonErr(w, http.StatusBadRequest, "name is required")
+	if !validName.MatchString(req.Name) {
+		jsonErr(w, http.StatusBadRequest, "name must be letters, digits, - or _")
 		return
 	}
 	if req.Description == "" {
@@ -132,8 +158,8 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if name == "" {
-		jsonErr(w, http.StatusBadRequest, "missing name")
+	if !validName.MatchString(name) {
+		jsonErr(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
@@ -152,10 +178,10 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		Body:        req.Body,
 	}
 
-	ccDir := s.projectRoot + "/.claude/agents"
+	ccDir := s.ccAgentDir(name)
 	ocDir := s.projectRoot + "/.opencode/agents"
 
-	ccExists := pathExists(ccDir + "/" + name + ".md")
+	ccExists := ccDir != ""
 	ocExists := pathExists(ocDir + "/" + name + ".md")
 
 	if !ccExists && !ocExists {
@@ -164,6 +190,10 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ccExists {
+		// The dashboard does not edit effort or color; keep what the file has.
+		if existing, err := agents.ParseAgentFile(ccDir + "/" + name + ".md"); err == nil {
+			agent.Effort, agent.Color = existing.Effort, existing.Color
+		}
 		if err := agents.WriteAgentClaudeCode(ccDir, agent); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "update claude code: "+err.Error())
 			return
@@ -181,17 +211,18 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if name == "" {
-		jsonErr(w, http.StatusBadRequest, "missing name")
+	if !validName.MatchString(name) {
+		jsonErr(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
 	var deleted []string
-	ccDir := s.projectRoot + "/.claude/agents"
 	ocDir := s.projectRoot + "/.opencode/agents"
 
-	if err := agents.DeleteAgent(ccDir, name); err == nil {
-		deleted = append(deleted, "claude-code")
+	if ccDir := s.ccAgentDir(name); ccDir != "" {
+		if err := agents.DeleteAgent(ccDir, name); err == nil {
+			deleted = append(deleted, "claude-code")
+		}
 	}
 	if err := agents.DeleteAgent(ocDir, name); err == nil {
 		deleted = append(deleted, "opencode")
@@ -215,8 +246,8 @@ type assignSkillsRequest struct {
 
 func (s *Server) handleAssignSkills(w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if name == "" {
-		jsonErr(w, http.StatusBadRequest, "missing name")
+	if !validName.MatchString(name) {
+		jsonErr(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
@@ -226,15 +257,14 @@ func (s *Server) handleAssignSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ccDir := s.projectRoot + "/.claude/agents"
+	ccDir := s.ccAgentDir(name)
 	ocDir := s.projectRoot + "/.opencode/agents"
 
-	ccPath := ccDir + "/" + name + ".md"
 	ocPath := ocDir + "/" + name + ".md"
 
 	var updated []string
 
-	if pathExists(ccPath) {
+	if ccDir != "" {
 		if err := agents.UpdateAgentSkills(ccDir, name, req.Skills, "claude-code"); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "update claude code skills: "+err.Error())
 			return
@@ -264,8 +294,7 @@ func (s *Server) handleAssignSkills(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
-	skillsDir := s.projectRoot + "/.claude/skills"
-	skills, err := agents.ListSkillFiles(skillsDir)
+	skills, err := agents.ListSkillFiles(s.projectRoot + "/.claude/skills")
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list skills: "+err.Error())
 		return
@@ -278,13 +307,17 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if name == "" {
-		jsonErr(w, http.StatusBadRequest, "missing name")
+	if !validName.MatchString(name) {
+		jsonErr(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
-	skillDir := s.projectRoot + "/.claude/skills/" + name
-	skill, err := agents.ParseSkillFile(skillDir)
+	dir := s.ccSkillDir(name)
+	if dir == "" {
+		jsonErr(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	skill, err := agents.ParseSkillFile(dir + "/" + name)
 	if err != nil {
 		jsonErr(w, http.StatusNotFound, "skill not found")
 		return
@@ -308,8 +341,8 @@ func (s *Server) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" {
-		jsonErr(w, http.StatusBadRequest, "name is required")
+	if !validName.MatchString(req.Name) {
+		jsonErr(w, http.StatusBadRequest, "name must be letters, digits, - or _")
 		return
 	}
 	if req.Description == "" {
@@ -330,6 +363,10 @@ func (s *Server) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	skillsDir := s.projectRoot + "/.claude/skills"
+	if pathExists(skillsDir+"/"+req.Name) && s.ccSkillDir(req.Name) == "" {
+		jsonErr(w, http.StatusConflict, "name is taken by a plugin or another directory in .claude/skills")
+		return
+	}
 	if err := agents.WriteSkill(skillsDir, skill); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "write skill: "+err.Error())
 		return
@@ -344,8 +381,8 @@ func (s *Server) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if name == "" {
-		jsonErr(w, http.StatusBadRequest, "missing name")
+	if !validName.MatchString(name) {
+		jsonErr(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
@@ -355,9 +392,8 @@ func (s *Server) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	skillsDir := s.projectRoot + "/.claude/skills"
-	skillDir := skillsDir + "/" + name
-	if !pathExists(skillDir) {
+	skillsDir := s.ccSkillDir(name)
+	if skillsDir == "" {
 		jsonErr(w, http.StatusNotFound, "skill not found")
 		return
 	}
@@ -368,6 +404,10 @@ func (s *Server) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 		DisableModelInvocation: req.DisableModelInvocation,
 		ArgumentHint:           req.ArgumentHint,
 		Body:                   req.Body,
+	}
+	// The dashboard does not edit context, agent, allowed-tools, paths and the like.
+	if existing, err := agents.ParseSkillFile(skillsDir + "/" + name); err == nil {
+		skill.Extra = existing.Extra
 	}
 
 	if err := agents.WriteSkill(skillsDir, skill); err != nil {
@@ -380,12 +420,16 @@ func (s *Server) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if name == "" {
-		jsonErr(w, http.StatusBadRequest, "missing name")
+	if !validName.MatchString(name) {
+		jsonErr(w, http.StatusBadRequest, "invalid name")
 		return
 	}
 
-	skillsDir := s.projectRoot + "/.claude/skills"
+	skillsDir := s.ccSkillDir(name)
+	if skillsDir == "" {
+		jsonErr(w, http.StatusNotFound, "skill not found")
+		return
+	}
 	if err := agents.DeleteSkill(skillsDir, name); err != nil {
 		jsonErr(w, http.StatusNotFound, err.Error())
 		return

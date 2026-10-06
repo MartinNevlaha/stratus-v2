@@ -1,8 +1,9 @@
 ---
 name: delivery-mobile-engineer
 description: "Mobile delivery agent for React Native / Expo cross-platform development (iOS + Android)."
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, mcp__stratus
 model: sonnet
+color: pink
 skills:
   - governance-db
   - vexor-cli

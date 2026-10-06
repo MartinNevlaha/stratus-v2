@@ -30,17 +30,20 @@ cd frontend && npm run build
 
 # Type-check frontend
 cd frontend && npm run check
+
+# Eval the stratus plugin's skills (calls the model on your account; see evals/stratus/README.md)
+make eval-plugin ARGS="--runs 1 --ablation none --max-cost-usd 5"
 ```
 
 ## Architecture
 
-Stratus is a single-binary Claude Code extension framework. The binary embeds four things via `go:embed` in `cmd/stratus/main.go`: the Svelte frontend (built to `cmd/stratus/static/`), skills (`cmd/stratus/skills/`), agents (`cmd/stratus/agents/`), and governance rules (`cmd/stratus/rules/`).
+Stratus is a single-binary Claude Code extension framework. The binary embeds five things via `go:embed` in `cmd/stratus/main.go`: the Svelte frontend (built to `cmd/stratus/static/`), skills (`cmd/stratus/skills/`), agents (`cmd/stratus/agents/`), governance rules (`cmd/stratus/rules/`), and Claude Code plugins (`cmd/stratus/mods/`: the `stratus` plugin's manifest and hooks, and the `mdview` and `stratus-hud` mods). For Claude Code, `init`/`refresh` write skills to `.claude/skills/`, agents to `.claude/agents/`, and the plugins into `.claude/skills/<plugin>/` as skills-directory plugins (the `stratus` plugin carries only the hooks); OpenCode reads the same `.claude/skills/`.
 
 **Key architectural points:**
 
 - **Single binary, no runtime deps**: all static assets, skills, agents, and rules are embedded at compile time. The frontend must be built (`cd frontend && npm run build`) before `go build` to include the latest UI.
 - **MCP server is a thin HTTP proxy**: `mcp/` does not talk to the database directly — it translates MCP JSON-RPC calls into HTTP requests to the running API server (`http://localhost:41777`).
-- **Hooks are stateless processes**: `hooks/` reads JSON from stdin, writes a `{"continue": bool, "reason": string}` decision to stdout, and exits 0 (allow) or 2 (block). They never hold persistent state.
+- **Hooks are stateless processes**: `hooks/` reads JSON from stdin; it allows with `{"continue": true}` and exit 0, blocks with the reason on stderr and exit 2 (never `continue: false`, which would stop the agent), or adds context through `hookSpecificOutput`. The `stratus` plugin's `hooks/hooks.json` registers them. They never hold persistent state.
 - **Database is shared state**: `db/DB` is the single SQLite connection passed to all subsystems. `db/schema.go` contains the full DDL. FTS5 virtual tables (`events_fts`, `docs_fts`) are kept in sync via SQL triggers defined in the schema.
 - **Orchestration is a pure state machine**: `orchestration/state.go` defines `validTransitions` — a map of allowed phase-to-phase moves per workflow type. The coordinator (`orchestration/coordinator.go`) enforces this before any DB write.
 - **WebSocket hub**: `api/ws_hub.go` broadcasts real-time updates to all connected dashboard clients. The terminal WebSocket in `terminal/ws_terminal.go` is separate and manages PTY I/O.
@@ -57,7 +60,7 @@ Stratus is a single-binary Claude Code extension framework. The binary embeds fo
 | `swarm` | Multi-agent swarm: worktree management, dispatch engine, signal bus |
 | `api` | HTTP server, all REST routes, WebSocket hub, SPA handler |
 | `mcp` | MCP stdio server (JSON-RPC); proxies all tool calls to the HTTP API |
-| `hooks` | `phase_guard`, `workflow_existence_guard`, `delegation_guard`, `workflow_enforcer` hook handlers |
+| `hooks` | `phase_guard`, `workflow_existence_guard`, `delegation_guard`, `bash_write_guard`, `watcher`, `session_start`, `teammate_idle` hook handlers |
 | `terminal` | PTY session management + WebSocket I/O via `creack/pty` |
 | `vexor` | CLI wrapper around the external `vexor` binary for code embeddings |
 | `frontend` | Svelte 5 + TypeScript + xterm.js dashboard, built with Vite |

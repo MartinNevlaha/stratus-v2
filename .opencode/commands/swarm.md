@@ -18,6 +18,8 @@ BASE=http://localhost:$(stratus port)
 
 ## Phase 1: Plan & Decompose
 
+> 🎯 **Karpathy — Think Before Coding:** State assumptions explicitly, surface tradeoffs, push back on overcomplication, stop and ask when confused. See `.claude/rules/karpathy-principles.md`.
+
 Generate a short slug from `$ARGUMENTS` (kebab-case, max 40 chars).
 
 Create the workflow — title **MUST** start with `[SWARM] `:
@@ -154,6 +156,8 @@ curl -sS -X PUT $BASE/api/swarm/missions/<mission-id>/status \
 
 ## Phase 2: Sequential Workers
 
+> 🎯 **Karpathy — Simplicity First + Surgical Changes:** Minimum code that solves the problem. Touch only what the task requires. No speculative abstractions, no "improvements" to adjacent code. See `.claude/rules/karpathy-principles.md`.
+
 ### 2a. Spawn workers — one per domain needed
 
 For each domain that has tickets, spawn a worker:
@@ -275,6 +279,8 @@ If a worker fails:
 ---
 
 ## Phase 3: Verify
+
+> 🎯 **Karpathy — Goal-Driven Execution:** Verify against the explicit success criteria, not style preferences. Loop until goals met; don't declare done prematurely. See `.claude/rules/karpathy-principles.md`.
 
 Transition to verify:
 

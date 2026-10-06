@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Write|Edit|Bash|NotebookEdit", "hooks": [{"type": "command", "command": "stratus hook phase_guard"}]},
+      {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "stratus hook workflow_existence_guard"}]},
+      {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "stratus hook delegation_guard"}]},
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "stratus hook bash_write_guard"}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "Write|Edit|NotebookEdit", "hooks": [{"type": "command", "command": "stratus hook watcher"}]}
+    ],
+    "SessionStart": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook session_start"}]}
+    ],
+    "TeammateIdle": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook teammate_idle"}]}
+    ],
+    "TaskCompleted": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook task_completed"}]}
+    ]
+  }
+}

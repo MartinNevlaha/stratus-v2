@@ -35,6 +35,18 @@ type slInput struct {
 		DisplayName string `json:"display_name"`
 		ID          string `json:"id"`
 	} `json:"model"`
+	Effort struct {
+		Level string `json:"level"`
+	} `json:"effort"`
+	Worktree struct {
+		Name string `json:"name"`
+	} `json:"worktree"`
+	RateLimits struct {
+		// FiveHour is absent until the plan reports usage, so nil means "no figure".
+		FiveHour *struct {
+			UsedPercentage float64 `json:"used_percentage"`
+		} `json:"five_hour"`
+	} `json:"rate_limits"`
 	Cost struct {
 		TotalCostUSD    float64 `json:"total_cost_usd"`
 		TotalDurationMS float64 `json:"total_duration_ms"`
@@ -106,14 +118,14 @@ func formatStatusline(in slInput, state *slDashboard) string {
 	sep := ansiDim + " | " + ansiReset
 
 	var first []string
-	for _, s := range []string{fmtModel(in), fmtDir(cwd), fmtGit(cwd)} {
+	for _, s := range []string{fmtModel(in), fmtDir(cwd), fmtGit(cwd), fmtWorktree(in)} {
 		if s != "" {
 			first = append(first, s)
 		}
 	}
 
 	var second []string
-	for _, s := range []string{fmtContext(in), fmtCost(in), fmtDuration(in), fmtStratus(state)} {
+	for _, s := range []string{fmtContext(in), fmtRateLimit(in), fmtCost(in), fmtDuration(in), fmtStratus(state)} {
 		if s != "" {
 			second = append(second, s)
 		}
@@ -157,13 +169,41 @@ func fmtGit(cwd string) string {
 	return ansiMagenta + "🌿 " + branch + ansiReset
 }
 
-// fmtModel returns the model display name in cyan, or "" if not set.
+// fmtModel returns the model display name, with the effort level when set, in cyan,
+// or "" if not set.
 func fmtModel(in slInput) string {
 	name := in.Model.DisplayName
 	if name == "" {
 		return ""
 	}
+	if in.Effort.Level != "" {
+		name += " · " + in.Effort.Level
+	}
 	return ansiCyan + "[" + name + "]" + ansiReset
+}
+
+// fmtWorktree returns the Claude Code worktree the session runs in, or "" outside one.
+func fmtWorktree(in slInput) string {
+	if in.Worktree.Name == "" {
+		return ""
+	}
+	return ansiGreen + "🌳 " + in.Worktree.Name + ansiReset
+}
+
+// fmtRateLimit returns the five-hour plan window's use, coloured like the context bar,
+// or "" when Claude Code reports no figure.
+func fmtRateLimit(in slInput) string {
+	if in.RateLimits.FiveHour == nil {
+		return ""
+	}
+	pct := in.RateLimits.FiveHour.UsedPercentage
+	color := ansiGreen
+	if pct >= 90 {
+		color = ansiRed
+	} else if pct >= 70 {
+		color = ansiYellow
+	}
+	return ansiDim + "5h " + ansiReset + color + fmt.Sprintf("%.0f%%", pct) + ansiReset
 }
 
 // fmtDir returns the current directory basename in the shape used by the Claude docs.

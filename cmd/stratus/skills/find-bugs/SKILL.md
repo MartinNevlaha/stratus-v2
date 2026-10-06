@@ -2,6 +2,7 @@
 name: find-bugs
 description: "Systematically identify bugs and root causes. Read-only diagnosis — never modifies code. Use when debugging failures or unexpected behavior."
 context: fork
+agent: delivery-debugger
 ---
 
 # Find Bugs

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Watcher extracts modified file paths from Write/Edit/MultiEdit/NotebookEdit
+// Watcher extracts modified file paths from Write/Edit/NotebookEdit
 // tool inputs and queues them for vexor reindexing via the Stratus API.
 // It always allows the tool call — this is a best-effort side effect.
 func Watcher(event HookEvent) Decision {
@@ -40,19 +40,6 @@ func watcherExtractPaths(event HookEvent) []string {
 		if p, _ := event.ToolInput["notebook_path"].(string); p != "" {
 			return []string{p}
 		}
-	case "MultiEdit":
-		edits, _ := event.ToolInput["edits"].([]any)
-		seen := map[string]bool{}
-		var paths []string
-		for _, e := range edits {
-			if edit, ok := e.(map[string]any); ok {
-				if p, _ := edit["file_path"].(string); p != "" && !seen[p] {
-					paths = append(paths, p)
-					seen[p] = true
-				}
-			}
-		}
-		return paths
 	}
 	return nil
 }

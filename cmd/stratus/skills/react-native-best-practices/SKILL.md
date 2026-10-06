@@ -2,6 +2,7 @@
 name: react-native-best-practices
 description: "Apply React Native / Expo performance and architecture patterns. Use when implementing or optimizing mobile screens."
 context: fork
+paths: "**/*.{tsx,jsx}, app.json, app.config.*, metro.config.*"
 ---
 
 # React Native Best Practices

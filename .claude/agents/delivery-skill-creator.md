@@ -3,6 +3,7 @@ name: delivery-skill-creator
 description: "Skill creation, evaluation and optimization agent. Creates new skills, runs evals, benchmarks performance, and optimizes skill descriptions for better triggering."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
+color: cyan
 skills:
   - skill-creator
 ---

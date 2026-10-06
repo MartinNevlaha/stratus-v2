@@ -292,6 +292,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workflows", s.handleStartWorkflow)
 	mux.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
 	mux.HandleFunc("PUT /api/workflows/{id}/phase", s.handleTransitionPhase)
+	mux.HandleFunc("POST /api/workflows/{id}/abort", s.handleAbortWorkflow)
 	mux.HandleFunc("POST /api/workflows/{id}/delegate", s.handleRecordDelegation)
 	mux.HandleFunc("POST /api/workflows/{id}/tasks", s.handleSetTasks)
 	mux.HandleFunc("POST /api/workflows/{id}/tasks/{index}/start", s.handleStartTask)

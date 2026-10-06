@@ -20,6 +20,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "search",
+		ReadOnly:    true,
 		Description: "Search memory events using full-text search. Returns index with IDs (~50-100 tokens/result).",
 		InputSchema: obj(
 			req("query", "string", "Full-text search query"),
@@ -53,6 +54,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "timeline",
+		ReadOnly:    true,
 		Description: "Get chronological context around a memory event ID.",
 		InputSchema: obj(
 			opt("anchor_id", "integer", "Memory event ID to center on"),
@@ -96,6 +98,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "get_observations",
+		ReadOnly:    true,
 		Description: "Fetch full details for memory event IDs. ALWAYS batch for 2+ items.",
 		InputSchema: obj(
 			req("ids", "array", "Array of memory event IDs to fetch"),
@@ -128,6 +131,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "retrieve",
+		ReadOnly:    true,
 		Description: "Semantic search across code (Vexor), governance docs, and wiki knowledge pages. Auto-routes by query type.",
 		InputSchema: obj(
 			req("query", "string", "Search query for code, governance docs, or wiki knowledge"),
@@ -151,6 +155,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "index_status",
+		ReadOnly:    true,
 		Description: "Check index freshness and backend availability.",
 		InputSchema: obj(),
 		Handler: func(args map[string]any) (any, error) {
@@ -160,6 +165,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "delivery_dispatch",
+		ReadOnly:    true,
 		Description: "Get delivery phase briefing, active workflows, and delegation instructions.",
 		InputSchema: obj(
 			opt("workflow_id", "string", "Specific workflow ID (omit for latest active)"),
@@ -187,7 +193,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "register_workflow",
-		Description: "Register a new workflow. REQUIRED before any Task delegation to delivery agents. Use this to start a spec, bug, or e2e workflow.",
+		Description: "Register a new workflow. REQUIRED before any Agent delegation to delivery agents. Use this to start a spec, bug, or e2e workflow.",
 		InputSchema: obj(
 			req("id", "string", "Unique workflow ID (use format: <type>-<slug>, e.g. 'bug-fix-login', 'spec-user-auth')"),
 			req("type", "string", "Workflow type: 'spec' | 'bug' | 'e2e'"),
@@ -244,7 +250,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "delegate_agent",
-		Description: "Record an agent delegation for the current workflow phase. Call this after delegating work via Task tool to track which agents worked on which phases.",
+		Description: "Record an agent delegation for the current workflow phase. Call this after delegating work via the Agent tool to track which agents worked on which phases.",
 		InputSchema: obj(
 			req("workflow_id", "string", "Workflow ID"),
 			req("agent_id", "string", "Agent being delegated (e.g. 'delivery-backend-engineer', 'delivery-code-reviewer')"),
@@ -300,6 +306,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "get_workflow",
+		ReadOnly:    true,
 		Description: "Get current workflow state including phase, tasks, and delegation history.",
 		InputSchema: obj(
 			req("workflow_id", "string", "Workflow ID"),
@@ -315,6 +322,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "list_workflows",
+		ReadOnly:    true,
 		Description: "List all active workflows.",
 		InputSchema: obj(),
 		Handler: func(args map[string]any) (any, error) {
@@ -480,6 +488,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "swarm_get_evidence",
+		ReadOnly:    true,
 		Description: "List all evidence recorded for a ticket. Use during review to see what the worker produced.",
 		InputSchema: obj(
 			req("ticket_id", "string", "Ticket ID"),
@@ -531,6 +540,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "wiki_search",
+		ReadOnly:    true,
 		Description: "Search knowledge wiki pages using full-text search.",
 		InputSchema: obj(
 			req("query", "string", "Search query"),
@@ -579,6 +589,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "evolution_status",
+		ReadOnly:    true,
 		Description: "Get recent agent evolution runs and their outcomes.",
 		InputSchema: obj(
 			opt("limit", "integer", "Max runs to return (default: 20)"),
@@ -630,6 +641,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "code_analysis_findings",
+		ReadOnly:    true,
 		Description: "Query code quality findings from the most recent analysis. Filter by file path, category, or severity to find specific issues.",
 		InputSchema: obj(
 			opt("file", "string", "Filter by file path (prefix match)"),
@@ -654,6 +666,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 
 	s.Register(Tool{
 		Name:        "code_quality_summary",
+		ReadOnly:    true,
 		Description: "Get aggregated code quality metrics for the project over time. Shows trends in findings count, severity distribution, and coverage.",
 		InputSchema: obj(
 			opt("days", "integer", "Number of days of history to return (default: 30, max: 365)"),

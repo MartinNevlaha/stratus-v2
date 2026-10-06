@@ -22,3 +22,6 @@ frontend/.vite/
 
 # OS
 .DS_Store
+
+# Plugin eval results (make eval-plugin)
+evals/results/

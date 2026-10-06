@@ -51,3 +51,33 @@ func TestHandleTransitionPhase_CaseInsensitive(t *testing.T) {
 		t.Errorf("phase = %v, want plan", resp["phase"])
 	}
 }
+
+// TestAbortWorkflowRoute verifies POST /api/workflows/{id}/abort marks the
+// workflow aborted and keeps it, instead of deleting it as DELETE does.
+func TestAbortWorkflowRoute(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	coord := orchestration.NewCoordinator(database)
+	server := &Server{db: database, coordinator: coord, hub: NewHub()}
+
+	const id = "spec-abort-test"
+	if _, err := coord.Start(id, orchestration.WorkflowSpec, orchestration.ComplexitySimple, "Abort Test"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workflows/"+id+"/abort", nil)
+	w := httptest.NewRecorder()
+	server.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	state, err := coord.Get(id)
+	if err != nil {
+		t.Fatalf("Get after abort: %v", err)
+	}
+	if !state.Aborted {
+		t.Errorf("Aborted = false, want true")
+	}
+}

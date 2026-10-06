@@ -106,8 +106,12 @@ func (wm *WorktreeManager) CreatePreviewMerge(missionID, baseBranch string, work
 
 	// Remove any stale preview worktree from a prior run.
 	if info, statErr := os.Stat(wtPath); statErr == nil && info.IsDir() {
-		_ = exec.Command("git", "worktree", "remove", "--force", wtPath).Run()
-		_ = exec.Command("git", "branch", "-D", previewBranch).Run()
+		rm := exec.Command("git", "worktree", "remove", "--force", wtPath)
+		rm.Dir = wm.projectRoot
+		_ = rm.Run()
+		del := exec.Command("git", "branch", "-D", previewBranch)
+		del.Dir = wm.projectRoot
+		_ = del.Run()
 	}
 
 	// Create the preview worktree from the base branch.
@@ -123,7 +127,9 @@ func (wm *WorktreeManager) CreatePreviewMerge(missionID, baseBranch string, work
 		mergeCmd.Dir = wtPath
 		if out, mergeErr := mergeCmd.CombinedOutput(); mergeErr != nil {
 			// Abort conflicting merge and record the failure.
-			_ = exec.Command("git", "merge", "--abort").Run()
+			abort := exec.Command("git", "merge", "--abort")
+			abort.Dir = wtPath
+			_ = abort.Run()
 			failedMerges = append(failedMerges, branch)
 			_ = strings.TrimSpace(string(out)) // suppress unused variable lint
 		}

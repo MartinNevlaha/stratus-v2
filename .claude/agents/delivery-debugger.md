@@ -1,8 +1,10 @@
 ---
 name: delivery-debugger
 description: "Diagnostic delivery agent for tracing root causes of bugs. Read-only - diagnoses and reports, never writes code or applies fixes."
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__stratus__retrieve, mcp__stratus__search, mcp__stratus__timeline, mcp__stratus__get_observations, mcp__stratus__get_workflow, mcp__stratus__wiki_search
 model: sonnet
+effort: high
+color: orange
 skills:
   - governance-db
   - vexor-cli
@@ -22,7 +24,7 @@ Read, Grep, Glob, Bash (read-only: diagnostic commands only)
 ## Workflow
 
 1. **Reproduce** - Understand the symptoms. Find error messages, stack traces, logs.
-2. **Trace** - Follow the execution path from symptom to root cause. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find related patterns.
+2. **Trace** - Follow the execution path from symptom to root cause. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find related patterns. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for evolution findings and existing knowledge relevant to this task.
 3. **Classify** - Categorize the bug type.
 4. **Report** - Deliver a structured diagnosis.
 

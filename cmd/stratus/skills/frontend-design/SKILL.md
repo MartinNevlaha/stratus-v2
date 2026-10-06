@@ -2,6 +2,7 @@
 name: frontend-design
 description: "Create a visually distinctive, production-ready frontend interface. Avoid generic AI aesthetics."
 context: fork
+paths: "**/*.{tsx,jsx,vue,svelte,html,css,scss}"
 ---
 
 # Frontend Design

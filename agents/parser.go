@@ -15,6 +15,8 @@ type AgentDef struct {
 	Description string   `json:"description"`
 	Tools       []string `json:"tools"`
 	Model       string   `json:"model,omitempty"`
+	Effort      string   `json:"effort,omitempty"`
+	Color       string   `json:"color,omitempty"`
 	Skills      []string `json:"skills"`
 	Body        string   `json:"body"`
 	Format      string   `json:"format"`
@@ -30,6 +32,9 @@ type SkillDef struct {
 	HasResources           bool     `json:"has_resources"`
 	ResourceDirs           []string `json:"resource_dirs"`
 	DirPath                string   `json:"dir_path"`
+	// Extra holds the frontmatter lines this package does not manage (context, agent,
+	// allowed-tools, paths, ...), so a rewrite keeps them.
+	Extra []string `json:"-"`
 }
 
 func ParseAgentFile(path string) (*AgentDef, error) {
@@ -80,6 +85,10 @@ func parseClaudeCodeFrontmatter(fm string, agent *AgentDef) {
 			}
 		} else if strings.HasPrefix(line, "model:") {
 			agent.Model = strings.TrimSpace(strings.TrimPrefix(line, "model:"))
+		} else if strings.HasPrefix(line, "effort:") {
+			agent.Effort = strings.TrimSpace(strings.TrimPrefix(line, "effort:"))
+		} else if strings.HasPrefix(line, "color:") {
+			agent.Color = strings.TrimSpace(strings.TrimPrefix(line, "color:"))
 		}
 	}
 
@@ -283,6 +292,12 @@ func WriteAgentClaudeCode(dir string, agent *AgentDef) error {
 	if agent.Model != "" {
 		fm.WriteString(fmt.Sprintf("model: %s\n", agent.Model))
 	}
+	if agent.Effort != "" {
+		fm.WriteString(fmt.Sprintf("effort: %s\n", agent.Effort))
+	}
+	if agent.Color != "" {
+		fm.WriteString(fmt.Sprintf("color: %s\n", agent.Color))
+	}
 	if len(agent.Skills) > 0 {
 		fm.WriteString("skills:\n")
 		for _, s := range agent.Skills {
@@ -390,8 +405,30 @@ func ParseSkillFile(dirPath string) (*SkillDef, error) {
 		DirPath: dirPath,
 	}
 
+	inExtra := false
+	blanks := 0 // blank lines seen inside an unmanaged field, kept if an indented line follows
 	for _, line := range strings.Split(fm, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			blanks++
+			continue
+		}
+		// A top-level key starts a field; indented lines continue the last one.
+		indented := line[0] == ' ' || line[0] == '\t'
+		if !indented {
+			key, _, _ := strings.Cut(trimmed, ":")
+			inExtra = !managedSkillKeys[key]
+		}
+		if inExtra && indented {
+			for ; blanks > 0; blanks-- {
+				skill.Extra = append(skill.Extra, "")
+			}
+		}
+		blanks = 0
+		if inExtra {
+			skill.Extra = append(skill.Extra, line)
+			continue
+		}
 		if strings.HasPrefix(trimmed, "name:") {
 			skill.Name = strings.Trim(strings.TrimSpace(strings.TrimPrefix(trimmed, "name:")), `"`)
 		} else if strings.HasPrefix(trimmed, "description:") {
@@ -415,6 +452,11 @@ func ParseSkillFile(dirPath string) (*SkillDef, error) {
 	}
 
 	return skill, nil
+}
+
+// managedSkillKeys are the frontmatter fields SkillDef carries as fields of its own.
+var managedSkillKeys = map[string]bool{
+	"name": true, "description": true, "disable-model-invocation": true, "argument-hint": true,
 }
 
 func ListSkillFiles(skillsDir string) ([]*SkillDef, error) {
@@ -456,6 +498,9 @@ func WriteSkill(skillsDir string, skill *SkillDef) error {
 	}
 	if skill.ArgumentHint != "" {
 		fm.WriteString(fmt.Sprintf("argument-hint: %q\n", skill.ArgumentHint))
+	}
+	for _, line := range skill.Extra {
+		fm.WriteString(line + "\n")
 	}
 	fm.WriteString("---\n")
 

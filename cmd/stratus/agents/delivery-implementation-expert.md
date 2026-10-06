@@ -1,8 +1,9 @@
 ---
 name: delivery-implementation-expert
 description: "General-purpose delivery agent for implementation tasks that don't fit a more specialized agent."
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, mcp__stratus
 model: sonnet
+color: green
 skills:
   - governance-db
   - vexor-cli

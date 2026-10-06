@@ -2,6 +2,7 @@
 name: explain-architecture
 description: "Explain the architecture of the project or a specific component. Read-only — consults docs and code, never modifies."
 context: fork
+agent: delivery-system-architect
 ---
 
 # Explain Architecture

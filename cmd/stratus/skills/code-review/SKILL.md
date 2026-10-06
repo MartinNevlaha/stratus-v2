@@ -2,6 +2,7 @@
 name: code-review
 description: "Structured code review — correctness, tests, standards, security, maintainability. Produces PASS/FAIL verdict."
 context: fork
+agent: delivery-code-reviewer
 ---
 
 # Code Review

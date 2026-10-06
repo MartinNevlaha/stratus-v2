@@ -74,12 +74,12 @@ func TestAuditDenialWritesJSONL(t *testing.T) {
 func TestAuditDenialRecordsOtherGuards(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("STRATUS_DATA_DIR", dir)
-	t.Setenv("CLAUDE_AGENT_ID", "delivery-backend-engineer")
 	setDashboardState(t, dashboardState{Workflows: []map[string]any{}})
 
 	decision := BashWriteGuard(HookEvent{
 		ToolName:  "Bash",
 		SessionID: "session-a",
+		AgentType: "delivery-backend-engineer",
 		ToolInput: map[string]any{"command": "rm -rf build"},
 	})
 	if decision.Continue {

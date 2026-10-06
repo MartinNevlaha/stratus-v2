@@ -35,7 +35,6 @@ const maxTeammateNudges = 2
 var workTools = map[string]bool{
 	"Edit":         true,
 	"Write":        true,
-	"MultiEdit":    true,
 	"NotebookEdit": true,
 	"Bash":         true,
 }

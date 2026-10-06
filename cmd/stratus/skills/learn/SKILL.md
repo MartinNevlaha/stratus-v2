@@ -2,6 +2,7 @@
 name: learn
 description: "Trigger insight pattern analysis and proposal generation; review pending proposals in the dashboard."
 disable-model-invocation: true
+allowed-tools: mcp__stratus
 ---
 
 # Learning Workflow

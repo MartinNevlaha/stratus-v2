@@ -1,0 +1,10 @@
+{
+  "name": "stratus",
+  "version": "1.0.0",
+  "description": "Stratus workflow governance for Claude Code: phase, delegation and write guards, file re-indexing and session context.",
+  "author": {
+    "name": "Stratus",
+    "url": "https://github.com/MartinNevlaha/stratus-v2"
+  },
+  "license": "MIT"
+}

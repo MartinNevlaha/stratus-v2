@@ -2,11 +2,12 @@
 name: e2e
 description: "E2E testing coordinator (setup → plan → generate → heal → complete). Orchestrates Playwright Test Agents for autonomous end-to-end test creation and maintenance."
 disable-model-invocation: true
+allowed-tools: mcp__stratus
 ---
 
 # E2E Testing Workflow
 
-You are the **coordinator** for an autonomous E2E testing workflow using Playwright Test Agents. You orchestrate work by delegating to specialized Playwright agents via Agent tool. `Task` is a legacy alias only. You do NOT write test code directly — agents handle that.
+You are the **coordinator** for an autonomous E2E testing workflow using Playwright Test Agents. You orchestrate work by delegating to specialized Playwright agents via Agent tool. `Task` is a legacy alias only. Delegated agents can run in the background: wait for each one's completion notification before acting on its result, and never `sleep` to wait. You do NOT write test code directly — agents handle that.
 
 ## Prerequisites
 
@@ -101,6 +102,14 @@ phase: "generate"
 ```
 
 **DO NOT PROCEED to Phase 3 until this transition succeeds.**
+
+**Autopilot (Claude Code, optional):** once the transition succeeds, offer the user a goal that keeps this workflow running to completion without a prompt per step. Print it exactly, with the workflow id filled in:
+
+```
+/goal Stratus workflow <slug> is complete: the latest mcp__stratus__get_workflow output for <slug> in this conversation shows phase "complete" and every task done, and the last Playwright test run shown passes. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/e2e/SKILL.md and continue <slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. Stop after 40 turns.
+```
+
+Tell the user it starts when they send it, runs unattended only in auto mode, and stops with `/goal clear`; the `/stratus` pane's Autopilot button fills in the same goal. Do not wait for an answer — continue with the next phase.
 
 ---
 

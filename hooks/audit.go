@@ -48,10 +48,7 @@ func auditDenial(event HookEvent, hookName, reason string, refs map[string]any) 
 }
 
 func agentTypeOf(event HookEvent) string {
-	if event.AgentType != "" {
-		return event.AgentType
-	}
-	return os.Getenv("CLAUDE_AGENT_ID")
+	return event.AgentType
 }
 
 func appendDenialLine(record map[string]any) {

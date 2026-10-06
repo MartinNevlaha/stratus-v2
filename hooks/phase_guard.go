@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,6 +40,9 @@ func PhaseGuard(event HookEvent) Decision {
 	}
 	if !isWriteTool(event.ToolName) || !isDeliveryAgent(event) {
 		return Decision{Continue: true}
+	}
+	if reason := architectWriteDenial(event); reason != "" {
+		return blockAudited(event, "phase_guard", reason, nil)
 	}
 
 	// A session can own several workflows at once, so "the" active workflow may not
@@ -82,6 +86,63 @@ func PhaseGuard(event HookEvent) Decision {
 		"phase":       phase,
 	})
 	return decision
+}
+
+// docsOnlyAgents design rather than build: they write design docs and ADRs, never source.
+var docsOnlyAgents = map[string]bool{
+	"delivery-system-architect":    true,
+	"delivery-strategic-architect": true,
+}
+
+// architectWriteDenial returns why an architect may not write, or "" when it may: Write
+// and Edit to a Markdown file under the docs/ directory of the project or of a swarm
+// worktree (.stratus/worktrees/<name>/docs/). Bash may read but not write.
+func architectWriteDenial(event HookEvent) string {
+	if !docsOnlyAgents[event.AgentType] {
+		return ""
+	}
+	if event.ToolName == "Bash" {
+		command, _ := event.ToolInput["command"].(string)
+		if command != "" && !isWriteBashCommand(command) {
+			return ""
+		}
+		return fmt.Sprintf("%s may not write through Bash; write design docs and ADRs with Write or Edit "+
+			"under docs/ (for example docs/plans/ or docs/decisions/).", event.AgentType)
+	}
+	path, _ := event.ToolInput["file_path"].(string)
+	if path == "" {
+		path, _ = event.ToolInput["notebook_path"].(string)
+	}
+	root := os.Getenv("CLAUDE_PROJECT_DIR")
+	if root == "" {
+		root = event.Cwd
+	}
+	if isProjectDoc(path, root) {
+		return ""
+	}
+	return fmt.Sprintf("%s writes only Markdown design docs and ADRs under a docs/ directory "+
+		"(for example docs/plans/ or docs/decisions/); %q is not one. Hand source changes to an engineering agent.",
+		event.AgentType, path)
+}
+
+func isProjectDoc(path, root string) bool {
+	if path == "" || root == "" || !strings.EqualFold(filepath.Ext(path), ".md") {
+		return false
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	rel, err := filepath.Rel(root, filepath.Clean(path))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	// docs/ at the top of the project or of a swarm worktree, never one nested elsewhere
+	// (.claude/rules/docs/ would be read as instructions, node_modules/*/docs/ is not ours).
+	dirs := strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/")
+	if len(dirs) >= 3 && dirs[0] == ".stratus" && dirs[1] == "worktrees" {
+		dirs = dirs[3:]
+	}
+	return len(dirs) > 0 && strings.EqualFold(dirs[0], "docs")
 }
 
 // isBlockingPhase reports whether a workflow is in a phase where delivery agents must
@@ -168,7 +229,25 @@ func DelegationGuard(event HookEvent) Decision {
 		return blockAudited(event, "delegation_guard", unresolvedWorkflowReason, nil)
 	}
 
+	recordDelegation(wf, subagentType)
 	return Decision{Continue: true}
+}
+
+// recordDelegation notes the delivery agent on the workflow's current phase, so the record
+// no longer depends on the coordinator remembering delegate_agent. Best-effort: the API
+// ignores a repeat, and a failure here never blocks the delegation. No session_id: the guard
+// already resolved the workflow, which may be one this session took over from another.
+func recordDelegation(wf map[string]any, agentType string) {
+	id, _ := wf["id"].(string)
+	if id == "" {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"agent_id": agentType, "workflow_id": id})
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Post("http://localhost:"+getPort()+"/api/workflows/"+url.PathEscape(id)+"/delegate", "application/json", bytes.NewReader(body))
+	if err == nil {
+		resp.Body.Close()
+	}
 }
 
 // blockAudited returns a denial and records it, so a coordinator can find out later which
@@ -176,12 +255,6 @@ func DelegationGuard(event HookEvent) Decision {
 func blockAudited(event HookEvent, hookName, reason string, refs map[string]any) Decision {
 	auditDenial(event, hookName, reason, refs)
 	return Decision{Continue: false, Reason: reason}
-}
-
-// WorkflowEnforcer nudges the coordinator when idle between phases.
-func WorkflowEnforcer(event HookEvent) Decision {
-	// Best-effort: always allow, just emit nudge to coordinator
-	return Decision{Continue: true}
 }
 
 // BashWriteGuard blocks file-modifying bash commands when running as a delivery agent without a workflow.
@@ -311,7 +384,7 @@ func isWriteBashCommand(cmd string) bool {
 func isWriteTool(name string) bool {
 	writeTools := map[string]bool{
 		"Write": true, "Edit": true, "Bash": true,
-		"NotebookEdit": true, "MultiEdit": true,
+		"NotebookEdit": true,
 	}
 	return writeTools[name]
 }
@@ -334,13 +407,9 @@ func isDeliverySubagent(subagentType string) bool {
 	return strings.HasPrefix(subagentType, "delivery-")
 }
 
-// isDeliveryAgent checks if the current process is running as a delivery agent.
+// isDeliveryAgent checks whether the hook fired inside a delivery agent.
 func isDeliveryAgent(event HookEvent) bool {
-	if event.AgentType != "" {
-		return isDeliverySubagent(event.AgentType)
-	}
-	// Fallback for older Claude Code builds that exposed only environment state.
-	return isDeliverySubagent(os.Getenv("CLAUDE_AGENT_ID"))
+	return isDeliverySubagent(event.AgentType)
 }
 
 func isStratusSelfRepo(event HookEvent) bool {

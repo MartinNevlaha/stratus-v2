@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -62,6 +63,10 @@ type Task struct {
 
 // Coordinator manages workflow state persistence.
 type Coordinator struct {
+	// mu serializes each read-modify-write of a workflow's state: hooks record parallel
+	// delegations at once, and an unguarded Get→save would drop all but the last.
+	mu sync.Mutex
+
 	db                  *db.DB
 	wikiStore           WikiAutodocStore
 	enricher            WikiEnricher
@@ -115,6 +120,8 @@ func (c *Coordinator) SetLearnPipelineTimeout(d time.Duration) {
 
 // Start creates a new workflow or returns an existing one with the same ID.
 func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity, title string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	existing, err := c.Get(id)
 	if err == nil {
 		return existing, nil
@@ -342,6 +349,8 @@ func validateE2EPhaseReadiness(state *WorkflowState, to Phase) []string {
 
 // Transition moves a workflow to a new phase.
 func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -378,6 +387,8 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 
 // RecordDelegation records an agent delegation for the current phase.
 func (c *Coordinator) RecordDelegation(id, agentID string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -397,6 +408,8 @@ func (c *Coordinator) RecordDelegation(id, agentID string) (*WorkflowState, erro
 
 // SetTasks sets the task list for a workflow.
 func (c *Coordinator) SetTasks(id string, titles []string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -411,6 +424,8 @@ func (c *Coordinator) SetTasks(id string, titles []string) (*WorkflowState, erro
 
 // StartTask marks a task as in_progress.
 func (c *Coordinator) StartTask(id string, index int) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -425,6 +440,8 @@ func (c *Coordinator) StartTask(id string, index int) (*WorkflowState, error) {
 
 // CompleteTask marks a task as done.
 func (c *Coordinator) CompleteTask(id string, index int) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -442,6 +459,8 @@ func (c *Coordinator) CompleteTask(id string, index int) (*WorkflowState, error)
 
 // Abort marks a workflow as aborted.
 func (c *Coordinator) Abort(id string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -452,6 +471,8 @@ func (c *Coordinator) Abort(id string) (*WorkflowState, error) {
 
 // SetPlanContent stores the plan markdown content in the workflow state.
 func (c *Coordinator) SetPlanContent(id, content string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -462,6 +483,8 @@ func (c *Coordinator) SetPlanContent(id, content string) (*WorkflowState, error)
 
 // SetDesignContent stores the design document markdown content in the workflow state.
 func (c *Coordinator) SetDesignContent(id, content string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -509,6 +532,8 @@ func (c *Coordinator) ListActive() ([]*WorkflowState, error) {
 // First-writer-wins: no-op if a session ID is already set.
 // Used when a workflow is first created via POST /api/workflows.
 func (c *Coordinator) SetSessionID(id, sessionID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return err
@@ -524,6 +549,8 @@ func (c *Coordinator) SetSessionID(id, sessionID string) error {
 // Unlike SetSessionID, this always overwrites the existing value.
 // Used by the /resume skill via PATCH /api/workflows/{id}/session.
 func (c *Coordinator) UpdateSessionID(id, sessionID string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
@@ -534,6 +561,8 @@ func (c *Coordinator) UpdateSessionID(id, sessionID string) (*WorkflowState, err
 
 // SetBaseCommit records the git HEAD SHA at workflow creation time.
 func (c *Coordinator) SetBaseCommit(id, commit string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return err
@@ -549,6 +578,8 @@ func (c *Coordinator) SetBaseCommit(id, commit string) error {
 // Computed fields (FilesChanged, LinesAdded, LinesRemoved, GovernanceDocs, VexorExcerpts, GeneratedAt)
 // are preserved when the incoming summary has zero values for them.
 func (c *Coordinator) SetChangeSummary(id string, incoming *ChangeSummary) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err

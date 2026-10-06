@@ -19,8 +19,11 @@
    - id: "<type>-<slug>"
    - type: "spec" | "bug" | "e2e"
    - title: "<human-readable title>"
-   - session_id: "${CLAUDE_SESSION_ID}"
+   - session_id: "<session id>"
    ```
+
+   The workflow skills (`/spec`, `/bug`, `/e2e`, `/swarm`) fill the session id in with
+   `${CLAUDE_SESSION_ID}`; this rule file is not substituted, so register workflows through them.
 
 2. **Transition phases via MCP tools:**
    ```
@@ -41,7 +44,7 @@
    workflow_id: "<id>"
    phase: "<current-phase>"
    task_index: <zero-based task index>
-   session_id: "${CLAUDE_SESSION_ID}"
+   session_id: "<session id>"
    ```
 
    `workflow_id` is authoritative. A prompt line such as `Workflow ID: <id>` is
@@ -51,13 +54,17 @@
 
 ### Enforcement
 
+The guards below are hooks of the `stratus` Claude Code plugin (`.claude/skills/stratus/hooks/hooks.json`);
+disabling the plugin turns them all off.
+
 - `WorkflowExistenceGuard`: Blocks delivery-agent delegation without active workflow (fail-closed outside the Stratus self-repo development escape hatch)
 - `DelegationGuard`: Requires a resolvable workflow for delivery-agent delegation
 - Explicit workflow IDs are resolved before session or global active workflow fallback
-- Violations result in immediate block with error message
+- Violations block the tool call; the agent receives the reason and keeps working
 - Every denial is recorded: a JSONL line in `<data_dir>/hook_denials.jsonl` and an event of
   type `hook_denial` in the timeline (searchable via `mcp__stratus__search`). Check it when
-  a delegated agent ends its turn without delivering — the block reason only reaches the agent.
+  a delegated agent works around a guard or reports it could not finish — the block reason
+  goes to the agent, not to you.
 
 ## Agent Choice Per Phase
 
@@ -68,6 +75,10 @@ denied legitimate delegations mid-phase.
 Phase discipline is still enforced where it matters: `PhaseGuard` blocks write tools
 for delivery agents during `spec/verify` and `bug/review`, so a reviewer cannot edit
 what it reviews.
+
+Role discipline: `PhaseGuard` also holds `delivery-system-architect` and
+`delivery-strategic-architect` to Markdown files under a `docs/` directory (design docs,
+ADRs), in the project or a swarm worktree; their writes anywhere else are denied.
 
 ## Stratus Server Requirement
 

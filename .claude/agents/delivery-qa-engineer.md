@@ -1,8 +1,9 @@
 ---
 name: delivery-qa-engineer
 description: "QA delivery agent for writing tests, analyzing coverage, and running validation commands. Does not write production code."
-tools: Read, Grep, Glob, Write, Bash
+tools: Read, Grep, Glob, Write, Bash, mcp__stratus
 model: sonnet
+color: green
 skills:
   - governance-db
   - vexor-cli

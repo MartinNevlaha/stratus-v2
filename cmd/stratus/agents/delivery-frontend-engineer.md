@@ -1,8 +1,9 @@
 ---
 name: delivery-frontend-engineer
 description: "Frontend delivery agent for UI components, pages, and client-side logic."
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, mcp__stratus
 model: sonnet
+color: cyan
 skills:
   - governance-db
   - vexor-cli

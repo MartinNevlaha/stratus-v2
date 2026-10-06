@@ -1,8 +1,9 @@
 ---
 name: delivery-database-engineer
 description: "Database delivery agent for schema design, migrations, queries, and data model changes."
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, mcp__stratus
 model: sonnet
+color: yellow
 skills:
   - governance-db
   - vexor-cli
@@ -18,7 +19,7 @@ Read, Grep, Glob, Edit, Write, Bash
 
 ## Workflow
 
-1. **Understand** — Read the task and explore existing schema, migrations, and queries. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns.
+1. **Understand** — Read the task and explore existing schema, migrations, and queries. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find existing patterns. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for evolution findings and existing knowledge relevant to this task.
 2. **Design** — Plan schema changes with forward-only migrations.
 3. **Implement** — Write migration files, update models/queries, add indexes.
 4. **Test** — Write tests for queries and migrations. Run and confirm green.

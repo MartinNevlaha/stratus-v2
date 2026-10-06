@@ -417,7 +417,7 @@ tools:
   - Edit
   - Write
   - Bash
-model: claude-sonnet-4-5
+model: sonnet
 skills:
   - run-tests
 ---
@@ -459,7 +459,7 @@ tools:
   - Edit
   - Write
   - Bash
-model: claude-sonnet-4-5
+model: sonnet
 skills:
   - run-tests
 ---
@@ -500,7 +500,7 @@ tools:
   - Edit
   - Write
   - Bash
-model: claude-sonnet-4-5
+model: sonnet
 skills:
   - docker-build
   - ci-check

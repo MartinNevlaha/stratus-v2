@@ -1,0 +1,11 @@
+{
+  "name": "stratus-hud",
+  "version": "0.1.0",
+  "description": "Shows the active Stratus workflow above the prompt, toasts phase changes, hook denials and Guardian warnings, and adds a /stratus pane (workflow actions with Autopilot, plan, swarm, Guardian, denials).",
+  "author": {
+    "name": "Stratus",
+    "url": "https://github.com/MartinNevlaha/stratus-v2"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

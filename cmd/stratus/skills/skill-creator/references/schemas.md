@@ -128,7 +128,7 @@ Output from the aggregation script. Located at `<workspace>/iteration-N/benchmar
   "metadata": {
     "skill_name": "pdf",
     "skill_path": "/path/to/pdf",
-    "executor_model": "claude-sonnet-4-20250514",
+    "executor_model": "sonnet",
     "analyzer_model": "most-capable-model",
     "timestamp": "2026-01-15T10:30:00Z",
     "evals_run": [1, 2, 3],

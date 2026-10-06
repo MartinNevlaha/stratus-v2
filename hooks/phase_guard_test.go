@@ -375,7 +375,6 @@ func TestFetchActiveWorkflowSingleWorkflowFallback(t *testing.T) {
 func TestPhaseGuardDoesNotBlockAcrossParallelWorkflows(t *testing.T) {
 	// A delivery agent implementing in session-a must not be blocked just because a
 	// different parallel workflow (session-b) is in its verify phase.
-	t.Setenv("CLAUDE_AGENT_ID", "delivery-backend-engineer")
 	setDashboardState(t, dashboardState{
 		Workflows: []map[string]any{
 			{"id": "spec-b", "session_id": "session-b", "type": "spec", "phase": "verify"},
@@ -386,6 +385,7 @@ func TestPhaseGuardDoesNotBlockAcrossParallelWorkflows(t *testing.T) {
 	decision := PhaseGuard(HookEvent{
 		ToolName:  "Write",
 		SessionID: "session-a",
+		AgentType: "delivery-backend-engineer",
 	})
 	if !decision.Continue {
 		t.Fatalf("expected write to be allowed in session-a implement phase, got blocked: %q", decision.Reason)
@@ -481,7 +481,7 @@ func TestPhaseGuardKeepsBlockingFileToolsInVerifyPhase(t *testing.T) {
 		t.Fatalf("expected `go test` to be allowed in verify phase, got blocked: %q", readOnly.Reason)
 	}
 
-	for _, tool := range []string{"Write", "Edit", "MultiEdit", "NotebookEdit"} {
+	for _, tool := range []string{"Write", "Edit", "NotebookEdit"} {
 		decision := PhaseGuard(HookEvent{
 			ToolName:  tool,
 			SessionID: "session-a",
@@ -646,8 +646,9 @@ func TestBashWriteGuard(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			agentType := ""
 			if tt.isDelivery {
-				t.Setenv("CLAUDE_AGENT_ID", "delivery-backend-engineer")
+				agentType = "delivery-backend-engineer"
 			}
 
 			if tt.hasWorkflow {
@@ -665,6 +666,7 @@ func TestBashWriteGuard(t *testing.T) {
 			decision := BashWriteGuard(HookEvent{
 				ToolName:  "Bash",
 				SessionID: "sess",
+				AgentType: agentType,
 				ToolInput: map[string]any{
 					"command": tt.cmd,
 				},

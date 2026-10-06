@@ -2,6 +2,7 @@
 name: run-tests
 description: "Run the project test suite. Auto-detects Python/Node/Go/Rust. Use when asked to test or verify changes."
 context: fork
+agent: delivery-qa-engineer
 ---
 
 # Run Tests

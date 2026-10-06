@@ -1,8 +1,9 @@
 ---
 name: delivery-devops-engineer
 description: "DevOps delivery agent for CI/CD pipelines, Docker, infrastructure-as-code, and deployment configuration."
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, mcp__stratus
 model: sonnet
+color: orange
 skills:
   - governance-db
   - vexor-cli

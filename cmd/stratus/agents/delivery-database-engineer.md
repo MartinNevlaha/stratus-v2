@@ -1,8 +1,9 @@
 ---
 name: delivery-database-engineer
 description: "Database delivery agent for schema design, migrations, queries, and data model changes."
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, mcp__stratus
 model: sonnet
+color: yellow
 skills:
   - governance-db
   - vexor-cli

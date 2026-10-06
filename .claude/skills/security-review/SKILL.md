@@ -2,6 +2,7 @@
 name: security-review
 description: "Audit code for security vulnerabilities — secrets, injection, auth, OWASP Top 10. Produces PASS/FAIL verdict."
 context: fork
+agent: delivery-code-reviewer
 ---
 
 # Security Review

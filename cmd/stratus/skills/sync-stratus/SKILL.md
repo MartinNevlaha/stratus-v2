@@ -23,16 +23,16 @@ Check for `.stratus.json`:
 Check for `.mcp.json`:
 - Present? `stratus mcp-serve` registered?
 
-Check `.claude/settings.json` for hooks:
-- Is `stratus hook phase_guard` registered under `PreToolUse`?
-- Is `stratus hook workflow_existence_guard` registered under `PreToolUse`?
-- Is `stratus hook delegation_guard` registered under `PreToolUse`?
+Check the stratus plugin, which carries Stratus' hooks (Claude Code):
+- Is `.claude/skills/stratus/.claude-plugin/plugin.json` present? Claude Code loads `.claude/skills/stratus` as a skills-directory plugin once the project folder is trusted; `claude plugin list` (run in the project) shows `stratus@skills-dir` enabled.
+- Does `.claude/skills/stratus/hooks/hooks.json` register `stratus hook phase_guard`, `stratus hook workflow_existence_guard` and `stratus hook delegation_guard` under `PreToolUse`?
+- Does `.claude/settings.json` still hold `stratus hook` entries from an older version? They run twice beside the plugin's; `stratus refresh` removes them.
 
 ---
 
 ### Step 2: Skills Audit
 
-Enumerate every `SKILL.md` in `.claude/skills/`.
+Enumerate every `SKILL.md` in `.claude/skills/` (one directory per skill; `.claude/skills/stratus`, `mdview` and `stratus-hud` are plugins, not skills).
 
 Expected coordinator skills (installed by `stratus init`):
 - `spec` — must NOT have `context: fork`
@@ -272,7 +272,7 @@ Run /sync-stratus again to verify the updated installation.
 
 **Never touch:**
 - Coordinator skill files (`spec`, `bug`, `learn`, `spec-complex`)
-- `.stratus.json`, `.mcp.json`, `.claude/settings.json` (hooks)
+- `.stratus.json`, `.mcp.json`, `.claude/settings.json`, `.claude/skills/stratus/hooks/hooks.json`
 - Any file the user said 'n' or did not confirm
 
 ---

@@ -2,6 +2,7 @@
 name: swarm
 description: "Multi-agent swarm workflow. Spawns isolated workers in git worktrees for truly parallel implementation. Use when the user says /swarm."
 disable-model-invocation: true
+allowed-tools: mcp__stratus
 argument-hint: "<feature description>"
 ---
 
@@ -37,7 +38,7 @@ curl -sS -X POST $BASE/api/workflows \
 
 ### 1a. Explore — built-in Explore agent
 
-**Delegate to the built-in `Explore` agent** (Agent tool, `agent_type: "Explore"`) with thoroughness `"very thorough"`:
+**Delegate to the built-in `Explore` agent** (Agent tool, `subagent_type: "Explore"`) with thoroughness `"very thorough"`:
 
 Pass the requirement from `$ARGUMENTS` and ask it to:
 - Find all files, modules, and patterns relevant to the requirement
@@ -81,7 +82,7 @@ Skip this step for backend-only, infra, or database-focused work.
 
 ### 1d. Plan — built-in Plan agent
 
-**Delegate to the built-in `Plan` agent** (Agent tool, `agent_type: "Plan"`):
+**Delegate to the built-in `Plan` agent** (Agent tool, `subagent_type: "Plan"`):
 
 Pass full context:
 - The requirement from `$ARGUMENTS`
@@ -138,6 +139,14 @@ curl -sS -X PUT $BASE/api/swarm/missions/<mission-id>/status \
   -H 'Content-Type: application/json' \
   -d '{"status": "active"}'
 ```
+
+**Autopilot (Claude Code, optional):** once the mission is active, offer the user a goal that keeps this workflow running to completion without a prompt per step. Print it exactly, with the workflow id filled in:
+
+```
+/goal Stratus workflow <slug> is complete: the latest mcp__stratus__get_workflow output for <slug> in this conversation shows phase "complete" and every task done, and the last code review shown has verdict PASS. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/swarm/SKILL.md and continue <slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. Stop after 40 turns.
+```
+
+Tell the user it starts when they send it, runs unattended only in auto mode, and stops with `/goal clear`; the `/stratus` pane's Autopilot button fills in the same goal. Do not wait for an answer — continue with the next phase.
 
 ---
 
@@ -203,17 +212,36 @@ For tickets with depends_on: poll for TICKET_DONE matching dependency IDs. If no
 
 **CRITICAL:** Without the `worker_instructions` block, workers will NOT call `swarm_ticket_update` and ticket progress will be invisible on the dashboard. Always include it.
 
-### 2d. Monitor progress — active polling loop
+### 2d. Monitor progress — watch, don't sleep
 
-You MUST actively poll and report to the user. Do NOT go idle.
+Claude Code blocks a foreground `sleep`, so do NOT poll in a sleep loop. Start ONE watch with the Monitor tool running this script; each line it prints reaches you as an event while you stay free to answer the user:
 
-**Polling intervals:** 0-1min → every 15s | 1-3min → every 30s | 3min+ → every 60s
+```bash
+BASE=http://localhost:$(stratus port); M=<mission-id>; prev=""
+while true; do
+  if ! tj=$(curl -fsS "$BASE/api/swarm/missions/$M/tickets") || ! wj=$(curl -fsS "$BASE/api/swarm/missions/$M/workers"); then
+    [ "$prev" != "API_UNREACHABLE" ] && echo "API_UNREACHABLE" && prev="API_UNREACHABLE"
+    sleep 15; continue
+  fi
+  t=$(echo "$tj" | grep -o '"status":"[a-z_]*"' | sort | uniq -c | tr -s ' \n' ' ')
+  w=$(echo "$wj" | grep -o '"status":"[a-z_]*"' | sort | uniq -c | tr -s ' \n' ' ')
+  cur="tickets:$t| workers:$w"
+  [ "$cur" != "$prev" ] && echo "$cur" && prev="$cur"
+  # Settled only once the mission has tickets and none is still open.
+  if [ -n "$t" ] && ! echo "$t" | grep -qE '"(pending|assigned|in_progress|blocked)"'; then
+    echo "ALL_TICKETS_SETTLED"; break
+  fi
+  sleep 15
+done
+```
 
-Each iteration:
-1. `sleep <interval>`
-2. Fetch status: `curl -sS $BASE/api/swarm/missions/<mission-id>/tickets` and `curl -sS $BASE/api/swarm/missions/<mission-id>/workers`
-3. Print progress summary (ticket statuses, worker counts)
-4. React: failed/stale worker → report to user; HELP signal → relay; all done → proceed to Phase 3
+Start it with `timeout_ms: 1800000` (30 minutes, the longest a watch may run). On each event:
+1. Print a progress summary for the user (ticket statuses, worker counts)
+2. React: `failed`/`stale` worker → report to user; check `curl -sS $BASE/api/swarm/missions/<mission-id>/signals` and relay HELP signals
+3. `API_UNREACHABLE` → tell the user the Stratus server is not answering (`stratus serve`); the watch keeps trying, so do not move on
+4. `ALL_TICKETS_SETTLED` → proceed to Phase 3
+
+A watch ends at its deadline: if tickets are still open when that notice arrives, start the watch again. Workers also notify you when they finish; where the Monitor tool is unavailable (Bedrock, Vertex, Foundry, or telemetry disabled), rely on those notifications and fetch ticket status once per notification.
 
 ---
 

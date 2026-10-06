@@ -81,7 +81,7 @@ def main():
     parser.add_argument("--eval-set", required=True, help="Path to eval set JSON")
     parser.add_argument("--skill-path", required=True, help="Path to skill directory")
     parser.add_argument(
-        "--model", default="claude-sonnet-4-20250514", help="Model to use"
+        "--model", default="sonnet", help="Model to use (alias or full ID)"
     )
     parser.add_argument(
         "--max-iterations", type=int, default=5, help="Max optimization iterations"

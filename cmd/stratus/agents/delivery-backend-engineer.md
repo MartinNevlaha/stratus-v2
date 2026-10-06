@@ -1,12 +1,12 @@
 ---
 name: delivery-backend-engineer
 description: "Backend delivery agent for API endpoints, handlers, services, and business logic. Use for server-side implementation tasks."
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, mcp__stratus
 model: sonnet
+color: blue
 skills:
   - governance-db
   - vexor-cli
-  - prompt-writing
 ---
 
 # Backend Engineer

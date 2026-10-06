@@ -2,6 +2,7 @@
 name: vexor-cli
 description: "Semantic file discovery via `vexor`. Use when file location is unclear or the repo is too large for efficient manual browsing."
 context: fork
+agent: Explore
 ---
 
 # Vexor CLI Skill

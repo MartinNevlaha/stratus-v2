@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -68,6 +69,11 @@ var promptsOpenCodeFS embed.FS
 
 //go:embed rules
 var rulesFS embed.FS
+
+// all: keeps the .claude-plugin/ manifests, which plain go:embed skips.
+//
+//go:embed all:mods
+var modsFS embed.FS
 
 //go:embed static
 var staticFiles embed.FS
@@ -601,18 +607,20 @@ func cmdHook() {
 		fmt.Fprintln(os.Stderr, "usage: stratus hook <name>")
 		os.Exit(1)
 	}
-	hookName := os.Args[2]
-	handlers := map[string]hooks.Handler{
-		"phase_guard":              hooks.PhaseGuard,
-		"workflow_existence_guard": hooks.WorkflowExistenceGuard,
-		"delegation_guard":         hooks.DelegationGuard,
-		"workflow_enforcer":        hooks.WorkflowEnforcer,
-		"bash_write_guard":         hooks.BashWriteGuard,
-		"watcher":                  hooks.Watcher,
-		"teammate_idle":            hooks.TeammateIdle,
-		"task_completed":           hooks.TaskCompleted,
-	}
-	hooks.Run(hookName, handlers)
+	hooks.Run(os.Args[2], hookHandlers)
+}
+
+// hookHandlers answers `stratus hook <name>`; the stratus plugin's hooks/hooks.json
+// registers each of them with Claude Code.
+var hookHandlers = map[string]hooks.Handler{
+	"phase_guard":              hooks.PhaseGuard,
+	"workflow_existence_guard": hooks.WorkflowExistenceGuard,
+	"delegation_guard":         hooks.DelegationGuard,
+	"bash_write_guard":         hooks.BashWriteGuard,
+	"watcher":                  hooks.Watcher,
+	"teammate_idle":            hooks.TeammateIdle,
+	"task_completed":           hooks.TaskCompleted,
+	"session_start":            hooks.SessionStart,
 }
 
 func parseInitFlags() (force bool, target string) {
@@ -703,7 +711,8 @@ func cmdInit() {
 }
 
 // initClaudeCode writes all Claude Code integration files: .mcp.json,
-// .claude/skills|agents|rules, and registers hooks in .claude/settings.json.
+// .claude/skills|agents|rules, the stratus plugin (hooks) and mods in .claude/skills, and
+// moves Stratus hooks out of .claude/settings.json into that plugin.
 func initClaudeCode(wd string, allHashes map[string]string) {
 	if err := writeMCP(wd); err != nil {
 		log.Printf("warning: could not write .mcp.json: %v", err)
@@ -716,6 +725,7 @@ func initClaudeCode(wd string, allHashes map[string]string) {
 		{skillsFS, "skills", "skills"},
 		{agentsFS, "agents", "agents"},
 		{rulesFS, "rules", "rules"},
+		{modsFS, "mods", "skills"}, // the stratus (hooks), mdview and stratus-hud plugins
 	} {
 		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, nil)
 		if err != nil {
@@ -805,8 +815,8 @@ func printInitSummary(target string) {
   delivery-database-engineer      — schema, migrations, queries
   delivery-devops-engineer        — CI/CD, Docker, infrastructure
   delivery-mobile-engineer        — React Native / Expo (iOS + Android)
-  delivery-system-architect       — component designs, API contracts (read-only)
-  delivery-strategic-architect    — ADRs, technology selection (read-only)
+  delivery-system-architect       — component designs, API contracts (writes docs/ only)
+  delivery-strategic-architect    — ADRs, technology selection (writes docs/ only)
   delivery-qa-engineer            — tests, coverage, lint
   delivery-code-reviewer          — code quality + security review
   delivery-governance-checker     — governance & ADR compliance
@@ -859,14 +869,20 @@ Prompts written to .opencode/prompts/:
   tdd-requirements      — test-driven development
   error-handling        — consistent error patterns`
 
-	const ccHooks = `Hooks registered in .claude/settings.json:
+	const ccHooks = `Hooks registered by the stratus plugin (.claude/skills/stratus/hooks/hooks.json):
   PreToolUse  phase_guard              — blocks writes during review/verify (read-only bash allowed)
   PreToolUse  workflow_existence_guard — requires session-scoped active workflow for Task delegation
   PreToolUse  delegation_guard         — requires an active workflow for delivery-agent delegation
   PreToolUse  bash_write_guard         — blocks file-modifying bash commands for delivery agents without workflow
   PostToolUse watcher                  — queues modified files for vexor reindexing
+  SessionStart session_start           — registers the session and lists active workflows for the agent
 
-Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar`
+Statusline registered in .claude/settings.json — workflow status visible in Claude Code status bar
+
+Plugins written to .claude/skills/ (Claude Code loads them once the project folder is trusted):
+  stratus     — the hooks above
+  mdview      — click a .md path to read it rendered beside the session (Claude Code 2.1.287+)
+  stratus-hud — active workflow above the prompt, phase/denial/Guardian toasts, /stratus pane with Autopilot (/goal)`
 
 	fmt.Println("stratus initialized!")
 	fmt.Println()
@@ -940,8 +956,10 @@ type assetWriteResult struct {
 // unconditionally.  In smart mode (storedHashes != nil) the 3-way comparison is
 // applied:
 //
-//   - stored hash == ""       → first-time, write and record hash
+//   - stored hash == ""       → new in this version: write it, unless a different file
+//     already sits there (someone else's, e.g. a mod they installed), which is reported
 //   - embedded == stored      → unchanged in new version, skip write
+//   - embedded == disk        → already current (another target wrote it this run)
 //   - embedded != stored AND disk == stored  → user hasn't touched, safe to overwrite
 //   - embedded != stored AND disk != stored  → user customized, skip and report
 func writeAssetsTo(
@@ -964,20 +982,24 @@ func writeAssetsTo(
 
 		if storedHashes != nil {
 			storedHash := storedHashes[path]
-			if storedHash != "" {
-				if embeddedHash == storedHash {
-					// Content unchanged in new binary — no need to write.
-					return nil
-				}
-				// Content changed in new binary — check if user modified the disk file.
-				if diskSHA256(dest) != storedHash {
-					// Disk differs from what we last wrote → user customized it, skip.
-					result.skipped = append(result.skipped, path)
-					return nil
-				}
-				// Disk matches what we wrote → safe to overwrite with new content.
+			onDisk := diskSHA256(dest)
+			switch {
+			case onDisk == embeddedHash:
+				result.hashes[path] = embeddedHash
+				return nil
+			case storedHash == "" && onDisk != "":
+				// New to Stratus, yet a different file is already there: not ours to replace.
+				result.skipped = append(result.skipped, path)
+				return nil
+			case storedHash != "" && embeddedHash == storedHash:
+				// Content unchanged in new binary — no need to write.
+				return nil
+			case storedHash != "" && onDisk != storedHash:
+				// Disk differs from what we last wrote → user customized it, skip.
+				result.skipped = append(result.skipped, path)
+				return nil
 			}
-			// storedHash == "" means this file is new in this version; write it.
+			// New file, or disk matches what we wrote → safe to (over)write.
 		}
 
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -1000,6 +1022,11 @@ func writeAssetsFS(
 ) (assetWriteResult, error) {
 	return writeAssetsTo(fsys, fsRoot, filepath.Join(projectRoot, ".claude", claudeSubdir), storedHashes)
 }
+
+// pluginDir is the stratus plugin init writes: Stratus' hooks, beside the mdview and
+// stratus-hud mods. Each is a skills-directory plugin, which Claude Code loads from this
+// project's .claude/skills once the folder is trusted, with no registration in settings.
+const pluginDir = ".claude/skills/stratus"
 
 // cmdUpdate updates the stratus binary via `go install`, then re-execs the new
 // binary with `stratus refresh` to update project files from the latest embedded content.
@@ -1084,9 +1111,17 @@ func cmdRefresh() {
 		allSkipped = append(allSkipped, skipped...)
 	}
 
+	// With --target both, a skipped shared file (.claude/skills, .claude/rules) is reported
+	// by both targets.
+	slices.Sort(allSkipped)
+	allSkipped = slices.Compact(allSkipped)
+
 	// Persist updated sync state.
 	if cfg.SyncState == nil {
-		cfg.SyncState = &config.SyncState{AssetHashes: make(map[string]string)}
+		cfg.SyncState = &config.SyncState{}
+	}
+	if cfg.SyncState.AssetHashes == nil {
+		cfg.SyncState.AssetHashes = make(map[string]string)
 	}
 	for k, v := range allHashes {
 		cfg.SyncState.AssetHashes[k] = v
@@ -1104,7 +1139,7 @@ func cmdRefresh() {
 		}
 		fmt.Println("Run /sync-stratus to review the new asset versions.")
 	} else {
-		fmt.Println("stratus refreshed — agents, skills, rules, and hooks updated to latest version.")
+		fmt.Println("stratus refreshed — agents, skills, rules, mods, and hooks updated to latest version.")
 	}
 }
 
@@ -1119,6 +1154,7 @@ func refreshClaudeCode(wd string, storedHashes map[string]string, allHashes map[
 		{skillsFS, "skills", "skills"},
 		{agentsFS, "agents", "agents"},
 		{rulesFS, "rules", "rules"},
+		{modsFS, "mods", "skills"}, // the stratus (hooks), mdview and stratus-hud plugins
 	} {
 		res, err := writeAssetsFS(spec.fsys, spec.root, spec.subdir, wd, storedHashes)
 		if err != nil {
@@ -1253,15 +1289,13 @@ func writeOpenCodeConfig(projectRoot string) error {
 		}
 		mcpSection["stratus"] = stratusEntry
 	}
-	// Always ensure STRATUS_EXECUTOR is set non-destructively (also upgrades existing entries).
-	envBlock, _ := stratusEntry["environment"].(map[string]any)
-	if envBlock == nil {
-		envBlock = map[string]any{}
+	// Earlier versions wrote STRATUS_EXECUTOR, which nothing reads.
+	if envBlock, _ := stratusEntry["environment"].(map[string]any); envBlock["STRATUS_EXECUTOR"] == "oc" {
+		delete(envBlock, "STRATUS_EXECUTOR")
+		if len(envBlock) == 0 {
+			delete(stratusEntry, "environment")
+		}
 	}
-	if _, ok := envBlock["STRATUS_EXECUTOR"]; !ok {
-		envBlock["STRATUS_EXECUTOR"] = "oc"
-	}
-	stratusEntry["environment"] = envBlock
 	if _, ok := mcpSection["playwright-test"]; !ok {
 		mcpSection["playwright-test"] = map[string]any{
 			"type":    "local",
@@ -1403,83 +1437,47 @@ func writeHooks(projectRoot string) error {
 		settings = map[string]any{}
 	}
 
-	// Extract or create the top-level "hooks" object.
-	hooksSection, _ := settings["hooks"].(map[string]any)
-	if hooksSection == nil {
-		hooksSection = map[string]any{}
-	}
-
-	// Stratus hooks: {event → [{matcher, command}]}.
-	type hookDef struct{ matcher, command string }
-	defs := []struct {
-		event string
-		hooks []hookDef
-	}{
-		{
-			event: "PreToolUse",
-			hooks: []hookDef{
-				// No executor_routing_guard here: cmdHook has never had a handler for
-				// it, so it registered a hook that spawned a process on every write and
-				// every delegation only to fall through to Allow.
-				{"Write|Edit|Bash|NotebookEdit|MultiEdit", "stratus hook phase_guard"},
-				{"Agent|Task", "stratus hook workflow_existence_guard"},
-				{"Agent|Task", "stratus hook delegation_guard"},
-				{"Bash", "stratus hook bash_write_guard"},
-			},
-		},
-		{
-			event: "PostToolUse",
-			hooks: []hookDef{
-				{"Write|Edit|MultiEdit|NotebookEdit", "stratus hook watcher"},
-			},
-		},
-		{
-			event: "TeammateIdle",
-			hooks: []hookDef{
-				{"", "stratus hook teammate_idle"},
-			},
-		},
-		{
-			event: "TaskCompleted",
-			hooks: []hookDef{
-				{"", "stratus hook task_completed"},
-			},
-		},
-	}
-
-	for _, d := range defs {
-		groups, _ := hooksSection[d.event].([]any)
-		if d.event == "PreToolUse" {
-			groups = removeStratusHook(groups, "stratus hook executor_routing_guard")
-			groups = removeStratusHook(groups, "stratus hook workflow_existence_guard")
-			groups = removeStratusHook(groups, "stratus hook delegation_guard")
-		}
-		for _, h := range d.hooks {
-			if hasStratusHook(groups, h.command) {
-				continue // already registered
+	// The stratus plugin registers the hooks now; once its hooks.json is in place, drop
+	// every entry an earlier version wrote here, and the events and hooks object that
+	// leaves empty. Without it (the plugin could not be written) the entries stay, so the
+	// guards keep running.
+	_, pluginErr := os.Stat(filepath.Join(projectRoot, pluginDir, "hooks", "hooks.json"))
+	if hooksSection, ok := settings["hooks"].(map[string]any); ok && pluginErr == nil {
+		for event, raw := range hooksSection {
+			groups, _ := raw.([]any)
+			if groups = removeStratusHooks(groups); len(groups) > 0 {
+				hooksSection[event] = groups
+			} else {
+				delete(hooksSection, event)
 			}
-			groups = append(groups, map[string]any{
-				"matcher": h.matcher,
-				"hooks":   []any{map[string]any{"type": "command", "command": h.command}},
-			})
 		}
-		hooksSection[d.event] = groups
+		if len(hooksSection) == 0 {
+			delete(settings, "hooks")
+		}
 	}
-
-	settings["hooks"] = hooksSection
 
 	// Register env non-destructively (preserve user customisation).
 	envSection, _ := settings["env"].(map[string]any)
 	if envSection == nil {
 		envSection = map[string]any{}
 	}
-	if _, ok := envSection["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]; !ok {
-		envSection["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+	// Agent teams are no longer enabled by default: with them on, every subagent Claude
+	// names launches as a teammate instead of returning its result like a subagent.
+	// Drop the "1" earlier versions wrote; keep the setting in .claude/settings.local.json
+	// to use teams anyway.
+	if envSection["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] == "1" {
+		delete(envSection, "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")
+		fmt.Println("Removed CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 from .claude/settings.json (agent teams are now opt-in; set it in .claude/settings.local.json to keep them).")
 	}
-	if _, ok := envSection["STRATUS_EXECUTOR"]; !ok {
-		envSection["STRATUS_EXECUTOR"] = "cc"
+	// Earlier versions wrote STRATUS_EXECUTOR, which nothing reads.
+	if envSection["STRATUS_EXECUTOR"] == "cc" {
+		delete(envSection, "STRATUS_EXECUTOR")
 	}
-	settings["env"] = envSection
+	if len(envSection) > 0 {
+		settings["env"] = envSection
+	} else {
+		delete(settings, "env")
+	}
 
 	// Register statusLine non-destructively (preserve user customisation).
 	if _, ok := settings["statusLine"]; !ok {
@@ -1498,7 +1496,9 @@ func writeHooks(projectRoot string) error {
 	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
 }
 
-func removeStratusHook(groups []any, command string) []any {
+// removeStratusHooks drops every "stratus hook <name>" command from the hook groups, and
+// any group that leaves empty.
+func removeStratusHooks(groups []any) []any {
 	var kept []any
 	for _, g := range groups {
 		group, ok := g.(map[string]any)
@@ -1515,7 +1515,7 @@ func removeStratusHook(groups []any, command string) []any {
 				hookKept = append(hookKept, h)
 				continue
 			}
-			if cmd, _ := entry["command"].(string); cmd == command {
+			if cmd, _ := entry["command"].(string); strings.HasPrefix(cmd, "stratus hook ") {
 				continue
 			}
 			hookKept = append(hookKept, h)
@@ -1527,27 +1527,6 @@ func removeStratusHook(groups []any, command string) []any {
 		kept = append(kept, group)
 	}
 	return kept
-}
-
-// hasStratusHook returns true when command is already present in the hook groups slice.
-func hasStratusHook(groups []any, command string) bool {
-	for _, g := range groups {
-		group, ok := g.(map[string]any)
-		if !ok {
-			continue
-		}
-		hooks, _ := group["hooks"].([]any)
-		for _, h := range hooks {
-			entry, ok := h.(map[string]any)
-			if !ok {
-				continue
-			}
-			if cmd, _ := entry["command"].(string); cmd == command {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // vexorIndex runs `vexor index` in the project root directory.

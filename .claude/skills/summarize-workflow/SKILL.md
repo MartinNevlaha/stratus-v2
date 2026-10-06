@@ -2,6 +2,7 @@
 name: summarize-workflow
 description: "Generate a semantic change summary for a completed workflow. Analyzes git diff, governance docs, and vexor results to populate capabilities added/modified/removed, downstream risks, and governance compliance."
 disable-model-invocation: true
+allowed-tools: mcp__stratus
 argument-hint: "[workflow-id]"
 ---
 

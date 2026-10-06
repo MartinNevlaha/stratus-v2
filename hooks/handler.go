@@ -34,8 +34,11 @@ type Decision struct {
 	Reason   string `json:"reason,omitempty"`
 	// Nudge redirects the agent instead of stopping it: Claude Code injects Reason
 	// into the agent's conversation and lets it keep working. Only meaningful for
-	// stop-like events (TeammateIdle); PreToolUse guards deny with Continue=false.
+	// stop-like events (TeammateIdle); PreToolUse guards deny with Continue=false,
+	// which Block turns into exit 2 with the reason on stderr.
 	Nudge bool `json:"-"`
+	// Context is text added to the agent's context (SessionStart); the event goes on.
+	Context string `json:"-"`
 }
 
 // Handler is a function that processes a hook event.
@@ -66,13 +69,11 @@ func Block(reason string) {
 	os.Exit(2)
 }
 
-// writeBlock emits a denial on BOTH channels. Claude Code reads stderr when a PreToolUse
-// hook exits 2; a reason that only ever reached stdout arrived at the agent as
-// "hook error: No stderr output" -- a denial with no text, which it cannot act on and
-// answers by ending its turn. The stdout JSON stays for runtimes that parse it instead.
+// writeBlock emits a denial as the reason on stderr and nothing on stdout. Claude Code
+// shows stderr to the agent when a hook exits 2, so it can adapt and keep working. It
+// also reads stdout JSON on exit 2, where {"continue": false} would stop the agent
+// outright instead of blocking the one tool call.
 func writeBlock(stdout, stderr io.Writer, reason string) {
-	data, _ := json.Marshal(Decision{Continue: false, Reason: reason})
-	fmt.Fprintln(stdout, string(data))
 	if reason != "" {
 		fmt.Fprintln(stderr, reason)
 	}
@@ -92,6 +93,15 @@ func Nudge(reason string) {
 func nudgePayload(reason string) []byte {
 	data, _ := json.Marshal(map[string]string{"decision": "block", "reason": reason})
 	return data
+}
+
+// writeContext emits additionalContext for the event, the documented way for a hook
+// to add text the agent reads without blocking anything.
+func writeContext(w io.Writer, eventName, context string) {
+	data, _ := json.Marshal(map[string]any{
+		"hookSpecificOutput": map[string]string{"hookEventName": eventName, "additionalContext": context},
+	})
+	fmt.Fprintln(w, string(data))
 }
 
 func writeDecision(d Decision) {
@@ -119,6 +129,9 @@ func Run(name string, handlers map[string]Handler) {
 	switch {
 	case decision.Nudge:
 		Nudge(decision.Reason)
+	case decision.Context != "":
+		writeContext(os.Stdout, event.HookEventName, decision.Context)
+		os.Exit(0)
 	case decision.Continue:
 		Allow()
 	default:
