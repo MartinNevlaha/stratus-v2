@@ -165,8 +165,8 @@ test('the band shows the workflow and its phase from the port `stratus port` nam
   await start($, on, w)
   expect(w.urls[0]).toBe('http://127.0.0.1:41999/api/dashboard/state')
   const ui = await $.ui.mount(band)
-  expect((await ui.find({ type: 'Text', text: 'Add mods' }))?.props).toMatchObject({ bold: true })
-  expect((await ui.find({ type: 'Text', text: '▸implement' }))?.props).toMatchObject({ bold: true, color: 'suggestion' })
+  expect((await ui.find({ type: 'Text', text: /^Add mods$/ }))?.props).toMatchObject({ bold: true })
+  expect((await ui.find({ type: 'Text', text: /^▸implement$/ }))?.props).toMatchObject({ bold: true, color: 'suggestion' })
   expect(await ui.find({ text: / · 1\/2/ })).toBeDefined()
   expect(await ui.find({ text: /delivery-backend-engineer/ })).toBeDefined()
   await ui.unmount()
@@ -379,7 +379,7 @@ test('another session’s workflow is shown as such, without toasts or actions',
   await ui.unmount()
   const p = await $.ui.mount(pane)
   expect((await p.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['tab-workflow', 'tab-plan', 'tab-swarm', 'tab-guardian', 'tab-denials'])
-  expect(await p.find({ text: /another session/ })).toBeDefined()
+  expect(await p.find({ text: /`\/resume spec-a` here takes it over/ })).toBeDefined()
   await p.unmount()
 })
 
@@ -443,4 +443,19 @@ test('Autopilot leaves a draft in the prompt alone', async ($, on) => {
   expect(w.filled).toEqual([])
   expect(w.toasts.at(-1)).toBe('◈ Autopilot: the prompt holds a draft; send or clear it first')
   await p.unmount()
+})
+
+test('the band is one line: a long title is clipped so the phases and tasks still show', async ($, on) => {
+  const w = world()
+  const title = 'Laya — test schopností vo všetkých dimenziách (technika, rozsah, objekt, zápor, identita) pred produkciou (DEV)'
+  w.workflows = [wf({ title, tasks: [{ index: 0, title: 'a', status: 'done' }], total_tasks: 7, delegated_agents: { implement: ['delivery-implementation-expert'] } })]
+  await start($, on, w)
+  const ui = await $.ui.mount(band)
+  const drawn = await ui.drawn()
+  expect(drawn).toMatchObject({ type: 'Text', props: { wrap: 'truncate' } })
+  expect(await ui.findAll({ type: 'Box' })).toEqual([])
+  expect(await ui.find({ type: 'Text', text: /^Laya — test schopností vo všetkých dime…$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^▸implement$/ })).toBeDefined()
+  expect(await ui.find({ text: / · 1\/7/ })).toBeDefined()
+  await ui.unmount()
 })

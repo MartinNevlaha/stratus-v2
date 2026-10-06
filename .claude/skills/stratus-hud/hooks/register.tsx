@@ -17,7 +17,11 @@ const pending = atom({ plugin: 'stratus-hud', key: 'pending' } as const, null)
 const TABS: [Tab, string][] = [['workflow', 'Workflow'], ['plan', 'Plan'], ['swarm', 'Swarm'], ['guardian', 'Guardian'], ['denials', 'Denials']]
 const MARK: Record<string, string> = { done: '✓', in_progress: '▸', active: '▸', failed: '✗', blocked: '⏸' }
 
-// plan → ▸implement → verify, the current phase marked and coloured
+// A long title leaves the phases room on the band.
+const TITLE_MAX = 40
+const clip = (text: string) => (text.length > TITLE_MAX ? `${text.slice(0, TITLE_MAX - 1)}…` : text)
+
+// plan → ▸implement → verify, the current phase marked and coloured; spans of one Text, so they wrap as words do
 const drawSteps = (Text: ElementConstructor<TextProps>, wf: Workflow): RenderElement[] =>
   steps(wf).flatMap((s, i) => [
     ...(i > 0 ? [<Text dimColor> → </Text>] : []),
@@ -185,7 +189,7 @@ export const register: Register = on => {
     const snap = await read($, snapshot)
     if (e.props.hasSurvey || snap === null) return next(e)
 
-    const { Box, Text } = $.ui.resolve(e)
+    const { Text } = $.ui.resolve(e)
     if (!snap.isOnline) return <Text dimColor>◈ stratus offline</Text>
 
     const wf = snap.workflow
@@ -193,16 +197,17 @@ export const register: Register = on => {
     const { done, total } = taskCount(wf)
     const agents = agentsNow(wf)
 
+    // One line: what does not fit is cut at its end.
     return (
-      <Box>
+      <Text wrap="truncate">
         <Text color="success">◈ </Text>
-        <Text bold wrap="truncate">{wf.title || wf.id}</Text>
+        <Text bold>{clip(wf.title || wf.id)}</Text>
         {!snap.isOwn && <Text dimColor> (another session)</Text>}
         <Text dimColor> · </Text>
         {drawSteps(Text, wf)}
         {total > 0 && <Text dimColor> · {done}/{total}</Text>}
-        {agents.length > 0 && <Text dimColor wrap="truncate"> · {agents.join(', ')}</Text>}
-      </Box>
+        {agents.length > 0 && <Text dimColor> · {agents.join(', ')}</Text>}
+      </Text>
     )
   })
 
@@ -296,8 +301,8 @@ export const register: Register = on => {
       return [
         <Text bold>{wf.title || wf.id}</Text>,
         <Text dimColor>{wf.id} · {wf.type}{wf.complexity === 'complex' ? ' (complex)' : ''}</Text>,
-        <Box>{drawSteps(Text, wf)}</Box>,
-        snap.isOwn ? actions(wf) : <Text dimColor>Started in another session; drive it from there.</Text>,
+        <Text>{drawSteps(Text, wf)}</Text>,
+        snap.isOwn ? actions(wf) : <Text dimColor>Started in another session; `/resume {wf.id}` here takes it over.</Text>,
         ...(wf.tasks ?? []).map(t => (
           <Text key={`task-${t.index}`} dimColor={t.status === 'done'}>
             {MARK[t.status] ?? '·'} {t.title}
