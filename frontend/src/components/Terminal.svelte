@@ -355,6 +355,10 @@
       error = null
       // Create terminal session
       ws!.send(JSON.stringify({ type: 'create', data: { id: sessionId } }))
+      // The PTY starts without a window size and the initial fit ran before the
+      // socket was open, so its resize was never sent. Without it the shell
+      // wraps at a different width than xterm and redraws land on wrong cells.
+      fitAndNotify()
     }
 
     ws.onmessage = (e) => {
