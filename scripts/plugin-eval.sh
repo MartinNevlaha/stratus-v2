@@ -28,6 +28,18 @@ for dir in "$project"/skills/*; do
 	fi
 done
 cp "$project"/agents/*.md "$plugin/agents/"
+# Sweep overrides: run every agent on one model and/or effort level (see evals/stratus/README.md).
+# Only the first match is replaced, which is the frontmatter line.
+case "${STRATUS_EVAL_AGENT_MODEL:-}" in
+"") ;;
+sonnet | opus | haiku | fable | inherit) perl -0pi -e "s/^model: .*\$/model: $STRATUS_EVAL_AGENT_MODEL/m" "$plugin"/agents/*.md ;;
+*) echo "STRATUS_EVAL_AGENT_MODEL must be sonnet, opus, haiku, fable or inherit" >&2 && exit 2 ;;
+esac
+case "${STRATUS_EVAL_AGENT_EFFORT:-}" in
+"") ;;
+low | medium | high | xhigh | max) perl -0pi -e "s/^effort: .*\\n//m; s/^(model: .*\\n)/\${1}effort: $STRATUS_EVAL_AGENT_EFFORT\\n/m" "$plugin"/agents/*.md ;;
+*) echo "STRATUS_EVAL_AGENT_EFFORT must be low, medium, high, xhigh or max" >&2 && exit 2 ;;
+esac
 # A plugin's agents are named <plugin>:<agent>; a bare name would fall back to the general-purpose agent.
 perl -pi -e 's/^agent: delivery-/agent: stratus:delivery-/' "$plugin"/skills/*/SKILL.md
 cp -R "$repo/evals/stratus" "$plugin/evals"

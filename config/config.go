@@ -101,6 +101,7 @@ type LLMConfig struct {
 	MaxTokens            int     `json:"max_tokens,omitempty"`
 	Temperature          float64 `json:"temperature,omitempty"`
 	MaxRetries           int     `json:"max_retries,omitempty"`
+	Effort               string  `json:"effort,omitempty"`
 	Concurrency          int     `json:"concurrency,omitempty"`
 	MinRequestIntervalMs int     `json:"min_request_interval_ms,omitempty"`
 }

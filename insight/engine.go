@@ -171,6 +171,7 @@ func (e *Engine) initLLMClient() {
 		MaxRetries:           e.config.LLM.MaxRetries,
 		Concurrency:          e.config.LLM.Concurrency,
 		MinRequestIntervalMs: e.config.LLM.MinRequestIntervalMs,
+		Effort:               e.config.LLM.Effort,
 	}
 	if llmCfg.Provider == "" {
 		llmCfg = llm.DefaultConfig()
@@ -359,6 +360,7 @@ func (e *Engine) initCodeAnalyst() {
 			MaxRetries:           caLLMCfg.MaxRetries,
 			Concurrency:          caLLMCfg.Concurrency,
 			MinRequestIntervalMs: caLLMCfg.MinRequestIntervalMs,
+			Effort:               caLLMCfg.Effort,
 		}
 		llmCfg = llmCfg.WithEnv()
 		client, err := llm.NewClient(llmCfg)

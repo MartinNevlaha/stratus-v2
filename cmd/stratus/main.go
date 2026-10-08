@@ -321,6 +321,7 @@ func cmdServe() {
 			MaxRetries:           cfg.Guardian.LLM.MaxRetries,
 			Concurrency:          cfg.Guardian.LLM.Concurrency,
 			MinRequestIntervalMs: cfg.Guardian.LLM.MinRequestIntervalMs,
+			Effort:               cfg.Guardian.LLM.Effort,
 		}
 		llmCfg = llmCfg.WithEnv()
 		if guardianClient, err := llm.NewClient(llmCfg); err == nil {
@@ -347,6 +348,7 @@ func cmdServe() {
 			MaxRetries:           cfg.LLM.MaxRetries,
 			Concurrency:          cfg.LLM.Concurrency,
 			MinRequestIntervalMs: cfg.LLM.MinRequestIntervalMs,
+			Effort:               cfg.LLM.Effort,
 		}.WithEnv()
 		if autodocClient, err := llm.NewClient(autodocCfg); err == nil {
 			coord.SetAutodocEnricher(&llmAutodocEnricher{client: autodocClient, language: cfg.Language})
@@ -1686,6 +1688,7 @@ func cmdOnboard() {
 		MaxRetries:           cfg.LLM.MaxRetries,
 		Concurrency:          cfg.LLM.Concurrency,
 		MinRequestIntervalMs: cfg.LLM.MinRequestIntervalMs,
+		Effort:               cfg.LLM.Effort,
 	}.WithEnv()
 
 	if llmCfg.Provider == "" {

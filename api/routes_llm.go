@@ -138,6 +138,7 @@ func (s *Server) handleTestLLM(w http.ResponseWriter, r *http.Request) {
 		MaxRetries:           cfg.MaxRetries,
 		Concurrency:          cfg.Concurrency,
 		MinRequestIntervalMs: cfg.MinRequestIntervalMs,
+		Effort:               cfg.Effort,
 	}
 	llmCfg = llmCfg.WithEnv()
 

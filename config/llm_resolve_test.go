@@ -155,3 +155,13 @@ func TestResolveLLMConfig_Concurrency_TopLevelBase(t *testing.T) {
 		t.Errorf("Concurrency = %d, want 4 (override wins)", result2.Concurrency)
 	}
 }
+
+func TestResolveLLMConfig_Effort(t *testing.T) {
+	top := LLMConfig{Provider: "anthropic", Model: "claude-opus-5-5", Effort: "medium"}
+	if got := ResolveLLMConfig(top, LLMConfig{Effort: "low"}).Effort; got != "low" {
+		t.Errorf("partial override: effort = %q, want low", got)
+	}
+	if got := ResolveLLMConfig(top, LLMConfig{Provider: "anthropic", Model: "claude-haiku-5-5"}).Effort; got != "medium" {
+		t.Errorf("full override: effort = %q, want medium (inherited)", got)
+	}
+}

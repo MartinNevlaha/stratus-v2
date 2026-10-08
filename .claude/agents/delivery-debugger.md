@@ -2,8 +2,8 @@
 name: delivery-debugger
 description: "Diagnostic delivery agent for tracing root causes of bugs. Read-only - diagnoses and reports, never writes code or applies fixes."
 tools: Read, Grep, Glob, Bash, mcp__stratus__retrieve, mcp__stratus__search, mcp__stratus__timeline, mcp__stratus__get_observations, mcp__stratus__get_workflow, mcp__stratus__wiki_search
-model: sonnet
-effort: high
+model: opus
+effort: medium
 color: orange
 skills:
   - governance-db

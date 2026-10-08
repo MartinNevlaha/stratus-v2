@@ -27,12 +27,17 @@ func NewAnthropicClient(cfg Config) (*AnthropicClient, error) {
 func (c *AnthropicClient) Provider() string { return "anthropic" }
 func (c *AnthropicClient) Model() string    { return c.config.Model }
 
+// anthropicRequest omits temperature: current Claude models return 400 for any non-default value.
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	System      string             `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	Temperature float64            `json:"temperature,omitempty"`
+	Model        string                 `json:"model"`
+	MaxTokens    int                    `json:"max_tokens"`
+	System       string                 `json:"system,omitempty"`
+	Messages     []anthropicMessage     `json:"messages"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+type anthropicOutputConfig struct {
+	Effort string `json:"effort"`
 }
 
 type anthropicMessage struct {
@@ -51,7 +56,10 @@ type anthropicResponse struct {
 	} `json:"content"`
 	StopReason   string `json:"stop_reason"`
 	StopSequence string `json:"stop_sequence,omitempty"`
-	Usage        struct {
+	StopDetails  struct {
+		Category string `json:"category"`
+	} `json:"stop_details"`
+	Usage struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
@@ -83,17 +91,14 @@ func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (
 		maxTokens = c.config.MaxTokens
 	}
 
-	temperature := req.Temperature
-	if temperature == 0 {
-		temperature = c.config.Temperature
-	}
-
 	body := anthropicRequest{
-		Model:       c.config.Model,
-		MaxTokens:   maxTokens,
-		System:      req.SystemPrompt,
-		Messages:    messages,
-		Temperature: temperature,
+		Model:     c.config.Model,
+		MaxTokens: maxTokens,
+		System:    req.SystemPrompt,
+		Messages:  messages,
+	}
+	if c.config.Effort != "" {
+		body.OutputConfig = &anthropicOutputConfig{Effort: c.config.Effort}
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -137,6 +142,10 @@ func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (
 		return nil, fmt.Errorf("llm: failed to parse response: %w", err)
 	}
 
+	if anthropicResp.StopReason == "refusal" {
+		return nil, fmt.Errorf("llm: anthropic refused the request (category %q)", anthropicResp.StopDetails.Category)
+	}
+
 	if len(anthropicResp.Content) == 0 {
 		return nil, fmt.Errorf("llm: no content in response")
 	}
@@ -146,6 +155,9 @@ func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (
 		if block.Type == "text" {
 			content += block.Text
 		}
+	}
+	if content == "" && anthropicResp.StopReason == "max_tokens" {
+		return nil, fmt.Errorf("llm: anthropic reached max_tokens (%d) before writing text; thinking counts toward the limit, so raise max_tokens or lower effort", maxTokens)
 	}
 
 	return &CompletionResponse{

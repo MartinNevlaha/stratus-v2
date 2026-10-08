@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -995,5 +996,91 @@ func TestNewClient_WithConcurrency_WrapsInSemaphore(t *testing.T) {
 	}
 	if _, ok := client.(*semaphoreClient); !ok {
 		t.Error("expected *semaphoreClient when Concurrency > 0")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic request shape and stop reasons for current Claude models
+// ---------------------------------------------------------------------------
+
+// captureAnthropicRequest records the decoded request body and answers with a text block.
+func captureAnthropicRequest(got *map[string]any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(got)
+		newAnthropicSuccessHandler("ok", "claude", 1, 1)(w, r)
+	}
+}
+
+func TestAnthropicClient_Complete_OmitsTemperature(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(captureAnthropicRequest(&got))
+	defer srv.Close()
+
+	cfg := Config{Provider: "anthropic", Model: "claude", APIKey: "k", BaseURL: srv.URL, Temperature: 0.7}
+	client, _ := NewAnthropicClient(cfg)
+	if _, err := client.Complete(context.Background(), CompletionRequest{
+		Messages:    []Message{{Role: "user", Content: "hi"}},
+		Temperature: 0.3,
+	}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if _, ok := got["temperature"]; ok {
+		t.Errorf("request has temperature %v; current Claude models reject non-default values", got["temperature"])
+	}
+}
+
+func TestAnthropicClient_Complete_Effort(t *testing.T) {
+	for _, effort := range []string{"", "low"} {
+		var got map[string]any
+		srv := httptest.NewServer(captureAnthropicRequest(&got))
+
+		cfg := Config{Provider: "anthropic", Model: "claude", APIKey: "k", BaseURL: srv.URL, Effort: effort}
+		client, _ := NewAnthropicClient(cfg)
+		if _, err := client.Complete(context.Background(), CompletionRequest{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		}); err != nil {
+			t.Fatalf("Complete(effort=%q): %v", effort, err)
+		}
+		srv.Close()
+
+		oc, ok := got["output_config"].(map[string]any)
+		if effort == "" {
+			if ok {
+				t.Errorf("effort unset: request has output_config %v, want none", oc)
+			}
+			continue
+		}
+		if !ok || oc["effort"] != effort {
+			t.Errorf("output_config = %v, want effort %q", got["output_config"], effort)
+		}
+	}
+}
+
+func TestAnthropicClient_Complete_Refusal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"content":[],"stop_reason":"refusal","stop_details":{"category":"cyber"}}`)
+	}))
+	defer srv.Close()
+
+	client, _ := NewAnthropicClient(Config{Provider: "anthropic", Model: "claude", APIKey: "k", BaseURL: srv.URL})
+	_, err := client.Complete(context.Background(), CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err == nil || !strings.Contains(err.Error(), "refus") || !strings.Contains(err.Error(), "cyber") {
+		t.Fatalf("err = %v, want a refusal error naming the category", err)
+	}
+}
+
+func TestAnthropicClient_Complete_MaxTokensWithoutText(t *testing.T) {
+	// Thinking counts toward max_tokens; a response cut off before any text must not pass as an empty answer.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"content":[{"type":"thinking","thinking":""}],"stop_reason":"max_tokens"}`)
+	}))
+	defer srv.Close()
+
+	client, _ := NewAnthropicClient(Config{Provider: "anthropic", Model: "claude", APIKey: "k", BaseURL: srv.URL})
+	_, err := client.Complete(context.Background(), CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err == nil || !strings.Contains(err.Error(), "max_tokens") {
+		t.Fatalf("err = %v, want a max_tokens error", err)
 	}
 }

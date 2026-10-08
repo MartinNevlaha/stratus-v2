@@ -3,7 +3,7 @@ name: delivery-governance-checker
 description: "Governance review delivery agent that checks plans, designs, and implementations against project rules and ADRs. Read-only - reports findings, never modifies files."
 tools: Read, Grep, Glob, mcp__stratus__retrieve, mcp__stratus__search, mcp__stratus__timeline, mcp__stratus__get_observations, mcp__stratus__get_workflow, mcp__stratus__wiki_search
 model: opus
-effort: high
+effort: medium
 color: red
 skills:
   - governance-db

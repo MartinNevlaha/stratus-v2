@@ -141,6 +141,7 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 			MaxRetries:           s.cfg.LLM.MaxRetries,
 			Concurrency:          s.cfg.LLM.Concurrency,
 			MinRequestIntervalMs: s.cfg.LLM.MinRequestIntervalMs,
+			Effort:               s.cfg.LLM.Effort,
 		}.WithEnv()
 
 		bareClient, err := llm.NewClient(llmCfg)

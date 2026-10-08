@@ -13,7 +13,7 @@ func validateLLMConfig(c config.LLMConfig, allowEmpty bool) error {
 	isZero := c.Provider == "" && c.Model == "" && c.BaseURL == "" &&
 		c.APIKey == "" && c.Timeout == 0 && c.MaxTokens == 0 &&
 		c.Temperature == 0 && c.MaxRetries == 0 &&
-		c.Concurrency == 0 && c.MinRequestIntervalMs == 0
+		c.Concurrency == 0 && c.MinRequestIntervalMs == 0 && c.Effort == ""
 	if isZero {
 		if allowEmpty {
 			return nil
@@ -26,6 +26,13 @@ func validateLLMConfig(c config.LLMConfig, allowEmpty bool) error {
 	case "", "zai", "anthropic", "openai", "ollama", "lmstudio":
 	default:
 		return fmt.Errorf("llm.provider: invalid value %q (allowed: zai, anthropic, openai, ollama, lmstudio)", c.Provider)
+	}
+
+	// Effort enum (anthropic output_config.effort; empty = model default)
+	switch c.Effort {
+	case "", "low", "medium", "high", "xhigh", "max":
+	default:
+		return fmt.Errorf("llm.effort: invalid value %q (allowed: low, medium, high, xhigh, max)", c.Effort)
 	}
 
 	// Temperature ∈ [0, 2]

@@ -51,3 +51,16 @@ func TestConfig_Validate_EmptyProvider_Valid(t *testing.T) {
 		t.Errorf("expected nil for empty provider (disabled), got: %v", err)
 	}
 }
+
+func TestConfig_Validate_Effort(t *testing.T) {
+	for _, effort := range []string{"", "low", "medium", "high", "xhigh", "max"} {
+		cfg := Config{Provider: "ollama", Model: "m", Effort: effort}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("effort %q: unexpected error: %v", effort, err)
+		}
+	}
+	cfg := Config{Provider: "ollama", Model: "m", Effort: "adaptive"}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for effort \"adaptive\"")
+	}
+}

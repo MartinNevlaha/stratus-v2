@@ -3,6 +3,7 @@ name: delivery-ux-designer
 description: "UX design delivery agent that produces design specifications, component hierarchies, and design tokens. Does not write source code."
 tools: Read, Grep, Glob, Edit, Write, mcp__stratus
 model: sonnet
+effort: medium
 color: pink
 skills:
   - governance-db

@@ -203,3 +203,16 @@ func TestRestoreLLMAPIKey_NewKeyPreserved(t *testing.T) {
 		t.Errorf("expected new key to be preserved, got %q", incoming.APIKey)
 	}
 }
+
+func TestValidateLLMConfig_Effort(t *testing.T) {
+	if err := validateLLMConfig(config.LLMConfig{Provider: "anthropic", Model: "claude-opus-5-5", Effort: "low"}, false); err != nil {
+		t.Errorf("effort low: unexpected error: %v", err)
+	}
+	err := validateLLMConfig(config.LLMConfig{Provider: "anthropic", Model: "claude-opus-5-5", Effort: "turbo"}, false)
+	if err == nil || !strings.Contains(err.Error(), "effort") {
+		t.Errorf("effort turbo: err = %v, want an effort error", err)
+	}
+	if err := validateLLMConfig(config.LLMConfig{Effort: "high"}, true); err != nil {
+		t.Errorf("effort-only override: unexpected error: %v", err)
+	}
+}

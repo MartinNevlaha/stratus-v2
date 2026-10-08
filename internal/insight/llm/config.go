@@ -15,6 +15,9 @@ type Config struct {
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
 	MaxRetries  int     `json:"max_retries,omitempty"`
+	// Effort sets output_config.effort for the anthropic provider (low|medium|high|xhigh|max).
+	// Empty leaves the model default. Thinking counts toward MaxTokens on current Claude models.
+	Effort string `json:"effort,omitempty"`
 	// Concurrency limits simultaneous in-flight requests to this provider.
 	// 0 = unlimited; 1 = serialized (required for z.ai free tier); >1 = bounded.
 	Concurrency int `json:"concurrency,omitempty"`
@@ -74,6 +77,11 @@ func (c Config) Validate() error {
 	}
 	if c.Temperature < 0 || c.Temperature > 2 {
 		return fmt.Errorf("llm: temperature must be between 0 and 2, got %f", c.Temperature)
+	}
+	switch c.Effort {
+	case "", "low", "medium", "high", "xhigh", "max":
+	default:
+		return fmt.Errorf("llm: effort must be one of low, medium, high, xhigh, max, got %q", c.Effort)
 	}
 	if c.Timeout < 0 || c.Timeout > 600 {
 		return fmt.Errorf("llm: timeout must be between 0 and 600 seconds, got %d", c.Timeout)

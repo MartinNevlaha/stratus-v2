@@ -140,6 +140,7 @@ func (s *Server) handleTestGuardianLLM(w http.ResponseWriter, r *http.Request) {
 		MaxRetries:           resolved.MaxRetries,
 		Concurrency:          resolved.Concurrency,
 		MinRequestIntervalMs: resolved.MinRequestIntervalMs,
+		Effort:               resolved.Effort,
 	})
 	if err != nil {
 		http.Error(w, "llm init failed: "+err.Error(), http.StatusBadRequest)

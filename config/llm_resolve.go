@@ -29,6 +29,9 @@ func ResolveLLMConfig(topLevel, override LLMConfig) LLMConfig {
 		if result.Concurrency == 0 {
 			result.Concurrency = topLevel.Concurrency
 		}
+		if result.Effort == "" {
+			result.Effort = topLevel.Effort
+		}
 		return result
 	}
 	// Otherwise use top-level as base, override individual fields
@@ -59,6 +62,9 @@ func ResolveLLMConfig(topLevel, override LLMConfig) LLMConfig {
 	}
 	if override.Concurrency != 0 {
 		result.Concurrency = override.Concurrency
+	}
+	if override.Effort != "" {
+		result.Effort = override.Effort
 	}
 	return result
 }

@@ -64,6 +64,11 @@ Detect project type and use appropriate commands:
 - **Node.js**: `npm test`, `npx eslint`
 - **Rust**: `cargo test`, `cargo clippy`
 
+## Finishing
+
+- You run as a subagent: the coordinator cannot answer questions mid-task. Keep working until everything the task asks for is done; stop early only when you are blocked, and then say exactly what blocks you.
+- Report only results you actually ran. A test command that failed to start, or a syntax-only check, does not count as a run; if a check cannot run here, say which one and why.
+
 ## Completion
 
 Report: tests written, coverage percentage, lint results, and any quality concerns found.
