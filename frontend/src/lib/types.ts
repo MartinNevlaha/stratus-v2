@@ -53,7 +53,95 @@ export interface WorkflowState {
 export interface Task {
   index: number
   title: string
-  status: 'pending' | 'in_progress' | 'done'
+  status: 'pending' | 'in_progress' | 'done' | 'skipped'
+  started_at?: string
+  completed_at?: string
+  depends_on?: number[]
+}
+
+export interface WorkflowAgent {
+  id: string
+  workflow_id: string
+  session_id: string
+  agent_type: string
+  phase: string
+  task_index?: number
+  status: 'running' | 'done' | 'failed'
+  started_at: string
+  ended_at?: string
+  last_activity: string
+  tool_calls: number
+  last_tool?: string
+  files: string[]
+  verdict?: 'PASS' | 'FAIL' | ''
+  must_fix: number
+  should_fix: number
+  suggestion: number
+  tokens_in: number
+  tokens_out: number
+}
+
+export interface TranscriptStep {
+  kind: 'tool' | 'text'
+  name?: string
+  summary?: string
+  text?: string
+}
+
+export interface AgentTranscript {
+  steps: TranscriptStep[]
+  usage: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number }
+}
+
+export interface MissionAgent extends WorkflowAgent {
+  workflow_title: string
+  idle: boolean
+}
+
+export interface WorkflowAgentsResponse {
+  agents: WorkflowAgent[]
+  conflicts: string[]
+}
+
+export interface WorkflowDenial {
+  ts: string
+  hook?: string
+  tool_name?: string
+  agent_type?: string
+  reason?: string
+}
+
+export interface AttentionItem {
+  workflow_id: string
+  title: string
+  phase: string
+  running_agents: number
+  stale_agents: number
+  review_failed: boolean
+  conflicts: string[]
+}
+
+export interface RunMetrics {
+  id: string
+  duration_sec: number
+  tasks: number
+  agents: number
+  review_loops: number
+  tokens: number
+}
+
+export interface RunComparison {
+  current: RunMetrics
+  previous: RunMetrics | null
+}
+
+export interface WorkflowLog {
+  id: number
+  workflow_id: string
+  session_id: string
+  ts: string
+  tool_name: string
+  summary: string
 }
 
 export interface SearchResult {
@@ -283,6 +371,7 @@ export interface GuardianConfig {
   tech_debt_threshold: number
   reviewer_timeout_minutes: number
   ticket_timeout_minutes: number
+  workflow_token_budget: number
   llm: LLMConfig
 }
 

@@ -1,28 +1,38 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { appState, dismissUpdate } from '$lib/store'
-  import { listWorkflows, deleteWorkflow, listMissions, getMission, listPastItems, listGuardianAlerts, dismissGuardianAlert, dismissAllGuardianAlerts, deleteGuardianAlert, killSwarmWorker, runGuardianScan, startWorkflow, recordDelegation, listAgents } from '$lib/api'
+  import { listWorkflows, deleteWorkflow, listMissions, listPastItems, listGuardianAlerts, dismissGuardianAlert, dismissAllGuardianAlerts, deleteGuardianAlert, killSwarmWorker, setWorkflowAgentStatus, runGuardianScan, startWorkflow, recordDelegation, listAgents } from '$lib/api'
   import PhaseTimeline from '../components/PhaseTimeline.svelte'
   import AnalysisPanel from '../components/AnalysisPanel.svelte'
-  import SwarmGraph from '../components/SwarmGraph.svelte'
-  import SignalBus from '../components/SignalBus.svelte'
-  import EvidenceTrail from '../components/EvidenceTrail.svelte'
-  import type { WorkflowState, SwarmMission, SwarmMissionDetail, PastItem, GuardianAlert, AgentDef } from '$lib/types'
+  import SwarmDetail from '../components/SwarmDetail.svelte'
+  import WorkflowActivity from '../components/WorkflowActivity.svelte'
+  import WorkflowDetail from '../components/WorkflowDetail.svelte'
+  import AttentionStrip from '../components/AttentionStrip.svelte'
+  import MissionControl from '../components/MissionControl.svelte'
+  import { relativeTime } from '$lib/ui'
+  import type { WorkflowState, SwarmMission, PastItem, GuardianAlert, AgentDef } from '$lib/types'
 
   let allWorkflows = $state<WorkflowState[]>([])
   let missions = $state<SwarmMission[]>([])
-  let swarmDetails = $state<Record<string, SwarmMissionDetail | null>>({})
-  let swarmLoading = $state<Record<string, boolean>>({})
-  let swarmViews = $state<Record<string, 'list' | 'graph'>>({})
   let confirmDelete = $state<string | null>(null)
   let copiedId = $state<string | null>(null)
   let expandedTasks = $state<Set<string>>(new Set())
   let expandedPlans = $state<Set<string>>(new Set())
   let expandedDesigns = $state<Set<string>>(new Set())
-  let expandedTickets = $state<Set<string>>(new Set())
   let confirmTimer: ReturnType<typeof setTimeout> | null = null
 
+  // Deep link: `#/workflow/<id>` focuses one workflow card.
+  const WF_HASH = '#/workflow/'
+  let focusId = $state<string | null>(readFocusId())
+
+  function readFocusId(): string | null {
+    const h = window.location.hash
+    return h.startsWith(WF_HASH) ? decodeURIComponent(h.slice(WF_HASH.length)) : null
+  }
+
   let activeWfs = $derived(allWorkflows.filter(w => !w.aborted && w.phase !== 'complete'))
+  // A focused workflow may already be finished: its agents and tasks stay inspectable.
+  let visibleWfs = $derived(focusId ? allWorkflows.filter(w => w.id === focusId) : activeWfs)
 
   // Guardian
   let guardianAlerts = $state<GuardianAlert[]>([])
@@ -63,6 +73,15 @@
   async function killWorker(workerId: string, alertId: number) {
     try {
       await killSwarmWorker(workerId)
+      await dismissGuardianAlert(alertId)
+      guardianAlerts = guardianAlerts.filter(a => a.id !== alertId)
+      appState.guardianAlertCount = Math.max(0, guardianAlerts.length)
+    } catch { /* ignore */ }
+  }
+
+  async function failAgent(agentId: string, alertId: number) {
+    try {
+      await setWorkflowAgentStatus(agentId, 'failed')
       await dismissGuardianAlert(alertId)
       guardianAlerts = guardianAlerts.filter(a => a.id !== alertId)
       appState.guardianAlertCount = Math.max(0, guardianAlerts.length)
@@ -154,7 +173,6 @@
     try {
       missions = await listMissions()
     } catch { /* ignore */ }
-    refreshSwarmDetails(allWorkflows, missions)
   }
 
   async function loadPastItems(append = false) {
@@ -214,71 +232,13 @@
     setTimeout(() => { if (copiedId === key) copiedId = null }, 2000)
   }
 
-  function workerStatusColor(status: string): string {
-    switch (status) {
-      case 'active': return '#3fb950'
-      case 'pending': return '#8b949e'
-      case 'stale': return '#d29922'
-      case 'done': return '#58a6ff'
-      case 'failed': case 'killed': return '#f85149'
-      default: return '#8b949e'
-    }
-  }
-
-  function ticketIcon(status: string): string {
-    switch (status) {
-      case 'done': return '\u2713'
-      case 'in_progress': return '\u25B6'
-      case 'assigned': return '\u25CB'
-      case 'failed': return '\u2717'
-      case 'blocked': return '\u2758'
-      default: return '\u25CB'
-    }
-  }
-
-  function relativeTime(ts: string): string {
-    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-    if (diff < 5) return 'just now'
-    if (diff < 60) return `${diff}s ago`
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    return `${Math.floor(diff / 3600)}h ago`
-  }
-
-  function workerTicketCounts(detail: SwarmMissionDetail, workerId: string): string {
-    const assigned = detail.tickets.filter(t => t.worker_id === workerId)
-    if (assigned.length === 0) return ''
-    const done = assigned.filter(t => t.status === 'done').length
-    return `${done}/${assigned.length}`
-  }
-
-  async function loadSwarmDetail(wfId: string, missionList?: typeof missions) {
-    const list = missionList ?? missions
-    const mission = list.find(m => m.workflow_id === wfId)
-    if (!mission) { swarmDetails[wfId] = null; return }
-    swarmLoading[wfId] = true
-    try {
-      const detail = await getMission(mission.id)
-      swarmDetails[wfId] = detail
-    } catch (e) {
-      console.error('[swarm] loadSwarmDetail failed for', wfId, e)
-      swarmDetails[wfId] = null
-    } finally {
-      swarmLoading[wfId] = false
-    }
-  }
-
-  function refreshSwarmDetails(wfs: typeof allWorkflows, missionList: typeof missions) {
-    for (const wf of wfs) {
-      if (!wf.aborted && wf.phase !== 'complete' && displayType(wf) === 'swarm') {
-        loadSwarmDetail(wf.id, missionList)
-      }
-    }
-  }
-
   onMount(() => {
     loadWorkflows()
     loadPastItems()
     loadGuardianAlerts()
+    const onHash = () => { focusId = readFocusId() }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
   })
 
   $effect(() => {
@@ -296,28 +256,19 @@
   $effect(() => {
     const _ = appState.swarmUpdateCounter
     if (_ === 0) return
-    listMissions().then(m => {
-      missions = m
-      refreshSwarmDetails(allWorkflows, m)
-    }).catch(() => {})
+    listMissions().then(m => { missions = m }).catch(() => {})
     loadPastItems()
   })
 
-  // Tick heartbeat display + poll swarm details every 5s
-  let _heartbeatTick = $state(0)
-  let _pollInterval: ReturnType<typeof setInterval> | undefined
+  // Keep the mission list fresh while a swarm workflow is active
   onMount(() => {
-    _pollInterval = setInterval(() => {
-      _heartbeatTick++
+    const pollInterval = setInterval(() => {
       const hasSwarm = allWorkflows.some(wf => !wf.aborted && wf.phase !== 'complete' && displayType(wf) === 'swarm')
       if (hasSwarm) {
-        listMissions().then(m => {
-          missions = m
-          refreshSwarmDetails(allWorkflows, m)
-        }).catch(() => {})
+        listMissions().then(m => { missions = m }).catch(() => {})
       }
     }, 5000)
-    return () => clearInterval(_pollInterval)
+    return () => clearInterval(pollInterval)
   })
 </script>
 
@@ -416,6 +367,11 @@
                     Kill worker
                   </button>
                 {/if}
+                {#if alert.type === 'stale_agent' && alert.metadata?.agent_id}
+                  <button class="alert-action alert-action-danger" onclick={() => failAgent(String(alert.metadata.agent_id), alert.id)} title="Mark idle agent as failed">
+                    Mark failed
+                  </button>
+                {/if}
                 <button class="alert-action" onclick={() => openDelegateMenu(alert.id)} title="Send to agent">
                   {delegateAlertId === alert.id ? 'Cancel' : 'Send to agent'}
                 </button>
@@ -444,14 +400,25 @@
 
 
   <!-- Active workflows -->
-  {#if activeWfs.length === 0}
-    <div class="empty">No active workflows. Use <code>/spec</code>, <code>/bug</code>, or <code>/swarm</code> to start one.</div>
+  {#if !focusId}
+    <AttentionStrip />
+    {#if activeWfs.length > 0}<MissionControl />{/if}
+  {/if}
+  {#if focusId}
+    <a class="focus-back" href="#/" onclick={() => { focusId = null }}>← All workflows</a>
+  {/if}
+  {#if focusId && visibleWfs.length === 1}
+    <WorkflowDetail wf={visibleWfs[0]} {missions} isSwarm={displayType(visibleWfs[0]) === 'swarm'} />
+  {:else if visibleWfs.length === 0}
+    <div class="empty">
+      {#if focusId}Workflow <code>{focusId}</code> was not found.{:else}No active workflows. Use <code>/spec</code>, <code>/bug</code>, or <code>/swarm</code> to start one.{/if}
+    </div>
   {:else}
-    {#each activeWfs as wf}
+    {#each visibleWfs as wf (wf.id)}
       <div class="workflow-card">
         <div class="workflow-header">
           <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
-          <span class="wf-id">{wf.id}</span>
+          <a class="wf-id" href="{WF_HASH}{encodeURIComponent(wf.id)}" onclick={() => { focusId = wf.id }} title="Open this workflow only">{wf.id}</a>
           <span class="wf-phase">{wf.phase}</span>
           <div class="wf-actions">
             {#if confirmDelete === wf.id}
@@ -560,94 +527,7 @@
 
         <!-- Swarm mission detail (inline for [SWARM] workflows) -->
         {#if displayType(wf) === 'swarm'}
-          {@const detail = swarmDetails[wf.id]}
-          {@const loading = swarmLoading[wf.id]}
-          <div class="swarm-inline">
-            {#if loading && !detail}
-              <div class="detail-loading">Loading mission…</div>
-            {:else if detail}
-              {#if detail.tickets.length > 0}
-                <div class="mission-view-toggle">
-                  <button class="view-btn" class:active={(swarmViews[wf.id] ?? 'list') === 'list'} onclick={() => swarmViews[wf.id] = 'list'}>List</button>
-                  <button class="view-btn" class:active={(swarmViews[wf.id] ?? 'list') === 'graph'} onclick={() => swarmViews[wf.id] = 'graph'}>Graph</button>
-                </div>
-              {/if}
-              {#if (swarmViews[wf.id] ?? 'list') === 'graph' && detail.tickets.length > 0}
-                <SwarmGraph detail={detail} />
-              {:else}
-                {#if detail.workers.length > 0}
-                  <div class="detail-section">
-                    <div class="detail-label">Workers</div>
-                    <div class="workers-grid">
-                      {#each detail.workers as worker}
-                        <div class="worker-node" class:failed={worker.status === 'failed' || worker.status === 'killed'} class:stale={worker.status === 'stale'}>
-                          <span class="worker-dot" class:active={worker.status === 'active'} style="background: {workerStatusColor(worker.status)}"></span>
-                          <span class="worker-type">{worker.agent_type.replace('delivery-', '')}</span>
-                          <span class="worker-status">{worker.status}</span>
-                          {#if workerTicketCounts(detail, worker.id)}
-                            <span class="worker-tickets">{workerTicketCounts(detail, worker.id)}</span>
-                          {/if}
-                          {#if worker.status === 'active'}
-                            <span class="worker-heartbeat">{(() => { const _ = _heartbeatTick; const hb = appState.lastHeartbeats[worker.id]; return hb ? relativeTime(new Date(hb).toISOString()) : relativeTime(worker.last_heartbeat) })()}</span>
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-                {#if detail.tickets.length > 0}
-                  <div class="detail-section">
-                    <div class="detail-label">
-                      Tickets ({detail.tickets.filter(t => t.status === 'done').length}/{detail.tickets.length})
-                      <div class="progress-bar">
-                        <div class="ticket-progress-fill"
-                          class:active={detail.tickets.some(t => t.status === 'in_progress' || t.status === 'assigned')}
-                          style="width: {detail.tickets.length > 0 ? (detail.tickets.filter(t => t.status === 'done').length / detail.tickets.length) * 100 : 0}%"
-                        ></div>
-                      </div>
-                    </div>
-                    {#each detail.tickets as ticket}
-                      <div class="ticket" class:done={ticket.status === 'done'} class:active={ticket.status === 'in_progress'} class:failed={ticket.status === 'failed'}
-                        role="button" tabindex="0"
-                        onclick={() => { const s = new Set(expandedTickets); s.has(ticket.id) ? s.delete(ticket.id) : s.add(ticket.id); expandedTickets = s }}
-                        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { const s = new Set(expandedTickets); s.has(ticket.id) ? s.delete(ticket.id) : s.add(ticket.id); expandedTickets = s } }}
-                        style="cursor: pointer"
-                      >
-                        <span class="ticket-icon" class:spinning={ticket.status === 'in_progress'}>{ticketIcon(ticket.status)}</span>
-                        <span class="ticket-title">{ticket.title}</span>
-                        {#if ticket.worker_id}
-                          {@const worker = detail.workers.find(w => w.id === ticket.worker_id)}
-                          {#if worker}
-                            <span class="ticket-worker-chip">{worker.agent_type.replace('delivery-', '')}</span>
-                          {/if}
-                        {/if}
-                        <span class="ticket-domain">{ticket.domain}</span>
-                        <span class="ticket-expand">{expandedTickets.has(ticket.id) ? '▲' : '▼'}</span>
-                      </div>
-                      {#if expandedTickets.has(ticket.id)}
-                        <EvidenceTrail ticketId={ticket.id} />
-                      {/if}
-                    {/each}
-                  </div>
-                {/if}
-                <SignalBus missionId={detail.mission.id} />
-                {#if detail.forge.length > 0}
-                  <div class="detail-section">
-                    <div class="detail-label">Forge (merge queue)</div>
-                    {#each detail.forge as entry}
-                      <div class="forge-entry" class:merged={entry.status === 'merged'} class:conflict={entry.status === 'conflict'}>
-                        {#if entry.status === 'merged'}<span class="forge-check">&#10003;</span>{/if}
-                        <span class="forge-branch">{entry.branch_name}</span>
-                        <span class="forge-status">{entry.status}</span>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              {/if}
-            {:else}
-              <div class="swarm-waiting">Awaiting dispatch…</div>
-            {/if}
-          </div>
+          <SwarmDetail {wf} {missions} />
         {/if}
 
         <!-- Resume buttons -->
@@ -672,63 +552,67 @@
           {/if}
         </div>
 
-        <!-- Tasks -->
-        {#if wf.tasks.length > 0}
-          <div class="tasks">
-            <div class="tasks-header">
-              Tasks ({wf.tasks.filter(t => t.status === 'done').length}/{wf.total_tasks})
-              <div class="progress-bar">
-                <div
-                  class="progress-fill"
-                  style="width: {wf.total_tasks > 0 ? (wf.tasks.filter(t => t.status === 'done').length / wf.total_tasks) * 100 : 0}%"
-                ></div>
-              </div>
-            </div>
-            {#each expandedTasks.has(wf.id) ? wf.tasks : wf.tasks.slice(0, 5) as task}
-              <div class="task" class:done={task.status === 'done'} class:active={task.status === 'in_progress'}>
-                <span class="task-status">
-                  {task.status === 'done' ? '✓' : task.status === 'in_progress' ? '▶' : '○'}
-                </span>
-                {task.title}
-              </div>
-            {/each}
-            {#if wf.tasks.length > 5}
-              <button
-                class="task-toggle"
-                onclick={() => {
-                  const next = new Set(expandedTasks)
-                  if (next.has(wf.id)) next.delete(wf.id)
-                  else next.add(wf.id)
-                  expandedTasks = next
-                }}
-              >
-                {expandedTasks.has(wf.id) ? 'Show less' : `+${wf.tasks.length - 5} more`}
-              </button>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- Delegated agents -->
-        {#if Object.keys(wf.delegated_agents).length > 0}
-          <div class="delegated">
-            {#each Object.entries(wf.delegated_agents) as [phase, agents]}
-              {#if agents.length > 0}
-                <div class="phase-agents">
-                  <span class="phase-label">{phase}:</span>
-                  {#each agents as agent}
-                    <span class="agent-chip">{agent}</span>
-                  {/each}
+        {#if displayType(wf) === 'swarm'}
+          <!-- Tasks -->
+          {#if wf.tasks.length > 0}
+            <div class="tasks">
+              <div class="tasks-header">
+                Tasks ({wf.tasks.filter(t => t.status === 'done').length}/{wf.total_tasks})
+                <div class="progress-bar">
+                  <div
+                    class="progress-fill"
+                    style="width: {wf.total_tasks > 0 ? (wf.tasks.filter(t => t.status === 'done').length / wf.total_tasks) * 100 : 0}%"
+                  ></div>
                 </div>
+              </div>
+              {#each expandedTasks.has(wf.id) ? wf.tasks : wf.tasks.slice(0, 5) as task}
+                <div class="task" class:done={task.status === 'done'} class:active={task.status === 'in_progress'}>
+                  <span class="task-status">
+                    {task.status === 'done' ? '✓' : task.status === 'in_progress' ? '▶' : '○'}
+                  </span>
+                  {task.title}
+                </div>
+              {/each}
+              {#if wf.tasks.length > 5}
+                <button
+                  class="task-toggle"
+                  onclick={() => {
+                    const next = new Set(expandedTasks)
+                    if (next.has(wf.id)) next.delete(wf.id)
+                    else next.add(wf.id)
+                    expandedTasks = next
+                  }}
+                >
+                  {expandedTasks.has(wf.id) ? 'Show less' : `+${wf.tasks.length - 5} more`}
+                </button>
               {/if}
-            {/each}
-          </div>
+            </div>
+          {/if}
+
+          <!-- Delegated agents -->
+          {#if Object.keys(wf.delegated_agents).length > 0}
+            <div class="delegated">
+              {#each Object.entries(wf.delegated_agents) as [phase, agents]}
+                {#if agents.length > 0}
+                  <div class="phase-agents">
+                    <span class="phase-label">{phase}:</span>
+                    {#each agents as agent}
+                      <span class="agent-chip">{agent}</span>
+                    {/each}
+                  </div>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        {:else}
+          <WorkflowActivity {wf} />
         {/if}
       </div>
     {/each}
   {/if}
 
   <!-- Past workflows + missions (paginated) -->
-  {#if pastItems.length > 0}
+  {#if pastItems.length > 0 && !focusId}
     <div class="section-title">Past ({pastTotal})</div>
     {#each pastItems as item}
       {#if item.kind === 'mission'}
@@ -745,7 +629,7 @@
         <div class="workflow-card past">
           <div class="workflow-header">
             <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
-            <span class="wf-id">{wf.id}</span>
+            <a class="wf-id" href="{WF_HASH}{encodeURIComponent(wf.id)}" onclick={() => { focusId = wf.id }} title="Open agents and tasks of this run">{wf.id}</a>
             <span class="wf-phase" class:aborted={wf.aborted}>{wf.aborted ? 'aborted' : wf.phase}</span>
             <span class="wf-ts">{new Date(wf.updated_at).toLocaleDateString()}</span>
             <div class="wf-actions">
@@ -812,7 +696,10 @@
   .wf-type.swarm { color: #a371f7; background: #2d1f56; }
   .wf-type.bug { color: #f0883e; background: #3d2200; }
   .wf-type.e2e { color: #3fb950; background: #0d3226; }
-  .wf-id { font-size: 13px; font-weight: 600; color: #c9d1d9; flex: 1; }
+  .wf-id { font-size: 13px; font-weight: 600; color: #c9d1d9; flex: 1; text-decoration: none; }
+  a.wf-id:hover { color: #58a6ff; text-decoration: underline; }
+  .focus-back { font-size: 12px; color: #58a6ff; text-decoration: none; align-self: flex-start; }
+  .focus-back:hover { text-decoration: underline; }
   .wf-phase { font-size: 12px; color: #8b949e; }
   .wf-phase.aborted { color: #f85149; }
   .wf-ts { font-size: 11px; color: #8b949e; }
@@ -895,16 +782,6 @@
   .event-ts { font-size: 11px; color: #8b949e; }
 
   /* Mission cards */
-  .swarm-inline {
-    padding: 0 0 4px 0;
-    border-top: 1px solid #21262d;
-    margin-top: 8px;
-  }
-  .swarm-waiting {
-    font-size: 12px; color: #484f58; padding: 10px 0 4px;
-    font-style: italic;
-  }
-
   .mission-card {
     background: #161b22; border: 1px solid #30363d; border-radius: 8px;
     overflow: hidden;
@@ -917,54 +794,9 @@
     font-size: 14px; color: #c9d1d9;
   }
 
-  .mission-view-toggle {
-    display: flex; gap: 4px; padding: 0 0 8px;
-  }
-  .view-btn {
-    background: #21262d; border: 1px solid #30363d; border-radius: 5px;
-    color: #8b949e; font-size: 11px; padding: 3px 10px; cursor: pointer; transition: all 0.1s;
-  }
-  .view-btn:hover { color: #c9d1d9; border-color: #484f58; }
-  .view-btn.active { background: #1f6feb22; border-color: #1f6feb; color: #58a6ff; }
-
   .mission-title { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mission-phase { font-size: 12px; color: #8b949e; }
   .mission-phase.failed { color: #f85149; }
-
-  .detail-section { display: flex; flex-direction: column; gap: 6px; }
-  .detail-label { font-size: 12px; font-weight: 600; color: #8b949e; display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-
-  .workers-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-  .worker-node {
-    display: flex; align-items: center; gap: 6px;
-    background: #21262d; border-radius: 6px; padding: 4px 10px; font-size: 12px;
-  }
-  .worker-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-  .worker-type { color: #c9d1d9; }
-  .worker-status { color: #8b949e; font-size: 11px; }
-
-  .ticket {
-    display: flex; gap: 8px; align-items: center; font-size: 13px; color: #8b949e; padding: 2px 0;
-  }
-  .ticket.done { color: #3fb950; }
-  .ticket.active { color: #a371f7; }
-  .ticket.failed { color: #f85149; }
-  .ticket-icon { width: 16px; text-align: center; flex-shrink: 0; }
-  .ticket-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ticket-domain { font-size: 11px; background: #21262d; padding: 1px 6px; border-radius: 4px; }
-  .ticket-expand { font-size: 9px; color: #484f58; flex-shrink: 0; margin-left: 4px; }
-
-  .ticket-progress-fill { height: 100%; background: #a371f7; border-radius: 2px; transition: width 0.3s; }
-
-  .forge-entry {
-    display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8b949e; padding: 2px 0;
-  }
-  .forge-entry.merged { color: #3fb950; }
-  .forge-entry.conflict { color: #d29922; }
-  .forge-branch { font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .forge-status { font-size: 11px; }
-
-  .detail-loading { font-size: 12px; color: #8b949e; padding: 12px 0; }
 
   /* === Change summary === */
   .change-summary { display: flex; flex-direction: column; gap: 6px; }
@@ -979,63 +811,6 @@
   .cs-item { color: #c9d1d9; background: #21262d; padding: 1px 8px; border-radius: 4px; }
   .cs-item.risk { color: #d29922; background: #2d2200; }
   .cs-tag { font-size: 11px; background: #1f2d1f; color: #3fb950; border: 1px solid #238636; padding: 1px 8px; border-radius: 12px; }
-
-  /* === Swarm live animations === */
-
-  /* Active worker pulse */
-  @keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.6); }
-    50% { box-shadow: 0 0 0 4px rgba(63, 185, 80, 0); }
-  }
-  .worker-dot.active { animation: pulse 2s ease-in-out infinite; }
-
-  /* In-progress ticket spinner */
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .ticket-icon.spinning { display: inline-block; animation: spin 1s linear infinite; }
-
-  /* New element entrance */
-  @keyframes fadeSlideIn {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .worker-node, .ticket, .forge-entry { animation: fadeSlideIn 0.3s ease-out; }
-
-  /* Progress bar shimmer while active */
-  @keyframes shimmer {
-    from { background-position: -200% 0; }
-    to { background-position: 200% 0; }
-  }
-  .ticket-progress-fill.active {
-    background: linear-gradient(90deg, #a371f7 30%, #c9a0ff 50%, #a371f7 70%);
-    background-size: 200% 100%;
-    animation: shimmer 2s linear infinite;
-  }
-
-  /* Failed/stale worker attention shake */
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-2px); }
-    75% { transform: translateX(2px); }
-  }
-  .worker-node.failed { animation: shake 0.4s ease-in-out; }
-  .worker-node.stale { border: 1px solid #d29922; }
-
-  /* Forge merged checkmark scale-in */
-  @keyframes scaleIn {
-    from { transform: scale(0); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
-  }
-  .forge-check { display: inline-block; color: #3fb950; font-weight: bold; animation: scaleIn 0.3s ease-out; }
-
-  /* Worker extra info */
-  .worker-tickets { font-size: 10px; color: #58a6ff; background: #1f3056; padding: 1px 5px; border-radius: 3px; }
-  .worker-heartbeat { font-size: 10px; color: #8b949e; }
-
-  /* Ticket worker chip */
-  .ticket-worker-chip { font-size: 10px; background: #2d1f56; color: #a371f7; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
-
-  /* Smooth status transitions on tickets */
-  .ticket { transition: color 0.3s, opacity 0.3s; }
 
   /* Plan/Design doc sections */
   .doc-section { display: flex; flex-direction: column; gap: 0; }

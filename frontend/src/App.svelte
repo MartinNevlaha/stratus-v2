@@ -11,6 +11,7 @@
   import Evolution from './routes/Evolution.svelte'
   import CodeQuality from './routes/CodeQuality.svelte'
   import Terminal from './components/Terminal.svelte'
+  import ToastStack from './components/ToastStack.svelte'
 
   onMount(() => {
     initStore()
@@ -58,6 +59,7 @@
 </script>
 
 <svelte:window onmousemove={onMouseMove} onmouseup={onMouseUp} />
+<ToastStack />
 
 <div class="app">
   <header>

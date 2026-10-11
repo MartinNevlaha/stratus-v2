@@ -45,6 +45,7 @@
     tech_debt_threshold: 50,
     reviewer_timeout_minutes: 30,
     ticket_timeout_minutes: 30,
+    workflow_token_budget: 0,
     llm: emptyLLM(),
   })
 
@@ -613,6 +614,10 @@
         <div class="form-group">
           <label>Ticket timeout (minutes)</label>
           <input type="number" min="1" bind:value={cfg.ticket_timeout_minutes} />
+        </div>
+        <div class="form-group">
+          <label>Workflow token budget (0 = off)</label>
+          <input type="number" min="0" step="10000" bind:value={cfg.workflow_token_budget} />
         </div>
       </div>
 

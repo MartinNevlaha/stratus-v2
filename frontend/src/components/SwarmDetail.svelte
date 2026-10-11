@@ -5,6 +5,7 @@
   import SwarmGraph from './SwarmGraph.svelte'
   import SignalBus from './SignalBus.svelte'
   import EvidenceTrail from './EvidenceTrail.svelte'
+  import { relativeTime, workerStatusColor, ticketIcon, toggleSet } from '$lib/ui'
   import type { WorkflowState, SwarmMission, SwarmMissionDetail } from '$lib/types'
 
   interface Props {
@@ -21,48 +22,11 @@
   let _heartbeatTick = $state(0)
   let _pollInterval: ReturnType<typeof setInterval> | undefined
 
-  function workerStatusColor(status: string): string {
-    switch (status) {
-      case 'active': return '#3fb950'
-      case 'pending': return '#8b949e'
-      case 'stale': return '#d29922'
-      case 'done': return '#58a6ff'
-      case 'failed': case 'killed': return '#f85149'
-      default: return '#8b949e'
-    }
-  }
-
-  function ticketIcon(status: string): string {
-    switch (status) {
-      case 'done': return '\u2713'
-      case 'in_progress': return '\u25B6'
-      case 'assigned': return '\u25CB'
-      case 'failed': return '\u2717'
-      case 'blocked': return '\u2758'
-      default: return '\u25CB'
-    }
-  }
-
   function workerTicketCounts(detail: SwarmMissionDetail, workerId: string): string {
     const assigned = detail.tickets.filter(t => t.worker_id === workerId)
     if (assigned.length === 0) return ''
     const done = assigned.filter(t => t.status === 'done').length
     return `${done}/${assigned.length}`
-  }
-
-  function relativeTime(ts: string): string {
-    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-    if (diff < 5) return 'just now'
-    if (diff < 60) return `${diff}s ago`
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    return `${Math.floor(diff / 3600)}h ago`
-  }
-
-  function toggleSet(set: Set<string>, id: string): Set<string> {
-    const next = new Set(set)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
   }
 
   async function loadSwarmDetail(missionList?: SwarmMission[]) {
@@ -233,6 +197,7 @@
   .ticket-domain { font-size: 11px; background: #21262d; padding: 1px 6px; border-radius: 4px; }
   .ticket-expand { font-size: 9px; color: #484f58; flex-shrink: 0; margin-left: 4px; }
 
+  .progress-bar { flex: 1; height: 4px; background: #30363d; border-radius: 2px; }
   .ticket-progress-fill { height: 100%; background: #a371f7; border-radius: 2px; transition: width 0.3s; }
 
   .forge-entry {

@@ -3,6 +3,13 @@ import type {
   Event,
   SearchResult,
   WorkflowState,
+  WorkflowAgentsResponse,
+  AgentTranscript,
+  WorkflowDenial,
+  MissionAgent,
+  AttentionItem,
+  RunComparison,
+  WorkflowLog,
   ChangeSummary,
   VersionInfo,
   SwarmMission,
@@ -122,6 +129,29 @@ export const triggerReIndex = () => post<{ status: string }>('/retrieve/index')
 
 // Workflows
 export const listWorkflows = () => get<WorkflowState[]>('/workflows')
+export const getWorkflowAgents = (id: string) =>
+  get<WorkflowAgentsResponse>(`/workflows/${encodeURIComponent(id)}/agents`)
+export const getWorkflowDenials = (id: string) =>
+  get<{ denials: WorkflowDenial[] }>(`/workflows/${encodeURIComponent(id)}/denials`)
+export const getAttention = () => get<{ items: AttentionItem[] }>('/workflow-agents/attention')
+export const getRunSummary = (id: string) =>
+  get<{ markdown: string }>(`/workflows/${encodeURIComponent(id)}/run-summary`)
+export const getRunComparison = (id: string) =>
+  get<RunComparison>(`/workflows/${encodeURIComponent(id)}/comparison`)
+export const getAgentTranscript = (workflowId: string, agentId: string) =>
+  get<AgentTranscript>(`/workflows/${encodeURIComponent(workflowId)}/agents/${encodeURIComponent(agentId)}/transcript`)
+export const resetTask = (workflowId: string, index: number) =>
+  post<WorkflowState>(`/workflows/${encodeURIComponent(workflowId)}/tasks/${index}/reset`)
+export const skipTask = (workflowId: string, index: number) =>
+  post<WorkflowState>(`/workflows/${encodeURIComponent(workflowId)}/tasks/${index}/skip`)
+export const listAllAgents = (params?: Record<string, string>) =>
+  get<{ agents: MissionAgent[] }>('/workflow-agents', params)
+export const abortWorkflow = (id: string) =>
+  post<WorkflowState>(`/workflows/${encodeURIComponent(id)}/abort`)
+export const getWorkflowLogs = (id: string) =>
+  get<WorkflowLog[]>(`/workflows/${encodeURIComponent(id)}/logs`)
+export const setWorkflowAgentStatus = (agentId: string, status: 'done' | 'failed') =>
+  put<{ id: string; status: string }>(`/workflow-agents/${encodeURIComponent(agentId)}/status`, { status })
 export const deleteWorkflow = (id: string) => del<{ deleted: boolean }>(`/workflows/${id}`)
 export const listPastItems = (limit = 20, offset = 0) =>
   get<PastItemsResponse>('/past', { limit: String(limit), offset: String(offset) })

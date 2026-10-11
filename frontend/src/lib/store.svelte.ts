@@ -14,11 +14,33 @@ interface AppState {
   updateLog: string[]
   updateError: string | null
   swarmUpdateCounter: number
+  workflowActivityCounter: number
+  toasts: Toast[]
   lastHeartbeats: Record<string, number>
   guardianAlertCount: number
   activeTab: TabId
   pendingTerminalInput: string | null
   language: Language
+}
+
+export interface Toast {
+  id: number
+  kind: 'info' | 'warn' | 'error' | 'success'
+  text: string
+  href?: string
+}
+
+let toastSeq = 0
+const TOAST_MS = 8000
+
+export function pushToast(kind: Toast['kind'], text: string, href?: string) {
+  const id = ++toastSeq
+  appState.toasts = [...appState.toasts.slice(-4), { id, kind, text, href }]
+  setTimeout(() => dismissToast(id), TOAST_MS)
+}
+
+export function dismissToast(id: number) {
+  appState.toasts = appState.toasts.filter(t => t.id !== id)
 }
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
@@ -33,6 +55,8 @@ export const appState: AppState = $state({
   updateLog: [],
   updateError: null,
   swarmUpdateCounter: 0,
+  workflowActivityCounter: 0,
+  toasts: [],
   lastHeartbeats: {},
   guardianAlertCount: 0,
   activeTab: 'overview',
@@ -132,6 +156,40 @@ export function initStore() {
     const data = msg.payload as { id?: string; ts?: string } | undefined
     if (data?.id) appState.lastHeartbeats[data.id] = Date.now()
     emitSwarmUpdate()
+  })
+
+  // Agent/task activity of normal workflows
+  const activityTypes = ['agent_started', 'agent_status', 'agent_activity', 'task_started', 'task_completed', 'workflow_log']
+  for (const type of activityTypes) {
+    wsClient.on(type, () => { appState.workflowActivityCounter++ })
+  }
+
+  // Things worth interrupting for: a failing review, a finished workflow.
+  wsClient.on('agent_status', (msg) => {
+    const d = msg.payload as { workflow_id?: string; agent_id?: string; status?: string; verdict?: string; agent_type?: string } | undefined
+    const href = d?.workflow_id ? `#/workflow/${encodeURIComponent(d.workflow_id)}` : undefined
+    const who = (d?.agent_type ?? 'agent').replace('delivery-', '')
+    if (d?.verdict === 'FAIL') pushToast('warn', `Review FAILED (${who})`, href)
+    else if (d?.status === 'failed') pushToast('error', `${who} marked as failed`, href)
+  })
+  // Alerts that mean something is stuck or over budget; routine health alerts stay in Guardian.
+  const toastAlertTypes = new Set(['stale_agent', 'token_budget', 'stale_worker', 'reviewer_timeout', 'agent_failed', 'review_failed'])
+  wsClient.on('guardian_alert', (msg) => {
+    const a = msg.payload as { type?: string; severity?: string; message?: string; metadata?: { workflow_id?: string } } | undefined
+    if (!a?.type || !toastAlertTypes.has(a.type) || !a.message) return
+    const wfId = a.metadata?.workflow_id
+    pushToast(a.severity === 'critical' ? 'error' : 'warn', a.message, wfId ? `#/workflow/${encodeURIComponent(wfId)}` : undefined)
+  })
+  // Claude is waiting for the human: a permission prompt, an idle prompt or a question.
+  wsClient.on('workflow_waiting', (msg) => {
+    const d = msg.payload as { workflow_id?: string; title?: string; message?: string } | undefined
+    if (!d?.workflow_id) return
+    const what = d.message ? `: ${d.message}` : ''
+    pushToast('info', `${d.title || d.workflow_id} is waiting for you${what}`.slice(0, 160), `#/workflow/${encodeURIComponent(d.workflow_id)}`)
+  })
+  wsClient.on('workflow_completed', (msg) => {
+    const d = msg.payload as { workflow_id?: string } | undefined
+    if (d?.workflow_id) pushToast('success', `Workflow ${d.workflow_id} completed`, `#/workflow/${encodeURIComponent(d.workflow_id)}`)
   })
 
   wsClient.on('guardian_alert', () => {
