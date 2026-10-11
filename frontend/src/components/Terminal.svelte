@@ -13,7 +13,24 @@
   let term: Terminal
   let fitAddon: FitAddon
   let ws: WebSocket | null = null
-  let sessionId = `terminal-${Date.now()}`
+  // Kept across reloads so the server-side PTY can be reattached.
+  const SESSION_KEY = 'stratus-terminal-session'
+  function loadSessionId(): string {
+    try {
+      const saved = localStorage.getItem(SESSION_KEY)
+      if (saved) return saved
+    } catch {
+      // storage unavailable: fall through to a fresh id
+    }
+    const id = `terminal-${Date.now()}`
+    try {
+      localStorage.setItem(SESSION_KEY, id)
+    } catch {
+      // not persisted; the session just won't survive a reload
+    }
+    return id
+  }
+  let sessionId = loadSessionId()
   let connected = $state(false)
   let error = $state<string | null>(null)
 
@@ -375,7 +392,12 @@
           term.writeln(`\r\n\x1b[31m[error: ${msg.data}]\x1b[0m`)
           break
         case 'create':
-          term.writeln('\x1b[32mConnected\x1b[0m\r\n')
+          if (msg.data?.status === 'attached') {
+            // The server replays its scrollback next; drop what is already shown.
+            term.reset()
+          } else {
+            term.writeln('\x1b[32mConnected\x1b[0m\r\n')
+          }
           break
       }
     }

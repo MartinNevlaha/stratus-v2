@@ -72,6 +72,15 @@ func (m *Manager) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var activeSess *Session
+	var detach func()
+	// Leave the PTY running when the client goes away so it can be reattached.
+	// cancel first so a blocked send cannot stall detach.
+	defer func() {
+		cancel()
+		if detach != nil {
+			detach()
+		}
+	}()
 
 	for {
 		var msg clientMsg
@@ -86,32 +95,52 @@ func (m *Manager) ServeWS(w http.ResponseWriter, r *http.Request) {
 				send(serverMsg{Type: MsgError, Data: "create requires id"})
 				continue
 			}
-			// Close any existing session before creating a new one (prevent leaks).
 			if activeSess != nil {
-				_ = activeSess.Close()
-				activeSess = nil
+				detach()
+				if activeSess.id != d.ID {
+					// Switching to a different session on one connection: close the
+					// old one to prevent leaks.
+					_ = activeSess.Close()
+				}
+				activeSess, detach = nil, nil
 			}
-			sess, err := m.Create(d.ID)
-			if err != nil {
-				send(serverMsg{Type: MsgError, Data: err.Error()})
-				continue
+
+			status := "attached"
+			sess, ok := m.Get(d.ID)
+			if !ok {
+				var err error
+				sess, err = m.Create(d.ID)
+				if err != nil {
+					send(serverMsg{Type: MsgError, Data: err.Error()})
+					continue
+				}
+				status = "ok"
 			}
 			activeSess = sess
-			send(serverMsg{Type: MsgCreate, Data: map[string]string{"id": d.ID, "status": "ok"}})
+			send(serverMsg{Type: MsgCreate, Data: map[string]string{"id": d.ID, "status": status}})
 
-			// Stream PTY output to client via the mutex-protected send.
+			// Stream PTY output to the client via the mutex-protected send. Attach
+			// returns the scrollback atomically with the subscription, so the
+			// replay is followed by live output with no gap or duplicate.
+			// The gate holds live output back until the replay has been sent.
+			var gate sync.Mutex
+			gate.Lock()
+			var replay []byte
+			replay, detach = sess.Attach(func(b []byte) {
+				gate.Lock()
+				gate.Unlock()
+				send(serverMsg{Type: MsgOutput, Data: string(b)})
+			})
+			if len(replay) > 0 {
+				send(serverMsg{Type: MsgOutput, Data: string(replay)})
+			}
+			gate.Unlock()
 			go func() {
-				buf := make([]byte, 4096)
-				for {
-					n, err := sess.Read(buf)
-					if n > 0 {
-						send(serverMsg{Type: MsgOutput, Data: string(buf[:n])})
-					}
-					if err != nil {
-						send(serverMsg{Type: MsgExit})
-						cancel()
-						return
-					}
+				select {
+				case <-sess.Exited():
+					send(serverMsg{Type: MsgExit})
+					cancel()
+				case <-ctx.Done():
 				}
 			}()
 

@@ -45,6 +45,19 @@ export function dismissToast(id: number) {
 
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
 
+const TAB_KEY = 'stratus-active-tab'
+const TAB_IDS: TabId[] = ['overview', 'agents', 'memory', 'retrieval', 'insight', 'wiki', 'evolution', 'code-quality', 'settings', 'terminal']
+
+function loadActiveTab(): TabId {
+  try {
+    const saved = localStorage.getItem(TAB_KEY)
+    if (saved && (TAB_IDS as string[]).includes(saved)) return saved as TabId
+  } catch {
+    // storage unavailable: use the default tab
+  }
+  return 'overview'
+}
+
 export const appState: AppState = $state({
   dashboard: null,
   connected: false,
@@ -59,13 +72,18 @@ export const appState: AppState = $state({
   toasts: [],
   lastHeartbeats: {},
   guardianAlertCount: 0,
-  activeTab: 'overview',
+  activeTab: loadActiveTab(),
   pendingTerminalInput: null,
   language: 'en',
 })
 
 export function setActiveTab(id: TabId) {
   appState.activeTab = id
+  try {
+    localStorage.setItem(TAB_KEY, id)
+  } catch {
+    // not persisted; the tab just resets on reload
+  }
 }
 
 export function requestTerminalPrefill(text: string) {
