@@ -218,6 +218,8 @@ For tickets with depends_on: poll for TICKET_DONE matching dependency IDs. If no
 
 **CRITICAL:** Without the `worker_instructions` block, workers will NOT call `swarm_ticket_update` and ticket progress will be invisible on the dashboard. Always include it.
 
+The block lists the MCP calls **and** an equivalent Bash `curl` fallback (delivery agents always have Bash, but may not get the `mcp__stratus__*` tools), plus a `SWARM_WORKER_ID:` line. When a worker stops without having reported, Stratus closes its still `assigned`/`in_progress` tickets as `done` with the agent's final report as the result, prefixed `[auto-closed: agent stopped without reporting]`; tickets the worker reported itself (`done`, `failed`, `blocked`) are never overwritten. This relies on the stratus plugin's `SubagentStop` hook, so run `stratus refresh` after updating.
+
 Record the delegation:
 
 ```bash

@@ -388,6 +388,7 @@ func (s *Server) handleTransitionPhase(w http.ResponseWriter, r *http.Request) {
 			"workflow_id": id,
 			"success":     true,
 		})
+		s.storeRunSummary(state)
 		go s.generateChangeSummary(id, state.BaseCommit)
 	}
 	json200(w, state)
@@ -493,13 +494,14 @@ func (s *Server) handleRecordDelegation(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleSetTasks(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		Tasks []string `json:"tasks"`
+		Tasks     []string `json:"tasks"`
+		DependsOn [][]int  `json:"depends_on"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	state, err := s.coordinator.SetTasks(id, body.Tasks)
+	state, err := s.coordinator.SetTasksWithDeps(id, body.Tasks, body.DependsOn)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -521,6 +523,10 @@ func (s *Server) handleStartTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.BroadcastJSON("workflow_updated", state)
+	s.hub.BroadcastJSON("task_started", map[string]any{
+		"workflow_id": id,
+		"task_index":  index,
+	})
 	json200(w, state)
 }
 

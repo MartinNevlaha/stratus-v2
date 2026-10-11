@@ -118,9 +118,12 @@ export function goalCondition(wf: Workflow, isSwarm: boolean): string {
     : ', and the last code review shown has verdict PASS'
   const skill = wf.type === 'e2e' ? 'e2e' : isSwarm ? 'swarm' : wf.complexity === 'complex' ? 'spec-complex' : 'resume'
   return `/goal Stratus workflow ${wf.id} is complete: the latest mcp__stratus__get_workflow output for ${wf.id} ` +
-    `in this conversation shows phase "complete" and every task done${evidence}. Work through the remaining ` +
+    `in this conversation (or the same fields from GET /api/workflows/${wf.id} when that tool is unavailable) ` +
+    `shows phase "complete" and every task done${evidence}. Work through the remaining ` +
     `phases in order; if the coordinator instructions for this workflow are not in this conversation, read ` +
     `.claude/skills/${skill}/SKILL.md and continue ${wf.id} from its current phase as it describes. ` +
     `Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with ` +
-    `AskUserQuestion. Stop after 40 turns.`
+    `AskUserQuestion. This goal is also met, and you must then stop, when you cannot make progress without ` +
+    `me: your last message names exactly what is needed (a decision, a missing mcp__stratus tool, a failing ` +
+    `guard); do not retry a blocked step in later turns. Stop after 40 turns.`
 }

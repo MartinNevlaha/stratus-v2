@@ -78,6 +78,9 @@ describe('hud', () => {
     expect(spec).toContain('the last code review shown has verdict PASS')
     expect(spec).toContain('read .claude/skills/resume/SKILL.md and continue spec-a from its current phase')
     expect(spec).toContain('Stop after 40 turns.')
+    // A goal the model cannot satisfy must still be able to end: handing back a blocker counts.
+    expect(spec).toContain('also met, and you must then stop')
+    expect(spec).toContain('GET /api/workflows/spec-a')
     expect(spec.length - '/goal '.length).toBeLessThanOrEqual(4000)
 
     const e2e = goalCondition(wf({ id: 'e2e-login', type: 'e2e' }), false)

@@ -143,7 +143,7 @@ curl -sS -X PUT $BASE/api/swarm/missions/<mission-id>/status \
 **Autopilot (Claude Code, optional):** once the mission is active, offer the user a goal that keeps this workflow running to completion without a prompt per step. Print it exactly, with the workflow id filled in:
 
 ```
-/goal Stratus workflow <slug> is complete: the latest mcp__stratus__get_workflow output for <slug> in this conversation shows phase "complete" and every task done, and the last code review shown has verdict PASS. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/swarm/SKILL.md and continue <slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. Stop after 40 turns.
+/goal Stratus workflow <slug> is complete: the latest mcp__stratus__get_workflow output for <slug> in this conversation (or the same fields from GET /api/workflows/<slug> when that tool is unavailable) shows phase "complete" and every task done, and the last code review shown has verdict PASS. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/swarm/SKILL.md and continue <slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. This goal is also met, and you must then stop, when you cannot make progress without me: your last message names exactly what is needed (a decision, a missing mcp__stratus tool, a failing guard); do not retry a blocked step in later turns. Stop after 40 turns.
 ```
 
 Tell the user it starts when they send it, runs unattended only in auto mode, and stops with `/goal clear`; the `/stratus` pane's Autopilot button fills in the same goal. Do not wait for an answer — continue with the next phase.
@@ -211,6 +211,8 @@ For tickets with depends_on: poll for TICKET_DONE matching dependency IDs. If no
 ```
 
 **CRITICAL:** Without the `worker_instructions` block, workers will NOT call `swarm_ticket_update` and ticket progress will be invisible on the dashboard. Always include it.
+
+The block lists the MCP calls **and** an equivalent Bash `curl` fallback (delivery agents always have Bash, but may not get the `mcp__stratus__*` tools), plus a `SWARM_WORKER_ID:` line. When a worker stops without having reported, Stratus closes its still `assigned`/`in_progress` tickets as `done` with the agent's final report as the result, prefixed `[auto-closed: agent stopped without reporting]`; tickets the worker reported itself (`done`, `failed`, `blocked`) are never overwritten. This relies on the stratus plugin's `SubagentStop` hook, so run `stratus refresh` after updating.
 
 ### 2d. Monitor progress — watch, don't sleep
 

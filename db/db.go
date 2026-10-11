@@ -298,6 +298,9 @@ SELECT id, title, content, doc_type FROM docs;
 	// wiki second-brain: workflow-scoped pages
 	`ALTER TABLE wiki_pages ADD COLUMN workflow_id TEXT`,
 	`ALTER TABLE wiki_pages ADD COLUMN feature_slug TEXT`,
+	// workflow agents: token totals added after the table first shipped in dev builds
+	`ALTER TABLE workflow_agents ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE workflow_agents ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS wiki_pages_workflow_uniq ON wiki_pages(workflow_id, feature_slug) WHERE workflow_id IS NOT NULL`,
 }
 

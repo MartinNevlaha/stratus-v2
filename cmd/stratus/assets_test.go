@@ -77,7 +77,7 @@ func TestCoordinators_OfferAutopilotGoal(t *testing.T) {
 			t.Errorf("%s offers no Autopilot /goal", skill)
 			continue
 		}
-		for _, part := range []string{"mcp__stratus__get_workflow output for", `shows phase "complete"`, "AskUserQuestion", "Stop after 40 turns."} {
+		for _, part := range []string{"mcp__stratus__get_workflow output for", `shows phase "complete"`, "AskUserQuestion", "also met, and you must then stop", "GET /api/workflows/", "Stop after 40 turns."} {
 			if !strings.Contains(goal, part) {
 				t.Errorf("%s goal lacks %q", skill, part)
 			}

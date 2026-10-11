@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,9 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/db"
 	insightllm "github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 )
+
+// maxWorkflowTokenBudget caps workflow_token_budget at a value no real workflow reaches.
+const maxWorkflowTokenBudget = 1_000_000_000
 
 // GET /api/guardian/alerts
 func (s *Server) handleListGuardianAlerts(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +90,10 @@ func (s *Server) handleUpdateGuardianConfig(w http.ResponseWriter, r *http.Reque
 
 	if err := validateLLMConfig(incoming.LLM, true); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if incoming.WorkflowTokenBudget < 0 || incoming.WorkflowTokenBudget > maxWorkflowTokenBudget {
+		jsonErr(w, http.StatusBadRequest, fmt.Sprintf("workflow_token_budget must be between 0 and %d", maxWorkflowTokenBudget))
 		return
 	}
 

@@ -213,6 +213,8 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			req("workflow_id", "string", "Workflow ID to transition"),
 			req("phase", "string", "Target phase (e.g. 'implement', 'verify', 'review', 'complete')"),
 			opt("tasks", "array", "Task titles to set before transitioning (for plan→implement)"),
+			optItems("task_dependencies", "Optional, aligned with tasks: for each task an array of earlier task indexes (0-based) it depends on, e.g. [[],[0],[0,1]]",
+				map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}),
 			opt("plan_content", "string", "Full markdown plan content to set before transitioning"),
 		),
 		Handler: func(args map[string]any) (any, error) {
@@ -228,7 +230,15 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			if tasks, err := convertTasksArg(args["tasks"]); err != nil {
 				return nil, fmt.Errorf("invalid tasks: %w", err)
 			} else if len(tasks) > 0 {
-				if _, err := client.post(fmt.Sprintf("/api/workflows/%s/tasks", id), map[string]any{"tasks": tasks}); err != nil {
+				payload := map[string]any{"tasks": tasks}
+				deps, err := convertDepsArg(args["task_dependencies"])
+				if err != nil {
+					return nil, err
+				}
+				if len(deps) > 0 {
+					payload["depends_on"] = deps
+				}
+				if _, err := client.post(fmt.Sprintf("/api/workflows/%s/tasks", id), payload); err != nil {
 					return nil, fmt.Errorf("failed to set tasks: %w", err)
 				}
 			}
@@ -885,7 +895,11 @@ func obj(fields ...map[string]any) map[string]any {
 		name := f["name"].(string)
 		prop := map[string]any{"type": f["type"], "description": f["description"]}
 		if f["type"] == "array" {
-			prop["items"] = map[string]any{"type": "string"}
+			if items, ok := f["items"].(map[string]any); ok {
+				prop["items"] = items
+			} else {
+				prop["items"] = map[string]any{"type": "string"}
+			}
 		}
 		properties[name] = prop
 		if r, ok := f["required"].(bool); ok && r {
@@ -905,6 +919,47 @@ func req(name, typ, desc string) map[string]any {
 
 func opt(name, typ, desc string) map[string]any {
 	return map[string]any{"name": name, "type": typ, "description": desc}
+}
+
+// optItems is an optional array argument whose items follow the given schema
+// (obj otherwise declares array items as strings).
+func optItems(name, desc string, items map[string]any) map[string]any {
+	return map[string]any{"name": name, "type": "array", "description": desc, "items": items}
+}
+
+// convertDepsArg turns task_dependencies into per-task index lists. Each entry is an array of
+// numbers, or a JSON-encoded array string for clients that stringify nested arrays.
+func convertDepsArg(v any) ([][]int, error) {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, nil
+	}
+	out := make([][]int, 0, len(arr))
+	for i, entry := range arr {
+		var nums []any
+		switch e := entry.(type) {
+		case []any:
+			nums = e
+		case string:
+			if err := json.Unmarshal([]byte(e), &nums); err != nil {
+				return nil, fmt.Errorf("task_dependencies[%d]: invalid JSON array: %w", i, err)
+			}
+		case nil:
+			nums = nil
+		default:
+			return nil, fmt.Errorf("task_dependencies[%d]: expected an array of task indexes, got %T", i, entry)
+		}
+		deps := make([]int, 0, len(nums))
+		for _, n := range nums {
+			f, ok := n.(float64)
+			if !ok || f != float64(int(f)) {
+				return nil, fmt.Errorf("task_dependencies[%d]: %v is not an integer task index", i, n)
+			}
+			deps = append(deps, int(f))
+		}
+		out = append(out, deps)
+	}
+	return out, nil
 }
 
 func intArg(args map[string]any, key string, def int) int {

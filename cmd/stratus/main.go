@@ -623,6 +623,7 @@ var hookHandlers = map[string]hooks.Handler{
 	"teammate_idle":            hooks.TeammateIdle,
 	"task_completed":           hooks.TaskCompleted,
 	"session_start":            hooks.SessionStart,
+	"agent_activity":           hooks.AgentActivity,
 }
 
 func parseInitFlags() (force bool, target string) {

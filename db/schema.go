@@ -1006,4 +1006,45 @@ CREATE TABLE IF NOT EXISTS code_file_cache (
 );
 
 CREATE INDEX IF NOT EXISTS idx_code_file_cache_score ON code_file_cache(composite_score DESC);
+
+-- Workflow agents: subagents observed by hooks inside spec/bug/e2e workflows
+CREATE TABLE IF NOT EXISTS workflow_agents (
+    id              TEXT PRIMARY KEY,
+    workflow_id     TEXT NOT NULL,
+    session_id      TEXT NOT NULL DEFAULT '',
+    agent_type      TEXT NOT NULL DEFAULT '',
+    phase           TEXT NOT NULL DEFAULT '',
+    task_index      INTEGER,
+    status          TEXT NOT NULL DEFAULT 'running',
+    started_at      TEXT NOT NULL,
+    ended_at        TEXT NOT NULL DEFAULT '',
+    last_activity   TEXT NOT NULL,
+    tool_calls      INTEGER NOT NULL DEFAULT 0,
+    last_tool       TEXT NOT NULL DEFAULT '',
+    files           TEXT NOT NULL DEFAULT '[]',
+    transcript_path TEXT NOT NULL DEFAULT '',
+    verdict         TEXT NOT NULL DEFAULT '',
+    must_fix        INTEGER NOT NULL DEFAULT 0,
+    should_fix      INTEGER NOT NULL DEFAULT 0,
+    suggestion      INTEGER NOT NULL DEFAULT 0,
+    tokens_in       INTEGER NOT NULL DEFAULT 0,
+    tokens_out      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_agents_workflow ON workflow_agents(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_agents_status ON workflow_agents(status);
+
+-- Workflow logs: per-tool-call activity feed for a workflow
+CREATE TABLE IF NOT EXISTS workflow_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id TEXT NOT NULL DEFAULT '',
+    session_id  TEXT NOT NULL DEFAULT '',
+    ts          TEXT NOT NULL,
+    tool_name   TEXT NOT NULL,
+    summary     TEXT NOT NULL DEFAULT '',
+    created_ms  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_logs_workflow ON workflow_logs(workflow_id, id);
+CREATE INDEX IF NOT EXISTS idx_workflow_logs_session ON workflow_logs(session_id, id);
 `

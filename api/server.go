@@ -30,6 +30,10 @@ import (
 const emitEventTimeout = 5 * time.Second
 
 type Server struct {
+	// idleThrottle limits idle_prompt "waiting" broadcasts so a finished turn per prompt
+	// does not toast every time; its zero value is ready to use.
+	idleThrottle waitingThrottle
+
 	db                   *db.DB
 	coordinator          *orchestration.Coordinator
 	vexor                *vexor.Client
@@ -305,6 +309,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/workflows/{id}/summary", s.handleGetSummary)
 	mux.HandleFunc("GET /api/workflows/{id}/summary.md", s.handleGetSummaryMD)
 	mux.HandleFunc("PUT /api/workflows/{id}/summary", s.handleUpdateSummary)
+	mux.HandleFunc("GET /api/workflows/{id}/agents", s.handleListWorkflowAgents)
+	mux.HandleFunc("GET /api/workflows/{id}/logs", s.handleListWorkflowLogs)
+	mux.HandleFunc("GET /api/workflows/{id}/agents/{agent}/transcript", s.handleAgentTranscript)
+	mux.HandleFunc("POST /api/workflows/{id}/tasks/{index}/reset", s.handleResetTask)
+	mux.HandleFunc("POST /api/workflows/{id}/tasks/{index}/skip", s.handleSkipTask)
+	mux.HandleFunc("GET /api/workflow-agents", s.handleListAllAgents)
+	mux.HandleFunc("GET /api/workflows/{id}/denials", s.handleWorkflowDenials)
+	mux.HandleFunc("GET /api/workflows/{id}/run-summary", s.handleRunSummary)
+	mux.HandleFunc("GET /api/workflows/{id}/comparison", s.handleRunComparison)
+	mux.HandleFunc("GET /api/workflow-agents/attention", s.handleAttention)
+	mux.HandleFunc("POST /api/workflow-agents/events", s.handleWorkflowAgentEvent)
+	mux.HandleFunc("PUT /api/workflow-agents/{id}/status", s.handleSetWorkflowAgentStatus)
 
 	// System
 	mux.HandleFunc("GET /api/system/version", s.handleVersion)

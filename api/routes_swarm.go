@@ -205,7 +205,7 @@ func (s *Server) handleSpawnWorker(w http.ResponseWriter, r *http.Request) {
 		"status":        worker.Status,
 		"created_at":    worker.CreatedAt,
 		"updated_at":    worker.UpdatedAt,
-		"worker_instructions": buildWorkerInstructions(worker),
+		"worker_instructions": buildWorkerInstructions(worker, s.apiBase()),
 	}
 	json200(w, resp)
 }
@@ -896,17 +896,34 @@ func scanPlaceholders(diff string) []string {
 	return found
 }
 
+// apiBase is the URL workers use to reach this server from a shell.
+func (s *Server) apiBase() string {
+	port := 41777
+	if s.cfg != nil && s.cfg.Port > 0 {
+		port = s.cfg.Port
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
+}
+
 // buildWorkerInstructions generates the swarm instruction block that must be
 // included in every worker agent's prompt. Without these instructions, workers
-// will not call swarm_ticket_update and ticket status will never change.
-func buildWorkerInstructions(w *db.SwarmWorker) string {
+// will not report ticket status and the dashboard shows everything as assigned.
+//
+// Subagents do not always get the mcp__stratus__* tools (the MCP server may be unavailable
+// to them), but every delivery agent has Bash, so the same calls are given as curl too.
+// The SWARM_WORKER_ID line is also how the SubagentStop hook identifies the worker and
+// closes its tickets when the agent finishes without reporting.
+func buildWorkerInstructions(w *db.SwarmWorker, apiBase string) string {
 	return fmt.Sprintf(`## Swarm Worker Protocol (MANDATORY)
 
 You are a swarm worker in an isolated git worktree.
 
 **Identity:** Worker %s | Worktree: %s | Branch: %s | Mission: %s
+SWARM_WORKER_ID: %s
 
-**You MUST call these MCP tools to report progress — without them your work is invisible:**
+**You MUST report progress — without it your work is invisible on the dashboard.**
+Use the MCP tools below when they are available to you. If you have no mcp__stratus__* tools
+(check your tool list), use the equivalent Bash curl calls further down. Never skip reporting.
 
 1. At start: swarm_heartbeat(worker_id="%s")
 2. Before each ticket: swarm_ticket_update(ticket_id="<TICKET_ID>", status="in_progress")
@@ -922,7 +939,17 @@ You are a swarm worker in an isolated git worktree.
 - Commit regularly — small, atomic commits on your branch
 - Poll signals periodically: swarm_signals(worker_id="%s")
 - Tickets have max 5 revisions — report failure rather than looping
-- Before calling functions from other modules, verify the function signature and parameter names match what actually exists`,
-		w.ID, w.WorktreePath, w.BranchName, w.MissionID,
-		w.ID, w.ID, w.ID, w.ID, w.WorktreePath, w.ID)
+- Before calling functions from other modules, verify the function signature and parameter names match what actually exists
+
+**Bash fallback (identical effect, needs only Bash):**
+- Start / heartbeat: curl -s -X POST %s/api/swarm/workers/%s/heartbeat
+- Ticket status:     curl -s -X PUT %s/api/swarm/tickets/<TICKET_ID>/status -H 'Content-Type: application/json' -d '{"status":"in_progress"}'
+                     (status: in_progress | done | failed | blocked; add "result":"<summary or reason>" when done or failed)
+- Signal:            curl -s -X POST %s/api/swarm/signals -H 'Content-Type: application/json' -d '{"mission_id":"%s","from_worker":"%s","type":"TICKET_DONE","payload":"{\"ticket_id\":\"<TICKET_ID>\"}"}'
+- Check the response: a JSON ticket object means success; an HTML page means the URL is wrong (%s/api/... is the API).
+- When your last ticket is finished, say so in your final message; Stratus also closes your open tickets when you stop, but an explicit report with a result is better.
+- Worker id for every call above: %s`,
+		w.ID, w.WorktreePath, w.BranchName, w.MissionID, w.ID,
+		w.ID, w.ID, w.ID, w.ID, w.WorktreePath, w.ID,
+		apiBase, w.ID, apiBase, apiBase, w.MissionID, w.ID, apiBase, w.ID)
 }

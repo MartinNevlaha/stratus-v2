@@ -115,7 +115,7 @@ phase: "fix"
 **Autopilot (Claude Code, optional):** once the transition succeeds, offer the user a goal that keeps this workflow running to completion without a prompt per step. Print it exactly, with the workflow id filled in:
 
 ```
-/goal Stratus workflow bug-<slug> is complete: the latest mcp__stratus__get_workflow output for bug-<slug> in this conversation shows phase "complete" and every task done, and the last code review shown has verdict PASS. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/resume/SKILL.md and continue bug-<slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. Stop after 40 turns.
+/goal Stratus workflow bug-<slug> is complete: the latest mcp__stratus__get_workflow output for bug-<slug> in this conversation (or the same fields from GET /api/workflows/<slug> when that tool is unavailable) shows phase "complete" and every task done, and the last code review shown has verdict PASS. Work through the remaining phases in order; if the coordinator instructions for this workflow are not in this conversation, read .claude/skills/resume/SKILL.md and continue bug-<slug> from its current phase as it describes. Do not skip phases or weaken tests to make them pass. When a step needs my decision, ask me with AskUserQuestion. This goal is also met, and you must then stop, when you cannot make progress without me: your last message names exactly what is needed (a decision, a missing mcp__stratus tool, a failing guard); do not retry a blocked step in later turns. Stop after 40 turns.
 ```
 
 Tell the user it starts when they send it, runs unattended only in auto mode, and stops with `/goal clear`; the `/stratus` pane's Autopilot button fills in the same goal. Do not wait for an answer — continue with the next phase.
@@ -140,6 +140,8 @@ Route to the appropriate delivery agent:
 
 1. Delegate via Agent tool with complete diagnosis context
 2. Record with `mcp__stratus__delegate_agent`: `workflow_id: "bug-<slug>"`, `agent_id: "<agent-name>"`
+
+> Entering `fix` creates a task automatically ("Fix: <title>", and "Fix iteration N" on every review → fix loop); you do not call `set_tasks` for a bug. Hooks record each subagent's start, stop and tool calls, so the dashboard shows what is running.
 
 ### Transition to Review
 

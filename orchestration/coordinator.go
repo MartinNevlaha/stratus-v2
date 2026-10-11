@@ -50,6 +50,7 @@ type WorkflowState struct {
 	DesignContent string              `json:"design_content,omitempty"`
 	BaseCommit    string              `json:"base_commit,omitempty"`    // git HEAD at workflow creation
 	ChangeSummary *ChangeSummary      `json:"change_summary,omitempty"` // populated on complete
+	RunSummary    string              `json:"run_summary,omitempty"`    // markdown report written on complete
 	CreatedAt     string              `json:"created_at"`
 	UpdatedAt     string              `json:"updated_at"`
 }
@@ -59,6 +60,11 @@ type Task struct {
 	Index  int    `json:"index"`
 	Title  string `json:"title"`
 	Status string `json:"status"` // pending | in_progress | done
+	// StartedAt and CompletedAt are RFC3339 UTC; empty until the task starts/completes.
+	StartedAt   string `json:"started_at,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
+	// DependsOn lists indexes of earlier tasks this one waits for (optional).
+	DependsOn []int `json:"depends_on,omitempty"`
 }
 
 // Coordinator manages workflow state persistence.
@@ -211,7 +217,7 @@ func validateSpecPhaseReadiness(state *WorkflowState, to Phase) []string {
 		if to == PhaseVerify {
 			var incompleteTasks []string
 			for i, task := range state.Tasks {
-				if task.Status != "done" {
+				if task.Status != "done" && task.Status != "skipped" {
 					incompleteTasks = append(incompleteTasks,
 						fmt.Sprintf("task %d: %s", i+1, task.Title))
 				}
@@ -267,7 +273,7 @@ func validateBugPhaseReadiness(state *WorkflowState, to Phase) []string {
 		if to == PhaseReview {
 			var incompleteTasks []string
 			for i, task := range state.Tasks {
-				if task.Status != "done" {
+				if task.Status != "done" && task.Status != "skipped" {
 					incompleteTasks = append(incompleteTasks,
 						fmt.Sprintf("task %d: %s", i+1, task.Title))
 				}
@@ -331,7 +337,7 @@ func validateE2EPhaseReadiness(state *WorkflowState, to Phase) []string {
 		if to == PhaseComplete {
 			var incompleteTasks []string
 			for i, task := range state.Tasks {
-				if task.Status != "done" {
+				if task.Status != "done" && task.Status != "skipped" {
 					incompleteTasks = append(incompleteTasks,
 						fmt.Sprintf("test %d: %s", i+1, task.Title))
 				}
@@ -359,11 +365,14 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 		return nil, err
 	}
 
+	from := state.Phase
+	if state.Type == WorkflowBug {
+		trackBugFixTasks(state, from, to)
+	}
 	for _, w := range validatePhaseReadiness(state, to) {
 		log.Printf("warning: workflow %s phase transition: %s", id, w)
 	}
 
-	from := state.Phase
 	state.Phase = to
 	if err := c.save(state); err != nil {
 		return nil, err
@@ -383,6 +392,34 @@ func (c *Coordinator) Transition(id string, to Phase) (*WorkflowState, error) {
 	}
 
 	return state, nil
+}
+
+// trackBugFixTasks gives a bug workflow a task per fix attempt, so the dashboard can show
+// fix/review loops without the coordinator having to call set_tasks for a bug.
+func trackBugFixTasks(state *WorkflowState, from, to Phase) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	switch to {
+	case PhaseFix:
+		if from == PhaseAnalyze && len(state.Tasks) > 0 {
+			return // the coordinator already defined its own tasks
+		}
+		title := "Fix: " + state.Title
+		if len(state.Tasks) > 0 {
+			title = fmt.Sprintf("Fix iteration %d", len(state.Tasks)+1)
+		}
+		idx := len(state.Tasks)
+		state.Tasks = append(state.Tasks, Task{Index: idx, Title: title, Status: "in_progress", StartedAt: now})
+		state.TotalTasks = len(state.Tasks)
+		state.CurrentTask = &idx
+	case PhaseReview:
+		for i := range state.Tasks {
+			if state.Tasks[i].Status == "in_progress" {
+				state.Tasks[i].Status = "done"
+				state.Tasks[i].CompletedAt = now
+			}
+		}
+		state.CurrentTask = nil
+	}
 }
 
 // RecordDelegation records an agent delegation for the current phase.
@@ -408,6 +445,23 @@ func (c *Coordinator) RecordDelegation(id, agentID string) (*WorkflowState, erro
 
 // SetTasks sets the task list for a workflow.
 func (c *Coordinator) SetTasks(id string, titles []string) (*WorkflowState, error) {
+	return c.SetTasksWithDeps(id, titles, nil)
+}
+
+// SetTasksWithDeps sets the task list with optional dependencies: deps[i] lists indexes of
+// tasks that task i waits for. A dependency must point at an earlier task, which also rules
+// out cycles. deps may be nil, or exactly as long as titles.
+func (c *Coordinator) SetTasksWithDeps(id string, titles []string, deps [][]int) (*WorkflowState, error) {
+	if deps != nil && len(deps) != len(titles) {
+		return nil, fmt.Errorf("depends_on has %d entries for %d tasks", len(deps), len(titles))
+	}
+	for i, list := range deps {
+		for _, d := range list {
+			if d < 0 || d >= i {
+				return nil, fmt.Errorf("task %d: dependency %d must be an earlier task index", i, d)
+			}
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	state, err := c.Get(id)
@@ -417,6 +471,9 @@ func (c *Coordinator) SetTasks(id string, titles []string) (*WorkflowState, erro
 	state.Tasks = make([]Task, len(titles))
 	for i, t := range titles {
 		state.Tasks[i] = Task{Index: i, Title: t, Status: "pending"}
+		if deps != nil && len(deps[i]) > 0 {
+			state.Tasks[i].DependsOn = append([]int(nil), deps[i]...)
+		}
 	}
 	state.TotalTasks = len(titles)
 	return state, c.save(state)
@@ -434,7 +491,65 @@ func (c *Coordinator) StartTask(id string, index int) (*WorkflowState, error) {
 		return nil, fmt.Errorf("task index %d out of range (total: %d)", index, len(state.Tasks))
 	}
 	state.Tasks[index].Status = "in_progress"
+	if state.Tasks[index].StartedAt == "" {
+		state.Tasks[index].StartedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 	state.CurrentTask = &index
+	return state, c.save(state)
+}
+
+// SkipTask marks a pending or in-progress task as skipped: it no longer blocks the next
+// phase but is not counted as done work.
+func (c *Coordinator) SkipTask(id string, index int) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, err := c.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if index < 0 || index >= len(state.Tasks) {
+		return nil, fmt.Errorf("task index %d out of range (total: %d)", index, len(state.Tasks))
+	}
+	if st := state.Tasks[index].Status; st == "done" || st == "skipped" {
+		return nil, fmt.Errorf("task %d is already %s", index, st)
+	}
+	state.Tasks[index].Status = "skipped"
+	state.Tasks[index].CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	if state.CurrentTask != nil && *state.CurrentTask == index {
+		state.CurrentTask = nil
+	}
+	return state, c.save(state)
+}
+
+// SetRunSummary stores the markdown run report generated when a workflow completes.
+func (c *Coordinator) SetRunSummary(id, markdown string) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, err := c.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	state.RunSummary = markdown
+	return state, c.save(state)
+}
+
+// ResetTask reopens a task (pending, no timestamps) so it can be retried.
+func (c *Coordinator) ResetTask(id string, index int) (*WorkflowState, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, err := c.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if index < 0 || index >= len(state.Tasks) {
+		return nil, fmt.Errorf("task index %d out of range (total: %d)", index, len(state.Tasks))
+	}
+	state.Tasks[index].Status = "pending"
+	state.Tasks[index].StartedAt = ""
+	state.Tasks[index].CompletedAt = ""
+	if state.CurrentTask != nil && *state.CurrentTask == index {
+		state.CurrentTask = nil
+	}
 	return state, c.save(state)
 }
 
@@ -450,6 +565,7 @@ func (c *Coordinator) CompleteTask(id string, index int) (*WorkflowState, error)
 		return nil, fmt.Errorf("task index %d out of range", index)
 	}
 	state.Tasks[index].Status = "done"
+	state.Tasks[index].CompletedAt = time.Now().UTC().Format(time.RFC3339)
 	state.CurrentTask = nil
 	if err := c.save(state); err != nil {
 		return nil, err

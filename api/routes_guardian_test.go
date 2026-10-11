@@ -186,3 +186,14 @@ func TestHandleTestGuardianLLM_MissingProvider(t *testing.T) {
 		t.Errorf("expected 400 when provider is missing, got %d (body: %s)", w.Code, w.Body.String())
 	}
 }
+
+func TestHandleUpdateGuardianConfig_RejectsNegativeTokenBudget(t *testing.T) {
+	s := newGuardianTestServer(t)
+	payload, _ := json.Marshal(config.GuardianConfig{WorkflowTokenBudget: -1})
+	req := httptest.NewRequest(http.MethodPut, "/api/guardian/config", bytes.NewReader(payload))
+	w := httptest.NewRecorder()
+	s.handleUpdateGuardianConfig(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}

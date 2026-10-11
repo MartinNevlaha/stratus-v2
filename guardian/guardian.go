@@ -156,6 +156,8 @@ func (g *Guardian) runChecks(ctx context.Context) {
 
 	// 1b. Stale swarm workers
 	candidates = append(candidates, checkStaleWorkers(g.db, cfg, lang)...)
+	candidates = append(candidates, checkStaleWorkflowAgents(g.db, cfg, lang)...)
+	candidates = append(candidates, checkTokenBudget(g.coord, g.db, cfg, lang)...)
 
 	// 1c. Reviewer timeout (mission stuck in verifying)
 	candidates = append(candidates, checkStaleVerifying(g.db, cfg, lang)...)

@@ -132,6 +132,7 @@ type GuardianConfig struct {
 	TechDebtThreshold      int       `json:"tech_debt_threshold"`
 	ReviewerTimeoutMinutes int       `json:"reviewer_timeout_minutes"`
 	TicketTimeoutMinutes   int       `json:"ticket_timeout_minutes"`
+	WorkflowTokenBudget    int       `json:"workflow_token_budget"` // subagent tokens per active workflow; warns at 80%, critical at 100%; 0 = off
 	LLM                    LLMConfig `json:"llm"`
 
 	// Legacy flat fields — read on load and migrated into LLM.

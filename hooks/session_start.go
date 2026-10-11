@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,9 +17,12 @@ import (
 func SessionStart(event HookEvent) Decision {
 	registerSession(event)
 
+	// Independent of the API: a disabled MCP server removes every mcp__stratus__* tool.
+	notice := mcpDisabledNotice(candidateProjectDirs(event))
+
 	state, err := fetchDashboardStateStrict()
 	if err != nil {
-		return Decision{Continue: true}
+		return Decision{Continue: true, Context: notice}
 	}
 	var lines []string
 	for _, wf := range state.Workflows {
@@ -39,10 +43,51 @@ func SessionStart(event HookEvent) Decision {
 		lines = append(lines, line)
 	}
 	if len(lines) == 0 {
-		return Decision{Continue: true}
+		return Decision{Continue: true, Context: notice}
 	}
-	return Decision{Continue: true, Context: "Active Stratus workflows in this project:\n" + strings.Join(lines, "\n") +
-		"\nContinue one with /resume <workflow-id>. Register a workflow before delegating to delivery agents."}
+	context := "Active Stratus workflows in this project:\n" + strings.Join(lines, "\n") +
+		"\nContinue one with /resume <workflow-id>. Register a workflow before delegating to delivery agents."
+	if notice != "" {
+		context = notice + "\n\n" + context
+	}
+	return Decision{Continue: true, Context: context}
+}
+
+// mcpDisabledNotice returns a warning when the project's Claude Code settings list the
+// stratus MCP server in disabledMcpjsonServers (typically after declining the one-time
+// approval prompt). Without the server every mcp__stratus__* tool is missing for the main
+// agent and for subagents, workflow registration and swarm ticket updates silently fail,
+// and the guards deny delegation, so the session needs to be told why.
+func mcpDisabledNotice(dirs []string) string {
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		for _, name := range []string{"settings.local.json", "settings.json"} {
+			data, err := os.ReadFile(filepath.Join(dir, ".claude", name))
+			if err != nil {
+				continue
+			}
+			var cfg struct {
+				Disabled []string `json:"disabledMcpjsonServers"`
+			}
+			if json.Unmarshal(data, &cfg) != nil {
+				continue
+			}
+			for _, s := range cfg.Disabled {
+				if s == "stratus" {
+					return "The Stratus MCP server is DISABLED for this project (\"stratus\" is in disabledMcpjsonServers in " +
+						filepath.Join(dir, ".claude", name) + "). The mcp__stratus__* tools (register_workflow, transition_phase, " +
+						"swarm_ticket_update, ...) are unavailable to you and to every subagent, so workflows cannot be tracked and " +
+						"swarm workers cannot report tickets. Tell the user to enable it with /mcp (or remove \"stratus\" from " +
+						"disabledMcpjsonServers) and restart the session."
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func taskProgress(wf map[string]any) (done, total int) {

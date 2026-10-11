@@ -21,6 +21,14 @@ type HookEvent struct {
 	AgentType     string         `json:"agent_type,omitempty"`
 	// TranscriptPath points at the JSONL transcript of the agent the hook fired for.
 	TranscriptPath string `json:"transcript_path,omitempty"`
+	// LastAssistantMessage is the final message of a subagent. Claude Code does not send it
+	// on SubagentStop; AgentTranscriptPath is what carries the report.
+	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
+	// Message and NotificationType come with Notification events (permission or idle prompts).
+	Message          string `json:"message,omitempty"`
+	NotificationType string `json:"notification_type,omitempty"`
+	// AgentTranscriptPath is the subagent's own JSONL transcript (SubagentStop).
+	AgentTranscriptPath string `json:"agent_transcript_path,omitempty"`
 	// TeammateName and TeamName are only set on Agent Teams events (TeammateIdle,
 	// TaskCreated, TaskCompleted).
 	TeammateName string         `json:"teammate_name,omitempty"`

@@ -22,6 +22,7 @@ Check for `.stratus.json`:
 
 Check for `.mcp.json`:
 - Present? `stratus mcp-serve` registered?
+- Is `stratus` listed in `disabledMcpjsonServers` in `.claude/settings.local.json` or `.claude/settings.json`? Then every `mcp__stratus__*` tool is missing for the main agent and all subagents (no workflow registration, swarm workers cannot update tickets) and nothing says why. `claude mcp list` shows the server as pending approval; enable it with `/mcp` or remove the entry.
 
 Check the stratus plugin, which carries Stratus' hooks (Claude Code):
 - Is `.claude/skills/stratus/.claude-plugin/plugin.json` present? Claude Code loads `.claude/skills/stratus` as a skills-directory plugin once the project folder is trusted; `claude plugin list` (run in the project) shows `stratus@skills-dir` enabled.

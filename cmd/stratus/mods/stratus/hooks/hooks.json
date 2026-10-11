@@ -4,10 +4,21 @@
       {"matcher": "Write|Edit|Bash|NotebookEdit", "hooks": [{"type": "command", "command": "stratus hook phase_guard"}]},
       {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "stratus hook workflow_existence_guard"}]},
       {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "stratus hook delegation_guard"}]},
-      {"matcher": "Bash", "hooks": [{"type": "command", "command": "stratus hook bash_write_guard"}]}
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "stratus hook bash_write_guard"}]},
+      {"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
+    ],
+    "Notification": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
     ],
     "PostToolUse": [
-      {"matcher": "Write|Edit|NotebookEdit", "hooks": [{"type": "command", "command": "stratus hook watcher"}]}
+      {"matcher": "Write|Edit|NotebookEdit", "hooks": [{"type": "command", "command": "stratus hook watcher"}]},
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
+    ],
+    "SubagentStart": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
+    ],
+    "SubagentStop": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
     ],
     "SessionStart": [
       {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook session_start"}]}

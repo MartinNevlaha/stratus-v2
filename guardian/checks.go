@@ -31,6 +31,8 @@ var alertMessages = map[string]map[string]string{
 	"en": {
 		"stale_workflow":       `Workflow "%s" has been in phase "%s" for over %dh`,
 		"stale_worker":         `Swarm worker %s (%s) has not heartbeated for >%v — marked stale`,
+		"stale_agent":          `Agent %s (%s) in workflow %s has been idle for >%v`,
+		"token_budget":         `Workflow "%s" used %d of %d budgeted tokens (%d%%)`,
 		"reviewer_timeout":     `Mission "%s" has been in 'verifying' for >%dmin — reviewer may be stuck`,
 		"ticket_timeout":       `Ticket "%s" timed out after >%dmin in_progress — marked failed`,
 		"memory_health":        `Memory store has %d events (threshold: %d). Consider running /learn to distill and prune.`,
@@ -44,6 +46,8 @@ var alertMessages = map[string]map[string]string{
 	"sk": {
 		"stale_workflow":       `Workflow "%s" je v fáze "%s" dlhšie ako %d hodín`,
 		"stale_worker":         `Swarm worker %s (%s) neodoslal heartbeat dlhšie ako %v — označený ako neaktívny`,
+		"stale_agent":          `Agent %s (%s) vo workflow %s je neaktívny dlhšie ako %v`,
+		"token_budget":         `Workflow "%s" spotreboval %d z rozpočtu %d tokenov (%d%%)`,
 		"reviewer_timeout":     `Misia "%s" je v stave 'verifying' dlhšie ako %d min — recenzent môže byť zaseknutý`,
 		"ticket_timeout":       `Ticket "%s" vypršal po viac ako %d min v stave in_progress — označený ako zlyhaný`,
 		"memory_health":        `Pamäťové úložisko obsahuje %d udalostí (prahová hodnota: %d). Zvážte spustenie /learn na destilláciu a čistenie.`,
@@ -160,6 +164,75 @@ func checkStaleWorkers(database *db.DB, cfg config.GuardianConfig, lang string) 
 				"mission_id":     w.MissionID,
 				"agent_type":     w.AgentType,
 				"last_heartbeat": w.LastHeartbeat,
+			},
+		})
+	}
+	return alerts
+}
+
+// staleAgentThreshold is how long a running workflow agent may go without a tool call
+// before the dashboard flags it as stuck.
+const staleAgentThreshold = 10 * time.Minute
+
+// checkStaleWorkflowAgents flags subagents of normal workflows that are still "running"
+// but have not made a tool call recently. It only alerts; the user decides in the UI.
+func checkStaleWorkflowAgents(database *db.DB, _ config.GuardianConfig, lang string) []alertInput {
+	agents, err := database.ListStaleWorkflowAgents(staleAgentThreshold)
+	if err != nil || len(agents) == 0 {
+		return nil
+	}
+	alerts := make([]alertInput, 0, len(agents))
+	for _, a := range agents {
+		alerts = append(alerts, alertInput{
+			Type:     "stale_agent",
+			Severity: "warning",
+			Message:  alertMessage(lang, "stale_agent", a.ID, a.AgentType, a.WorkflowID, staleAgentThreshold),
+			Metadata: map[string]any{
+				"dedup_key":     "stale_agent_" + a.ID,
+				"agent_id":      a.ID,
+				"agent_type":    a.AgentType,
+				"workflow_id":   a.WorkflowID,
+				"last_activity": a.LastActivity,
+			},
+		})
+	}
+	return alerts
+}
+
+// checkTokenBudget warns when an active workflow's subagents have used 80% of the configured
+// token budget and escalates to critical once it is exceeded. A budget of 0 disables it.
+func checkTokenBudget(coord *orchestration.Coordinator, database *db.DB, cfg config.GuardianConfig, lang string) []alertInput {
+	if cfg.WorkflowTokenBudget <= 0 {
+		return nil
+	}
+	workflows, err := coord.ListActive()
+	if err != nil || len(workflows) == 0 {
+		return nil
+	}
+	totals, err := database.SumWorkflowAgentTokens()
+	if err != nil {
+		return nil
+	}
+	var alerts []alertInput
+	for _, w := range workflows {
+		used := totals[w.ID]
+		pct := used * 100 / cfg.WorkflowTokenBudget
+		if pct < 80 {
+			continue
+		}
+		severity, level := "warning", 80
+		if pct >= 100 {
+			severity, level = "critical", 100
+		}
+		alerts = append(alerts, alertInput{
+			Type:     "token_budget",
+			Severity: severity,
+			Message:  alertMessage(lang, "token_budget", w.Title, used, cfg.WorkflowTokenBudget, pct),
+			Metadata: map[string]any{
+				"dedup_key":   fmt.Sprintf("token_budget_%s_%d", w.ID, level),
+				"workflow_id": w.ID,
+				"used":        used,
+				"budget":      cfg.WorkflowTokenBudget,
 			},
 		})
 	}
