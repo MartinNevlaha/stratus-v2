@@ -35,6 +35,10 @@ type serverMsg struct {
 
 type createData struct {
 	ID string `json:"id"`
+	// Adopt asks the server to hand over a detached session (e.g. after the
+	// browser was closed) before creating a new one with ID. The reply carries
+	// the id actually in use.
+	Adopt bool `json:"adopt,omitempty"`
 }
 
 type inputData struct {
@@ -105,36 +109,43 @@ func (m *Manager) ServeWS(w http.ResponseWriter, r *http.Request) {
 				activeSess, detach = nil, nil
 			}
 
-			status := "attached"
-			sess, ok := m.Get(d.ID)
-			if !ok {
-				var err error
-				sess, err = m.Create(d.ID)
+			// Stream PTY output to the client via the mutex-protected send. Attach
+			// returns the scrollback atomically with the subscription, so the replay is
+			// followed by live output with no gap or duplicate. The gate holds live
+			// output back until the replay has been sent.
+			var gate sync.Mutex
+			onOutput := func(b []byte) {
+				gate.Lock()
+				gate.Unlock()
+				send(serverMsg{Type: MsgOutput, Data: string(b)})
+			}
+			attach := func(sess *Session, status string) {
+				activeSess = sess
+				gate.Lock()
+				var replay []byte
+				replay, detach = sess.Attach(onOutput)
+				send(serverMsg{Type: MsgCreate, Data: map[string]string{"id": sess.id, "status": status}})
+				if len(replay) > 0 {
+					send(serverMsg{Type: MsgOutput, Data: string(replay)})
+				}
+				gate.Unlock()
+			}
+
+			switch existing, ok := m.Get(d.ID); {
+			case d.Adopt && m.Adopt(func(s *Session) { attach(s, "attached") }):
+				// A detached session was handed over; attach already ran.
+			case ok:
+				attach(existing, "attached")
+			default:
+				sess, err := m.Create(d.ID)
 				if err != nil {
 					send(serverMsg{Type: MsgError, Data: err.Error()})
 					continue
 				}
-				status = "ok"
+				attach(sess, "ok")
 			}
-			activeSess = sess
-			send(serverMsg{Type: MsgCreate, Data: map[string]string{"id": d.ID, "status": status}})
+			sess := activeSess
 
-			// Stream PTY output to the client via the mutex-protected send. Attach
-			// returns the scrollback atomically with the subscription, so the
-			// replay is followed by live output with no gap or duplicate.
-			// The gate holds live output back until the replay has been sent.
-			var gate sync.Mutex
-			gate.Lock()
-			var replay []byte
-			replay, detach = sess.Attach(func(b []byte) {
-				gate.Lock()
-				gate.Unlock()
-				send(serverMsg{Type: MsgOutput, Data: string(b)})
-			})
-			if len(replay) > 0 {
-				send(serverMsg{Type: MsgOutput, Data: string(replay)})
-			}
-			gate.Unlock()
 			go func() {
 				select {
 				case <-sess.Exited():

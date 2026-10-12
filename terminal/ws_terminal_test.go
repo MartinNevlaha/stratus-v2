@@ -120,3 +120,86 @@ func TestServeWS_Disconnect_KeepsSessionAlive(t *testing.T) {
 	}
 	_ = sess.Close()
 }
+
+func TestServeWS_DistinctIDs_AreIndependentSessions(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	m := NewManager()
+	srv := httptest.NewServer(http.HandlerFunc(m.ServeWS))
+	defer srv.Close()
+
+	c1 := dialTerminal(t, srv)
+	defer c1.Close(websocket.StatusNormalClosure, "bye")
+	c2 := dialTerminal(t, srv)
+	defer c2.Close(websocket.StatusNormalClosure, "bye")
+
+	sendMsg(t, c1, MsgCreate, map[string]string{"id": "w1"})
+	sendMsg(t, c2, MsgCreate, map[string]string{"id": "w2"})
+	s1, _ := readUntil(t, c1, func(s, _ string) bool { return s != "" })
+	s2, _ := readUntil(t, c2, func(s, _ string) bool { return s != "" })
+	if s1 != "ok" || s2 != "ok" {
+		t.Fatalf("statuses = %q, %q, want ok, ok", s1, s2)
+	}
+
+	// Output typed in window 1 must keep flowing to window 1 after window 2 attached.
+	sendMsg(t, c1, MsgInput, map[string]string{"id": "w1", "data": "echo only-in-one\n"})
+	readUntil(t, c1, func(_, o string) bool { return strings.Contains(o, "only-in-one") })
+}
+
+func TestServeWS_Adopt_TakesDetachedSessionAndReportsID(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	m := NewManager()
+	srv := httptest.NewServer(http.HandlerFunc(m.ServeWS))
+	defer srv.Close()
+
+	c1 := dialTerminal(t, srv)
+	sendMsg(t, c1, MsgCreate, map[string]string{"id": "old"})
+	readUntil(t, c1, func(s, _ string) bool { return s != "" })
+	sendMsg(t, c1, MsgInput, map[string]string{"id": "old", "data": "echo kept-work\n"})
+	readUntil(t, c1, func(_, o string) bool { return strings.Contains(o, "kept-work") })
+	c1.Close(websocket.StatusNormalClosure, "bye")
+	time.Sleep(200 * time.Millisecond)
+
+	c2 := dialTerminal(t, srv)
+	defer c2.Close(websocket.StatusNormalClosure, "bye")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := wsjson.Write(ctx, c2, map[string]any{
+		"type": MsgCreate, "data": map[string]any{"id": "fresh", "adopt": true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var created map[string]any
+	for created == nil {
+		var msg struct {
+			Type string         `json:"type"`
+			Data map[string]any `json:"data"`
+		}
+		if err := wsjson.Read(ctx, c2, &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Type == MsgCreate {
+			created = msg.Data
+		}
+	}
+	if created["id"] != "old" || created["status"] != "attached" {
+		t.Fatalf("create = %v, want id=old status=attached", created)
+	}
+}
+
+func TestServeWS_Adopt_NoDetachedSession_CreatesWithGivenID(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	m := NewManager()
+	srv := httptest.NewServer(http.HandlerFunc(m.ServeWS))
+	defer srv.Close()
+
+	c := dialTerminal(t, srv)
+	defer c.Close(websocket.StatusNormalClosure, "bye")
+	sendMsg(t, c, MsgCreate, map[string]any{"id": "fresh", "adopt": true})
+	status, _ := readUntil(t, c, func(s, _ string) bool { return s != "" })
+	if status != "ok" {
+		t.Fatalf("status = %q, want ok", status)
+	}
+	if _, ok := m.Get("fresh"); !ok {
+		t.Fatal("session fresh was not created")
+	}
+}

@@ -126,3 +126,55 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met in time")
 }
+
+func TestManager_Adopt_PicksDetachedSession(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	m := NewManager()
+	sess, err := m.Create("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	var got *Session
+	if !m.Adopt(func(s *Session) { got = s }) {
+		t.Fatal("Adopt found nothing")
+	}
+	if got != sess {
+		t.Fatal("Adopt returned a different session")
+	}
+}
+
+func TestManager_Adopt_SkipsAttachedSession(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	m := NewManager()
+	sess, err := m.Create("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	_, detach := sess.Attach(func([]byte) {})
+	defer detach()
+
+	if m.Adopt(func(*Session) { t.Fatal("attached session was adopted") }) {
+		t.Fatal("Adopt should find nothing")
+	}
+}
+
+func TestManager_Adopt_ClaimsEachSessionOnce(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	m := NewManager()
+	sess, err := m.Create("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	attach := func(s *Session) { s.Attach(func([]byte) {}) }
+	if !m.Adopt(attach) {
+		t.Fatal("first Adopt found nothing")
+	}
+	if m.Adopt(attach) {
+		t.Fatal("second Adopt claimed the same session")
+	}
+}

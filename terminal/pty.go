@@ -53,6 +53,7 @@ type Session struct {
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
+	claimMu  sync.Mutex // makes "pick a detached session + attach" atomic in Adopt
 }
 
 // NewManager creates a new terminal manager and starts reaping sessions that
@@ -124,6 +125,31 @@ func (m *Manager) Create(id string) (*Session, error) {
 	}()
 
 	return sess, nil
+}
+
+// Adopt hands the most recently detached live session to attach, which must
+// attach to it before returning so no other Adopt can claim it. It reports
+// whether a session was found.
+func (m *Manager) Adopt(attach func(*Session)) bool {
+	m.claimMu.Lock()
+	defer m.claimMu.Unlock()
+
+	m.mu.RLock()
+	var best *Session
+	var bestAt time.Time
+	for _, s := range m.sessions {
+		s.outMu.Lock()
+		if s.sub == nil && (best == nil || s.lastDetached.After(bestAt)) {
+			best, bestAt = s, s.lastDetached
+		}
+		s.outMu.Unlock()
+	}
+	m.mu.RUnlock()
+	if best == nil {
+		return false
+	}
+	attach(best)
+	return true
 }
 
 // Get returns a session by ID.

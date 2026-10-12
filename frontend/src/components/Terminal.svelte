@@ -13,24 +13,27 @@
   let term: Terminal
   let fitAddon: FitAddon
   let ws: WebSocket | null = null
-  // Kept across reloads so the server-side PTY can be reattached.
+  // Per-window id, kept across reloads so this window reattaches to its own
+  // server-side PTY. A window without one (new window, or browser was closed)
+  // asks the server to hand over a detached session, else gets a fresh shell.
   const SESSION_KEY = 'stratus-terminal-session'
-  function loadSessionId(): string {
+  function loadSessionId(): string | null {
     try {
-      const saved = localStorage.getItem(SESSION_KEY)
-      if (saved) return saved
+      return sessionStorage.getItem(SESSION_KEY)
     } catch {
-      // storage unavailable: fall through to a fresh id
+      return null
     }
-    const id = `terminal-${Date.now()}`
+  }
+  function saveSessionId(id: string) {
     try {
-      localStorage.setItem(SESSION_KEY, id)
+      sessionStorage.setItem(SESSION_KEY, id)
     } catch {
       // not persisted; the session just won't survive a reload
     }
-    return id
   }
-  let sessionId = loadSessionId()
+  const savedSessionId = loadSessionId()
+  let adopt = savedSessionId === null
+  let sessionId = savedSessionId ?? `terminal-${Date.now()}`
   let connected = $state(false)
   let error = $state<string | null>(null)
 
@@ -371,7 +374,7 @@
       connected = true
       error = null
       // Create terminal session
-      ws!.send(JSON.stringify({ type: 'create', data: { id: sessionId } }))
+      ws!.send(JSON.stringify({ type: 'create', data: { id: sessionId, adopt } }))
       // The PTY starts without a window size and the initial fit ran before the
       // socket was open, so its resize was never sent. Without it the shell
       // wraps at a different width than xterm and redraws land on wrong cells.
@@ -392,6 +395,10 @@
           term.writeln(`\r\n\x1b[31m[error: ${msg.data}]\x1b[0m`)
           break
         case 'create':
+          // The server may have handed over another session than the one asked for.
+          sessionId = msg.data.id
+          adopt = false
+          saveSessionId(sessionId)
           if (msg.data?.status === 'attached') {
             // The server replays its scrollback next; drop what is already shown.
             term.reset()
