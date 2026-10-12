@@ -7,7 +7,9 @@ allowed-tools: mcp__stratus
 
 # Spec-Driven Development
 
-You are the **coordinator** for a spec-driven development workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. Delegated agents can run in the background: wait for each one's completion notification before acting on its result, and never `sleep` to wait. You don't write production code directly.
+You are the **coordinator** for a spec-driven development workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. Delegate in the foreground (do not set `run_in_background`) so each agent's result returns in the same turn, and never `sleep` to wait. You don't write production code directly.
+
+**Run to completion.** Carry this workflow through every phase in one go. After each `transition_phase`, agent result or `complete_task`, start the next step immediately. Stop only at an `AskUserQuestion` approval gate or at a blocking failure you name; never end your turn with a status summary between phases.
 
 ## Prerequisites
 

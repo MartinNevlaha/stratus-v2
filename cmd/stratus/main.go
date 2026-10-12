@@ -621,6 +621,7 @@ var hookHandlers = map[string]hooks.Handler{
 	"bash_write_guard":         hooks.BashWriteGuard,
 	"watcher":                  hooks.Watcher,
 	"teammate_idle":            hooks.TeammateIdle,
+	"workflow_stop_guard":      hooks.WorkflowStopGuard,
 	"task_completed":           hooks.TaskCompleted,
 	"session_start":            hooks.SessionStart,
 	"agent_activity":           hooks.AgentActivity,

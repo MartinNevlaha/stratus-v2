@@ -14,6 +14,8 @@ Current session: ${CLAUDE_SESSION_ID}
 BASE=http://localhost:$(stratus port)
 ```
 
+**Run to completion.** Carry this workflow through every phase in one go. After each `transition_phase`, agent result or `complete_task`, start the next step immediately. Stop only at an `AskUserQuestion` approval gate or at a blocking failure you name; never end your turn with a status summary between phases.
+
 > **Swarm** runs delivery agents in isolated git worktrees — each worker has its own
 > branch and filesystem, enabling truly parallel implementation without file conflicts.
 > Progress is tracked in the **Overview** tab of the dashboard.
@@ -124,7 +126,7 @@ Each ticket should have:
 
 ### 1h. Present the plan
 
-Present the plan to the user. **Wait for explicit approval** before proceeding.
+Present the plan to the user via `AskUserQuestion` (approve or request changes) and proceed only after approval.
 
 Transition to implement:
 ```bash

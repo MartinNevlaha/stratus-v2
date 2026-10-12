@@ -60,7 +60,7 @@ Stratus is a single-binary Claude Code extension framework. The binary embeds fi
 | `swarm` | Multi-agent swarm: worktree management, dispatch engine, signal bus |
 | `api` | HTTP server, all REST routes, WebSocket hub, SPA handler |
 | `mcp` | MCP stdio server (JSON-RPC); proxies all tool calls to the HTTP API |
-| `hooks` | `phase_guard`, `workflow_existence_guard`, `delegation_guard`, `bash_write_guard`, `watcher`, `session_start`, `teammate_idle` hook handlers |
+| `hooks` | `phase_guard`, `workflow_existence_guard`, `delegation_guard`, `bash_write_guard`, `watcher`, `session_start`, `teammate_idle`, `workflow_stop_guard` hook handlers |
 | `terminal` | PTY session management + WebSocket I/O via `creack/pty` |
 | `vexor` | CLI wrapper around the external `vexor` binary for code embeddings |
 | `frontend` | Svelte 5 + TypeScript + xterm.js dashboard, built with Vite |

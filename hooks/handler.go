@@ -24,6 +24,9 @@ type HookEvent struct {
 	// LastAssistantMessage is the final message of a subagent. Claude Code does not send it
 	// on SubagentStop; AgentTranscriptPath is what carries the report.
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
+	// StopHookActive is true when the agent is already continuing because an earlier
+	// Stop hook told it to (Stop events).
+	StopHookActive bool `json:"stop_hook_active,omitempty"`
 	// Message and NotificationType come with Notification events (permission or idle prompts).
 	Message          string `json:"message,omitempty"`
 	NotificationType string `json:"notification_type,omitempty"`
@@ -42,7 +45,7 @@ type Decision struct {
 	Reason   string `json:"reason,omitempty"`
 	// Nudge redirects the agent instead of stopping it: Claude Code injects Reason
 	// into the agent's conversation and lets it keep working. Only meaningful for
-	// stop-like events (TeammateIdle); PreToolUse guards deny with Continue=false,
+	// stop-like events (TeammateIdle, Stop); PreToolUse guards deny with Continue=false,
 	// which Block turns into exit 2 with the reason on stderr.
 	Nudge bool `json:"-"`
 	// Context is text added to the agent's context (SessionStart); the event goes on.

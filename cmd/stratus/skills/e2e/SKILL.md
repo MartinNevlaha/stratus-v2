@@ -7,7 +7,9 @@ allowed-tools: mcp__stratus
 
 # E2E Testing Workflow
 
-You are the **coordinator** for an autonomous E2E testing workflow using Playwright Test Agents. You orchestrate work by delegating to specialized Playwright agents via Agent tool. `Task` is a legacy alias only. Delegated agents can run in the background: wait for each one's completion notification before acting on its result, and never `sleep` to wait. You don't write test code directly — agents handle that.
+You are the **coordinator** for an autonomous E2E testing workflow using Playwright Test Agents. You orchestrate work by delegating to specialized Playwright agents via Agent tool. `Task` is a legacy alias only. Delegate in the foreground (do not set `run_in_background`) so each agent's result returns in the same turn, and never `sleep` to wait. You don't write test code directly — agents handle that.
+
+**Run to completion.** Carry this workflow through every phase in one go. After each `transition_phase`, agent result or `complete_task`, start the next step immediately. Stop only at an `AskUserQuestion` approval gate or at a blocking failure you name; never end your turn with a status summary between phases.
 
 ## Prerequisites
 

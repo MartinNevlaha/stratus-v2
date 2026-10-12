@@ -23,6 +23,9 @@
     "SessionStart": [
       {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook session_start"}]}
     ],
+    "Stop": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook workflow_stop_guard"}]}
+    ],
     "TeammateIdle": [
       {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook teammate_idle"}]}
     ],

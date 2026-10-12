@@ -7,7 +7,9 @@ allowed-tools: mcp__stratus
 
 # Bug-Fixing Workflow
 
-You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. Delegated agents can run in the background: wait for each one's completion notification before acting on its result, and never `sleep` to wait. You don't write production code directly.
+You are the **coordinator** for a structured bug-fixing workflow. You orchestrate work by delegating to specialized agents via the Agent tool. `Task` is a legacy alias only. Delegate in the foreground (do not set `run_in_background`) so each agent's result returns in the same turn, and never `sleep` to wait. You don't write production code directly.
+
+**Run to completion.** Carry this workflow through every phase in one go. After each `transition_phase`, agent result or `complete_task`, start the next step immediately. Stop only at an `AskUserQuestion` approval gate or at a blocking failure you name; never end your turn with a status summary between phases.
 
 ## Prerequisites
 
@@ -94,14 +96,14 @@ The Plan agent will return:
 - Test coverage requirements
 - Risk mitigation strategies
 
-Present the plan to the user via AskUserQuestion. **Wait for explicit approval.**
+Do not ask for approval yet: Step 5 presents the diagnosis and this plan together in one gate.
 
 ### Step 5 — User Approval
 
-**Present diagnosis to user via AskUserQuestion.**
+**Present the diagnosis and the fix plan together in one `AskUserQuestion`** — this is the only approval gate before the fix.
 
-- If TRIVIAL: Get approval to proceed directly to fix
-- If COMPLEX: Get approval for the plan
+- If TRIVIAL: ask for approval to proceed directly to fix
+- If COMPLEX: ask for approval of the plan
 
 ### Step 6 — Transition to Fix
 
