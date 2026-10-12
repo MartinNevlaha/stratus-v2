@@ -263,53 +263,23 @@ type EvolutionConfig struct {
 	AllowedEvolutionCategories []string `json:"allowed_evolution_categories"`
 }
 
-// CodeAnalysisConfig configures the Project Code Evolution subsystem.
-// WARNING: When enabled, source file contents from the highest-risk files
-// are sent to the configured LLM provider for analysis.
-type CodeAnalysisConfig struct {
-	Enabled             bool      `json:"enabled"`
-	MaxFilesPerRun      int       `json:"max_files_per_run"`
-	TokenBudgetPerRun   int       `json:"token_budget_per_run"`
-	MinChurnScore       float64   `json:"min_churn_score"`
-	ConfidenceThreshold float64   `json:"confidence_threshold"`
-	ScanInterval        int       `json:"scan_interval"` // minutes between scheduled scans
-	IncludeGitHistory   bool      `json:"include_git_history"`
-	GitHistoryDepth     int       `json:"git_history_depth"` // number of commits to analyze
-	Categories          []string  `json:"categories"`        // empty = all categories
-	ExcludePaths        []string  `json:"exclude_paths"`     // path prefixes to skip, additive to built-in excludes (e.g. "scripts/")
-	VerifyFindings      bool      `json:"verify_findings"`   // run an adversarial verification pass to suppress false-positive findings
-	LLM                 LLMConfig `json:"llm"`               // per-subsystem LLM override
-}
-
-// AllowedCodeAnalysisCategories is the set of valid category values for CodeAnalysisConfig.Categories.
-var AllowedCodeAnalysisCategories = map[string]struct{}{
-	"anti_pattern":   {},
-	"duplication":    {},
-	"coverage_gap":   {},
-	"error_handling": {},
-	"complexity":     {},
-	"dead_code":      {},
-	"security":       {},
-}
-
 // Config holds the stratus configuration.
 type Config struct {
-	Port                     int                `json:"port"`
-	DevMode                  bool               `json:"dev_mode,omitempty"`
-	DataDir                  string             `json:"data_dir"`
-	ProjectRoot              string             `json:"project_root"`
-	Language                 string             `json:"language"`
-	LLM                      LLMConfig          `json:"llm"`
-	Vexor                    VexorConfig        `json:"vexor"`
-	STT                      STTConfig          `json:"stt"`
-	Guardian                 GuardianConfig     `json:"guardian"`
-	SyncState                *SyncState         `json:"sync_state,omitempty"`
-	MetricsBroadcastInterval int                `json:"metrics_broadcast_interval"`
-	Insight                  InsightConfig      `json:"insight"`
-	Wiki                     WikiConfig         `json:"wiki"`
-	Evolution                EvolutionConfig    `json:"evolution"`
-	CodeAnalysis             CodeAnalysisConfig `json:"code_analysis"`
-	Learn                    LearnConfig        `json:"learn"`
+	Port                     int             `json:"port"`
+	DevMode                  bool            `json:"dev_mode,omitempty"`
+	DataDir                  string          `json:"data_dir"`
+	ProjectRoot              string          `json:"project_root"`
+	Language                 string          `json:"language"`
+	LLM                      LLMConfig       `json:"llm"`
+	Vexor                    VexorConfig     `json:"vexor"`
+	STT                      STTConfig       `json:"stt"`
+	Guardian                 GuardianConfig  `json:"guardian"`
+	SyncState                *SyncState      `json:"sync_state,omitempty"`
+	MetricsBroadcastInterval int             `json:"metrics_broadcast_interval"`
+	Insight                  InsightConfig   `json:"insight"`
+	Wiki                     WikiConfig      `json:"wiki"`
+	Evolution                EvolutionConfig `json:"evolution"`
+	Learn                    LearnConfig     `json:"learn"`
 }
 
 // ValidLanguage returns true if s is a supported UI language code.
@@ -433,18 +403,6 @@ func Default() Config {
 				TODOMax:       50,
 			},
 			AllowedEvolutionCategories: append([]string{}, defaultProjectCategories...),
-		},
-		CodeAnalysis: CodeAnalysisConfig{
-			Enabled:             false,
-			MaxFilesPerRun:      10,
-			TokenBudgetPerRun:   500000,
-			MinChurnScore:       0.1,
-			ConfidenceThreshold: 0.75,
-			ScanInterval:        60,
-			IncludeGitHistory:   true,
-			GitHistoryDepth:     100,
-			Categories:          []string{},
-			VerifyFindings:      true,
 		},
 		Learn: LearnConfig{
 			PipelineTimeoutSec: 180,

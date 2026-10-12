@@ -58,3 +58,9 @@ export const STALE_AGENT_MS = 10 * 60 * 1000
 export function isAgentStale(status: string, lastActivity: string): boolean {
   return status === 'running' && Date.now() - new Date(lastActivity).getTime() > STALE_AGENT_MS
 }
+
+// sanitizeTerminalPayload flattens line breaks so pasted text is not executed as
+// several separate terminal commands.
+export function sanitizeTerminalPayload(s: string): string {
+  return s.replace(/[\r\n]+/g, ' ')
+}

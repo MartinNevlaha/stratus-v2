@@ -47,10 +47,6 @@ import type {
   EvolutionStatus,
   InsightProposal,
   OnboardingProgress,
-  CodeAnalysisRun,
-  CodeFinding,
-  CodeQualityMetric,
-  CodeAnalysisConfig,
 } from './types'
 
 const BASE = '/api'
@@ -414,34 +410,6 @@ export async function triggerOnboarding(opts: { depth?: string; output_dir?: str
 export async function getOnboardingStatus(): Promise<OnboardingProgress> {
   return get('/onboard/status')
 }
-
-// --- Code Quality ---
-
-export const getCodeAnalysisRuns = (limit = 20) =>
-  get<{ runs: CodeAnalysisRun[]; count: number }>('/code-analysis/runs', { limit: String(limit) })
-
-export const getCodeAnalysisRun = (id: string) =>
-  get<{ run: CodeAnalysisRun; findings: CodeFinding[] }>(`/code-analysis/runs/${id}`)
-
-export const getCodeFindings = (params: Record<string, string>) =>
-  get<{ findings: CodeFinding[]; count: number }>('/code-analysis/findings', params)
-
-export const updateFindingStatus = (id: string, status: 'rejected' | 'applied') =>
-  put<{ ok: boolean; id: string; status: string }>(`/code-analysis/findings/${id}/status`, { status })
-
-export const triggerCodeAnalysis = (categories?: string[]) =>
-  post<{ status: string }>('/code-analysis/trigger', {
-    ...(categories?.length ? { categories } : {}),
-  })
-
-export const getCodeMetrics = (days = 30) =>
-  get<{ metrics: CodeQualityMetric[] }>('/code-analysis/metrics', { days: String(days) })
-
-export const getCodeAnalysisConfig = () =>
-  get<CodeAnalysisConfig>('/code-analysis/config')
-
-export const updateCodeAnalysisConfig = (cfg: CodeAnalysisConfig) =>
-  post<CodeAnalysisConfig>('/code-analysis/config', cfg)
 
 // Language
 export const getLanguage = () => get<{ language: string }>('/config/language')

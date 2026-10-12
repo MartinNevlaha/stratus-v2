@@ -67,11 +67,6 @@ type Server struct {
 	onboardingMu       sync.Mutex
 	onboardingProgress *onboarding.OnboardingProgress
 	onboardingResult   *onboarding.OnboardingResult
-
-	// codeAnalysisTrigger, when set, is called by handleTriggerCodeAnalysis
-	// to start a background code analysis run. Wire this up after the code
-	// analysis engine is initialised.
-	codeAnalysisTrigger CodeAnalysisTriggerFn
 }
 
 // NewServer creates the HTTP server with all routes wired up.
@@ -149,12 +144,6 @@ func (s *Server) rebuildVaultSync() {
 	s.vaultSyncMu.Lock()
 	defer s.vaultSyncMu.Unlock()
 	s.vaultSync = newVaultSyncForConfig(s.cfg, s.db)
-}
-
-// SetCodeAnalysisTrigger sets the function used to start a background code
-// analysis run. Call this after the code analysis engine has been initialised.
-func (s *Server) SetCodeAnalysisTrigger(fn CodeAnalysisTriggerFn) {
-	s.codeAnalysisTrigger = fn
 }
 
 // SetGuardian attaches the guardian service so routes can trigger manual scans.
@@ -509,7 +498,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/evolution/config", s.handleUpdateEvolutionConfig)
 
 	// Code Analysis
-	s.registerCodeAnalysisRoutes(mux)
 
 	// Global config
 	mux.HandleFunc("GET /api/config/language", s.handleGetLanguage)

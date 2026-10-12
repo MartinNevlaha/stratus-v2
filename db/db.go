@@ -286,8 +286,6 @@ SELECT id, title, content, doc_type FROM docs;
 	// v2 migrations: additive columns on existing tables
 	`ALTER TABLE tickets ADD COLUMN files TEXT NOT NULL DEFAULT '[]'`,
 	`ALTER TABLE missions ADD COLUMN verifying_since TEXT NOT NULL DEFAULT ''`,
-	// v3 migrations: code_findings status lifecycle
-	`ALTER TABLE code_findings ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`,
 	// v4 migrations: evolution-loop dual-write columns on insight_proposals
 	`ALTER TABLE insight_proposals ADD COLUMN wiki_page_id TEXT NULL REFERENCES wiki_pages(id)`,
 	`ALTER TABLE insight_proposals ADD COLUMN idempotency_hash TEXT NULL`,

@@ -16,7 +16,6 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/artifacts"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/code_analyst"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop"
 	evolution_baseline "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/baseline"
 	evolution_scoring "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/scoring"
@@ -65,8 +64,6 @@ type Engine struct {
 	wikiCluster         *wiki_engine.ClusterSynthesizer
 	ingester            *ingest.Ingester
 	inboxWatcherCancel  context.CancelFunc
-	codeAnalyst         *code_analyst.Engine
-	codeAnalystCfg      config.CodeAnalysisConfig
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -97,27 +94,25 @@ func NewEngine(database *db.DB, cfg config.InsightConfig) *Engine {
 	return e
 }
 
-// NewEngineWithConfig creates an Engine with explicit WikiConfig,
-// EvolutionConfig, and CodeAnalysisConfig, enabling the WikiEngine,
-// EvolutionLoop, and CodeAnalyst subsystems.
+// NewEngineWithConfig creates an Engine with explicit WikiConfig and
+// EvolutionConfig, enabling the WikiEngine and EvolutionLoop subsystems.
 // Language defaults to "en". Use NewEngineWithFullConfig to specify a language.
 func NewEngineWithConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig) *Engine {
-	return NewEngineWithFullConfig(database, cfg, wikiCfg, evoCfg, config.CodeAnalysisConfig{}, "en")
+	return NewEngineWithFullConfig(database, cfg, wikiCfg, evoCfg, "en")
 }
 
 // NewEngineWithFullConfig creates an Engine with all subsystem configs.
 // lang is the UI language code ("en", "sk"); pass an empty string to default to "en".
-func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig, codeAnalystCfg config.CodeAnalysisConfig, lang string) *Engine {
+func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig, lang string) *Engine {
 	if lang == "" {
 		lang = "en"
 	}
 	e := &Engine{
-		database:       database,
-		config:         cfg,
-		wikiCfg:        wikiCfg,
-		evoCfg:         evoCfg,
-		codeAnalystCfg: codeAnalystCfg,
-		lang:           lang,
+		database: database,
+		config:   cfg,
+		wikiCfg:  wikiCfg,
+		evoCfg:   evoCfg,
+		lang:     lang,
 	}
 	e.initLLMClient()
 	e.scheduler = newScheduler(e)
@@ -133,7 +128,6 @@ func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg 
 	e.initProductIntelligence()
 	e.initWikiEngine()
 	e.initEvolutionLoop()
-	e.initCodeAnalyst()
 	return e
 }
 
@@ -338,155 +332,6 @@ func (e *Engine) initEvolutionLoop() {
 		evolution_loop.WithProposalWriter(proposalWriter),
 		evolution_loop.WithProjectRoot(root),
 	)
-}
-
-func (e *Engine) initCodeAnalyst() {
-	store := code_analyst.NewDBCodeAnalystStore(e.database)
-
-	// Build a per-subsystem LLM client. CodeAnalysis may have its own LLM
-	// override in the config; fall back to the shared insight LLM client when
-	// the subsystem override is not configured.
-	caLLMCfg := config.ResolveLLMConfig(e.config.LLM, e.codeAnalystCfg.LLM)
-	var caLLMClient llm.Client
-	if caLLMCfg.Provider != "" && caLLMCfg.Model != "" {
-		llmCfg := llm.Config{
-			Provider:             caLLMCfg.Provider,
-			Model:                caLLMCfg.Model,
-			APIKey:               caLLMCfg.APIKey,
-			BaseURL:              caLLMCfg.BaseURL,
-			Timeout:              caLLMCfg.Timeout,
-			MaxTokens:            caLLMCfg.MaxTokens,
-			Temperature:          caLLMCfg.Temperature,
-			MaxRetries:           caLLMCfg.MaxRetries,
-			Concurrency:          caLLMCfg.Concurrency,
-			MinRequestIntervalMs: caLLMCfg.MinRequestIntervalMs,
-			Effort:               caLLMCfg.Effort,
-		}
-		llmCfg = llmCfg.WithEnv()
-		client, err := llm.NewClient(llmCfg)
-		if err != nil {
-			slog.Warn("insight: code analyst: failed to initialize dedicated LLM client, falling back to shared", "error", err)
-			caLLMClient = e.llmClient
-		} else {
-			caLLMClient = client
-		}
-	} else {
-		caLLMClient = e.llmClient
-	}
-
-	configFn := func() code_analyst.CodeAnalysisConfig {
-		cfg := config.Load()
-		return code_analyst.CodeAnalysisConfig{
-			Enabled:             cfg.CodeAnalysis.Enabled,
-			MaxFilesPerRun:      cfg.CodeAnalysis.MaxFilesPerRun,
-			TokenBudgetPerRun:   cfg.CodeAnalysis.TokenBudgetPerRun,
-			MinChurnScore:       cfg.CodeAnalysis.MinChurnScore,
-			ConfidenceThreshold: cfg.CodeAnalysis.ConfidenceThreshold,
-			ScanInterval:        cfg.CodeAnalysis.ScanInterval,
-			IncludeGitHistory:   cfg.CodeAnalysis.IncludeGitHistory,
-			GitHistoryDepth:     cfg.CodeAnalysis.GitHistoryDepth,
-			Categories:          cfg.CodeAnalysis.Categories,
-			ExcludePaths:        cfg.CodeAnalysis.ExcludePaths,
-			VerifyFindings:      cfg.CodeAnalysis.VerifyFindings,
-		}
-	}
-
-	wikiStore := wiki_engine.NewDBWikiStore(e.database)
-	wikiFn := func(ctx context.Context, filePath string, findings []db.CodeFinding) (string, error) {
-		// Deterministic page ID based on file path so re-runs update the same page.
-		sanitized := strings.NewReplacer("/", "-", "\\", "-", ".", "-", " ", "-").Replace(filePath)
-		pageID := "ca-" + sanitized
-
-		// Build markdown content from findings.
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("# Code Analysis: %s\n\n", filePath))
-		sb.WriteString(fmt.Sprintf("**File:** `%s`\n\n", filePath))
-		sb.WriteString(fmt.Sprintf("**Findings:** %d\n\n", len(findings)))
-		sb.WriteString("## Findings\n\n")
-		for i, f := range findings {
-			sb.WriteString(fmt.Sprintf("### %d. [%s] %s\n\n", i+1, strings.ToUpper(f.Severity), f.Title))
-			sb.WriteString(fmt.Sprintf("**Category:** %s  \n", f.Category))
-			if f.LineStart > 0 {
-				sb.WriteString(fmt.Sprintf("**Lines:** %d–%d  \n", f.LineStart, f.LineEnd))
-			}
-			sb.WriteString(fmt.Sprintf("**Confidence:** %.0f%%  \n\n", f.Confidence*100))
-			sb.WriteString(f.Description + "\n\n")
-			if f.Suggestion != "" {
-				sb.WriteString("**Suggestion:** " + f.Suggestion + "\n\n")
-			}
-		}
-
-		content := sb.String()
-
-		// Try to update an existing page; create a new one if not found.
-		existing, err := wikiStore.GetPage(pageID)
-		if err == nil && existing != nil {
-			existing.Content = content
-			existing.Status = "published"
-			existing.StalenessScore = 0
-			existing.Version++
-			existing.Tags = []string{"code_analysis", "automated"}
-			if updateErr := wikiStore.UpdatePage(existing); updateErr != nil {
-				return "", fmt.Errorf("update wiki page: %w", updateErr)
-			}
-			slog.Info("insight: code analyst: updated wiki page", "page_id", pageID, "file", filePath)
-			return pageID, nil
-		}
-
-		page := &db.WikiPage{
-			ID:          pageID,
-			PageType:    "code_analysis",
-			Title:       fmt.Sprintf("Code Analysis: %s", filePath),
-			Content:     content,
-			Status:      "published",
-			Tags:        []string{"code_analysis", "automated"},
-			GeneratedBy: "code_analyst",
-			Version:     1,
-		}
-		if saveErr := wikiStore.SavePage(page); saveErr != nil {
-			return "", fmt.Errorf("save wiki page: %w", saveErr)
-		}
-		slog.Info("insight: code analyst: created wiki page", "page_id", pageID, "file", filePath)
-		return pageID, nil
-	}
-
-	projRoot := e.projectRoot
-	if projRoot == "" {
-		projRoot = "."
-	}
-
-	e.codeAnalyst = code_analyst.NewEngine(store, caLLMClient, projRoot, configFn, wikiFn)
-	// Wire language function so LLM prompts are returned in the user's language.
-	initCaLang := e.lang
-	e.codeAnalyst.SetLangFn(func() string {
-		if l := config.Load().Language; l != "" {
-			return l
-		}
-		return initCaLang
-	})
-}
-
-// RunCodeAnalysis executes a full code analysis cycle. triggerType should be
-// "manual" for user-initiated runs or "scheduled" for automatic runs.
-// categories may be empty to run all configured categories.
-func (e *Engine) RunCodeAnalysis(ctx context.Context, triggerType string, categories []string) (*code_analyst.RunResult, error) {
-	if e.codeAnalyst == nil {
-		return nil, nil
-	}
-	result, err := e.codeAnalyst.Run(ctx, triggerType, categories)
-	if err != nil {
-		return nil, fmt.Errorf("run code analysis: %w", err)
-	}
-	return result, nil
-}
-
-// IsCodeAnalysisRunning reports whether a code analysis run is currently in
-// progress.
-func (e *Engine) IsCodeAnalysisRunning() bool {
-	if e.codeAnalyst == nil {
-		return false
-	}
-	return e.codeAnalyst.IsRunning()
 }
 
 func (e *Engine) Start(ctx context.Context) error {

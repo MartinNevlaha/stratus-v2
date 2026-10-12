@@ -7,7 +7,7 @@
   import ImageUploadToast from './ImageUploadToast.svelte'
   import { uploadTerminalImage } from '$lib/api'
   import { appState } from '$lib/store'
-  import { sanitizeTerminalPayload } from '$lib/findingFlow'
+  import { sanitizeTerminalPayload } from '$lib/ui'
 
   let container: HTMLDivElement
   let term: Terminal

@@ -257,14 +257,13 @@ func cmdServe() {
 	// Resolve LLM configs: top-level → subsystem-specific overrides
 	cfg.Insight.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.Insight.LLM)
 	cfg.Guardian.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.Guardian.LLM)
-	cfg.CodeAnalysis.LLM = config.ResolveLLMConfig(cfg.LLM, cfg.CodeAnalysis.LLM)
 	cfg.STT.Model = normalizeSTTModel(cfg.STT.Model)
 
 	// Initialize Insight engine
 	var insightEngine *insight.Engine
 	var insightCancel context.CancelFunc
 	if cfg.Insight.Enabled {
-		insightEngine = insight.NewEngineWithFullConfig(database, cfg.Insight, cfg.Wiki, cfg.Evolution, cfg.CodeAnalysis, cfg.Language)
+		insightEngine = insight.NewEngineWithFullConfig(database, cfg.Insight, cfg.Wiki, cfg.Evolution, cfg.Language)
 		if eventBus != nil {
 			insightEngine.SetEventBus(eventBus)
 		}
@@ -288,14 +287,6 @@ func cmdServe() {
 	}
 	if insightEngine != nil {
 		srv.SetProductIntelligenceEngine(insightEngine.ProductIntelligence())
-	}
-
-	// Wire code analysis trigger so the API can start a background run.
-	if insightEngine != nil {
-		srv.SetCodeAnalysisTrigger(func(ctx context.Context, categories []string) error {
-			_, err := insightEngine.RunCodeAnalysis(ctx, "manual", categories)
-			return err
-		})
 	}
 
 	// Start Guardian background service.

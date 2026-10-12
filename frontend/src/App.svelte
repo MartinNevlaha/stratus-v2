@@ -9,7 +9,6 @@
   import Settings from './routes/Settings.svelte'
   import Wiki from './routes/Wiki.svelte'
   import Evolution from './routes/Evolution.svelte'
-  import CodeQuality from './routes/CodeQuality.svelte'
   import Terminal from './components/Terminal.svelte'
   import ToastStack from './components/ToastStack.svelte'
 
@@ -23,7 +22,6 @@
     { id: 'insight' as const, label: 'Insight' },
     { id: 'wiki' as const, label: 'Wiki' },
     { id: 'evolution' as const, label: 'Evolution' },
-    { id: 'code-quality' as const, label: 'Code Quality' },
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
     { id: 'settings' as const, label: 'Settings' },
@@ -144,8 +142,6 @@
         <Wiki />
       {:else if appState.activeTab === 'evolution'}
         <Evolution />
-      {:else if appState.activeTab === 'code-quality'}
-        <CodeQuality />
       {:else if appState.activeTab === 'retrieval'}
         <Retrieval />
       {:else if appState.activeTab === 'settings'}

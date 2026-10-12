@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDuration, formatTokens, isAgentStale, toggleSet, STALE_AGENT_MS } from './ui'
+import { formatDuration, formatTokens, isAgentStale, toggleSet, sanitizeTerminalPayload, STALE_AGENT_MS } from './ui'
 
 describe('formatDuration', () => {
   it('should format seconds, minutes and hours between two timestamps', () => {
@@ -41,5 +41,12 @@ describe('formatTokens', () => {
     expect(formatTokens(1234)).toBe('1.2k')
     expect(formatTokens(48_000)).toBe('48k')
     expect(formatTokens(2_500_000)).toBe('2.5M')
+  })
+})
+
+describe('sanitizeTerminalPayload', () => {
+  it('should remove CR and LF characters', () => {
+    const result = sanitizeTerminalPayload('a\r\nb\nc\rd')
+    expect(result).not.toMatch(/[\r\n]/)
   })
 })

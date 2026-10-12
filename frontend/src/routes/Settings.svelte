@@ -264,7 +264,7 @@
             <option value="en">English</option>
             <option value="sk">Slovenčina</option>
           </select>
-          <span class="hint">Controls the language of Evolution hypotheses and Guardian/Code Analysis findings.</span>
+          <span class="hint">Controls the language of Evolution hypotheses and Guardian findings.</span>
         </div>
       </div>
 

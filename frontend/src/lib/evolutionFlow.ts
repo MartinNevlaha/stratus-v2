@@ -1,5 +1,5 @@
 import type { EvolutionHypothesis } from './types'
-import { sanitizeTerminalPayload } from './findingFlow'
+import { sanitizeTerminalPayload } from './ui'
 
 export function buildEvolutionCommand(h: EvolutionHypothesis): string {
   const wikiRef = h.wiki_page_id ? ` [wiki:${h.wiki_page_id}]` : ''
