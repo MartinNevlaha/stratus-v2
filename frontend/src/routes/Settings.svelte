@@ -50,8 +50,6 @@
   let insightCfg = $state<InsightConfig>({
     enabled: false,
     interval: 1,
-    max_proposals: 5,
-    min_confidence: 0.7,
     llm: { provider: '', model: '', api_key: '', base_url: '', timeout: 120, max_tokens: 16384, temperature: 0.7, max_retries: 0, concurrency: 0 },
   })
 
@@ -387,7 +385,7 @@
     <section class="card">
       <h3>Insight — AI Coach</h3>
       <p class="section-desc">
-        Autonomous pattern detection, proposal generation, scorecards, and routing recommendations.
+        Background engine behind the wiki, learn pipeline and Product Intelligence.
         Requires server restart after enabling/disabling.
       </p>
 
@@ -402,17 +400,6 @@
         <div class="form-group">
           <label>Analysis interval (hours)</label>
           <input type="number" min="1" max="168" bind:value={insightCfg.interval} />
-        </div>
-        <div class="form-group">
-          <label>Max proposals per run</label>
-          <input type="number" min="1" max="50" bind:value={insightCfg.max_proposals} />
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label>Min confidence (0-1)</label>
-          <input type="number" min="0" max="1" step="0.05" bind:value={insightCfg.min_confidence} />
         </div>
       </div>
 

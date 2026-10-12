@@ -2,7 +2,7 @@ import type { DashboardState, Language, VersionInfo } from './types'
 import { getDashboardState, getLanguage, getVersion, triggerUpdate } from './api'
 import { wsClient } from './ws'
 
-export type TabId = 'overview' | 'agents' | 'memory' | 'retrieval' | 'insight' | 'wiki' | 'settings' | 'terminal'
+export type TabId = 'overview' | 'agents' | 'memory' | 'retrieval' | 'wiki' | 'settings' | 'terminal'
 
 interface AppState {
   dashboard: DashboardState | null
@@ -46,7 +46,7 @@ export function dismissToast(id: number) {
 function emitSwarmUpdate() { appState.swarmUpdateCounter++ }
 
 const TAB_KEY = 'stratus-active-tab'
-const TAB_IDS: TabId[] = ['overview', 'agents', 'memory', 'retrieval', 'insight', 'wiki', 'settings', 'terminal']
+const TAB_IDS: TabId[] = ['overview', 'agents', 'memory', 'retrieval', 'wiki', 'settings', 'terminal']
 
 function loadActiveTab(): TabId {
   try {

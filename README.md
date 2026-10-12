@@ -266,7 +266,6 @@ Hooks ship in the `stratus` plugin and register automatically — no manual `.cl
 | `/bug` | Bug-fixing workflow: analyze → fix → review → complete |
 | `/swarm` | Multi-agent parallel execution in isolated git worktrees |
 | `/e2e` | Playwright E2E testing: setup → plan → generate → heal |
-| `/learn` | Pattern learning: detect candidates, generate proposals |
 | `/resume` | Resume a workflow from where it left off |
 | `/code-review` | Deep code review with structured feedback |
 | `/run-tests` | Test execution with coverage reporting |
@@ -289,7 +288,6 @@ Hooks ship in the `stratus` plugin and register automatically — no manual `.cl
 | `/bug` | Bug-fixing workflow |
 | `/swarm` | Multi-agent coordination with file reservations + checkpointing |
 | `/e2e` | Playwright E2E testing: setup → plan → generate → heal |
-| `/learn` | Pattern learning pipeline |
 | `/team` | Team coordination and handoff |
 | `/sync-stratus` | Installation health check |
 

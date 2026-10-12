@@ -779,7 +779,6 @@ func printInitSummary(target string) {
   /spec                        — spec-driven development
   /spec-complex                — complex spec (discovery→design→plan→implement→verify→learn)
   /bug                         — bug-fixing workflow
-  /learn                       — pattern learning
   /sync-stratus                — installation health check
   /vexor-cli                   — semantic file discovery
   /governance-db               — query governance docs and ADRs
@@ -830,7 +829,6 @@ func printInitSummary(target string) {
   /bug           — bug-fixing workflow
   /e2e           — Playwright E2E testing (setup→plan→generate→heal)
   /swarm         — multi-agent swarm with file reservations + checkpointing
-  /learn         — pattern learning
   /sync-stratus  — installation health check
   /team          — parallel delivery`
 

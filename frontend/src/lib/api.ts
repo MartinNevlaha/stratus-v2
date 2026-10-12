@@ -29,7 +29,6 @@ import type {
   LLMConfig,
   SwarmSignal,
   SwarmEvidence,
-  AgentScorecard,
   SolutionPattern,
   ProblemStats,
   KBRecommendation,
@@ -41,7 +40,6 @@ import type {
   WikiQueryResult,
   VaultStatus,
   WikiConfig,
-  InsightProposal,
   OnboardingProgress,
 } from './types'
 
@@ -227,28 +225,6 @@ export const updateSkill = (name: string, data: { description: string; disable_m
   put<{ status: string; name: string }>(`/skills/${name}`, data)
 export const deleteSkill = (name: string) => del<{ status: string; name: string }>(`/skills/${name}`)
 
-// Insight
-export const getInsightStatus = () =>
-  get<{ enabled: boolean; state: any; metrics: any; recent_patterns: any[]; recent_analyses: any[] }>('/insight/status')
-
-export const triggerInsightAnalysis = () =>
-  post<{ status: string; message: string }>('/insight/trigger', {})
-
-export const getInsightPatterns = (type?: string, minConfidence?: number, limit?: number) => {
-  const params: Record<string, string> = {}
-  if (type) params.type = type
-  if (minConfidence) params.min_confidence = String(minConfidence)
-  if (limit) params.limit = String(limit)
-  return get<{ patterns: any[]; count: number }>('/insight/patterns', params)
-}
-
-export const getInsightAnalyses = (type?: string, limit?: number) => {
-  const params: Record<string, string> = {}
-  if (type) params.type = type
-  if (limit) params.limit = String(limit)
-  return get<{ analyses: any[]; count: number }>('/insight/analyses', params)
-}
-
 // Rules
 export const listRules = () => get<RulesResponse>('/rules')
 export const getRule = (name: string) => get<RuleDef>(`/rules/${name}`)
@@ -288,8 +264,6 @@ export const getMissionSignals = (missionId: string) =>
   get<SwarmSignal[]>(`/swarm/missions/${missionId}/signals`)
 export const getTicketEvidence = (ticketId: string) =>
   get<SwarmEvidence[]>(`/swarm/tickets/${ticketId}/evidence`)
-export const getAgentScorecards = (window = '7d') =>
-  get<{ scorecards: AgentScorecard[] }>(`/insight/scorecards/agents?window=${window}`)
 
 export const listKBSolutions = (params?: { problem_class?: string; repo_type?: string; min_success_rate?: number; limit?: number }) => {
   const q = new URLSearchParams()
@@ -349,23 +323,6 @@ export const triggerVaultSync = () =>
 
 export const getVaultStatus = () =>
   get<VaultStatus>('/wiki/vault/status')
-
-export const getInsightProposals = (params?: { type?: string; status?: string; limit?: number; offset?: number }) => {
-  const q = new URLSearchParams()
-  if (params?.type) q.set('type', params.type)
-  if (params?.status) q.set('status', params.status)
-  if (params?.limit) q.set('limit', String(params.limit))
-  if (params?.offset) q.set('offset', String(params.offset))
-  return get<{ proposals: InsightProposal[]; count: number }>(`/insight/proposals${q.toString() ? '?' + q : ''}`)
-}
-
-export const createInsightProposal = (body: {
-  type: string
-  title: string
-  description: string
-  signal_refs?: string[]
-  wiki_page_id?: string
-}) => post<InsightProposal>('/insight/proposals', body)
 
 export const getWikiConfig = () => get<WikiConfig>('/wiki/config')
 

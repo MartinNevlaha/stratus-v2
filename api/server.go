@@ -357,29 +357,10 @@ func (s *Server) Handler() http.Handler {
 	// Insight
 	mux.HandleFunc("GET /api/insight/config", s.handleGetInsightConfig)
 	mux.HandleFunc("PUT /api/insight/config", s.handleUpdateInsightConfig)
-	mux.HandleFunc("GET /api/insight/status", s.handleGetInsightStatus)
-	mux.HandleFunc("POST /api/insight/trigger", s.handleTriggerInsightAnalysis)
-	mux.HandleFunc("GET /api/insight/patterns", s.handleGetInsightPatterns)
-	mux.HandleFunc("GET /api/insight/analyses", s.handleGetInsightAnalyses)
 	mux.HandleFunc("GET /api/insight/proposals", s.handleGetInsightProposals)
 	mux.HandleFunc("POST /api/insight/proposals", s.handleCreateInsightProposal)
 	mux.HandleFunc("GET /api/insight/proposals/{id}", s.handleGetInsightProposal)
-	mux.HandleFunc("POST /api/insight/proposals/generate", s.handleTriggerInsightProposalGeneration)
-	mux.HandleFunc("GET /api/insight/dashboard", s.handleGetInsightDashboard)
 	mux.HandleFunc("PATCH /api/insight/proposals/{id}/status", s.handleUpdateInsightProposalStatus)
-
-	// Insight Scorecards
-	mux.HandleFunc("GET /api/insight/scorecards/agents", s.handleGetAgentScorecards)
-	mux.HandleFunc("GET /api/insight/scorecards/agents/{name}", s.handleGetAgentScorecardByName)
-	mux.HandleFunc("GET /api/insight/scorecards/workflows", s.handleGetWorkflowScorecards)
-	mux.HandleFunc("GET /api/insight/scorecards/workflows/{type}", s.handleGetWorkflowScorecardByType)
-	mux.HandleFunc("POST /api/insight/scorecards/compute", s.handleTriggerScorecardComputation)
-	mux.HandleFunc("GET /api/insight/scorecards/highlights", s.handleGetScorecardHighlights)
-
-	// Insight Routing Recommendations
-	mux.HandleFunc("GET /api/insight/routing/recommendations", s.handleGetRoutingRecommendations)
-	mux.HandleFunc("GET /api/insight/routing/recommendations/{id}", s.handleGetRoutingRecommendation)
-	mux.HandleFunc("POST /api/insight/routing/analyze", s.handleTriggerRoutingAnalysis)
 
 	// Insight LLM
 	mux.HandleFunc("POST /api/insight/llm/test", s.handleTestLLMConnection)

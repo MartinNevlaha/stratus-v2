@@ -73,11 +73,9 @@ type LLMConfig struct {
 }
 
 type InsightConfig struct {
-	Enabled       bool      `json:"enabled"`
-	Interval      int       `json:"interval"`
-	MaxProposals  int       `json:"max_proposals"`
-	MinConfidence float64   `json:"min_confidence"`
-	LLM           LLMConfig `json:"llm"`
+	Enabled  bool      `json:"enabled"`
+	Interval int       `json:"interval"`
+	LLM      LLMConfig `json:"llm"`
 }
 
 // LearnConfig configures the workflow `learn → complete` pipeline.
@@ -254,10 +252,8 @@ func Default() Config {
 		},
 		MetricsBroadcastInterval: 30,
 		Insight: InsightConfig{
-			Enabled:       false,
-			Interval:      1,
-			MaxProposals:  5,
-			MinConfidence: 0.7,
+			Enabled:  false,
+			Interval: 1,
 			LLM: LLMConfig{
 				Provider:    "",
 				Model:       "",

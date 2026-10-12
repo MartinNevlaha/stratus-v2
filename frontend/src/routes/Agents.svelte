@@ -3,15 +3,12 @@
   import {
     listAgents, listSkills, createAgent, updateAgent, deleteAgent,
     assignSkills, createSkill, updateSkill, deleteSkill,
-    listRules, createRule, updateRule, deleteRule,
-    getAgentScorecards
+    listRules, createRule, updateRule, deleteRule
   } from '$lib/api'
-  import type { AgentDef, SkillDef, AgentsResponse, SkillsResponse, RuleDef, RulesResponse, AgentScorecard } from '$lib/types'
-  import AgentScorecardStrip from '../components/AgentScorecardStrip.svelte'
+  import type { AgentDef, SkillDef, AgentsResponse, SkillsResponse, RuleDef, RulesResponse } from '$lib/types'
 
   let agents = $state<AgentsResponse | null>(null)
   let skills = $state<SkillDef[]>([])
-  let scorecards = $state<Map<string, AgentScorecard>>(new Map())
   let loading = $state(true)
   let error = $state<string | null>(null)
   let activeView = $state<'agents' | 'skills' | 'rules'>('agents')
@@ -148,15 +145,7 @@
     }
   }
 
-  onMount(async () => {
-    await loadData()
-    try {
-      const resp = await getAgentScorecards()
-      const m = new Map<string, AgentScorecard>()
-      for (const sc of resp.scorecards ?? []) m.set(sc.agent_name, sc)
-      scorecards = m
-    } catch { /* insight may not be enabled */ }
-  })
+  onMount(loadData)
 
   function navigateToSkill(skill: string) {
     activeView = 'skills'
@@ -479,7 +468,6 @@
             {:else}
               <div class="card-skills empty">No skills assigned</div>
             {/if}
-            <AgentScorecardStrip scorecard={scorecards.get(name)} />
           </div>
         {/each}
       </div>

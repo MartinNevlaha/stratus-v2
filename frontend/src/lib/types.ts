@@ -378,8 +378,6 @@ export interface GuardianConfig {
 export interface InsightConfig {
   enabled: boolean
   interval: number
-  max_proposals: number
-  min_confidence: number
   llm: LLMConfig
 }
 
@@ -392,25 +390,6 @@ export interface SwarmEvidence {
   agent: string
   verdict: string
   created_at: string
-}
-
-export interface AgentScorecard {
-  id: string
-  agent_name: string
-  window: string
-  window_start: string
-  window_end: string
-  total_runs: number
-  success_rate: number
-  failure_rate: number
-  review_pass_rate: number
-  rework_rate: number
-  avg_cycle_time_ms: number
-  regression_rate: number
-  confidence_score: number
-  trend: string
-  created_at: string
-  updated_at: string
 }
 
 export interface SolutionPattern {
@@ -502,23 +481,6 @@ export interface VaultStatus {
   file_count: number
   vault_path: string
   errors: string[]
-}
-
-export interface InsightProposal {
-  id: string
-  type: string
-  title: string
-  description: string
-  status: string
-  risk_level: string
-  confidence: number
-  impact_score: number
-  effort_score: number
-  idempotency_hash: string
-  wiki_page_id?: string
-  signal_refs?: string[]
-  created_at: string
-  updated_at: string
 }
 
 export interface WikiConfig {

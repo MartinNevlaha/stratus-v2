@@ -42,18 +42,6 @@ func (s *Scheduler) Run(ctx context.Context) error {
 func (s *Scheduler) tick(ctx context.Context) {
 	slog.Info("insight: scheduled analysis triggered")
 
-	if err := s.engine.RunPatternDetection(ctx); err != nil {
-		slog.Error("insight: pattern detection failed", "error", err)
-	}
-
-	if err := s.engine.RunProposalGeneration(ctx); err != nil {
-		slog.Error("insight: proposal generation failed", "error", err)
-	}
-
-	if err := s.engine.RunWorkflowAnalysis(ctx); err != nil {
-		slog.Error("insight: workflow analysis failed", "error", err)
-	}
-
 	interval := normalizeIntervalHours(s.engine.config.Interval)
 	since := time.Now().Add(-time.Duration(interval) * time.Hour)
 	if built, err := s.engine.BuildRecentArtifacts(ctx, since); err != nil {
@@ -83,10 +71,6 @@ func (s *Scheduler) tick(ctx context.Context) {
 			"experiments_evaluated", synResult.ExperimentsEvaluated,
 			"workflows_promoted", synResult.WorkflowsPromoted,
 			"workflows_rejected", synResult.WorkflowsRejected)
-	}
-
-	if err := s.engine.RunAnalysis(); err != nil {
-		slog.Error("insight: analysis failed", "error", err)
 	}
 
 	// Wiki ingest and maintenance

@@ -19,14 +19,9 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/ingest"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/knowledge_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/patterns"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/proposals"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/routing"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/scorecards"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/trajectory_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
 )
 
@@ -41,11 +36,6 @@ type Engine struct {
 	eventStore          events.Store
 	subscriptionID      events.SubscriptionID
 	llmClient           llm.Client
-	patternEngine       *patterns.Engine
-	proposalEngine      *proposals.Engine
-	scorecardEngine     *scorecards.Engine
-	routingEngine       *routing.Engine
-	workflowAnalyzer    *workflow_intelligence.WorkflowAnalyzer
 	artifactBuilder     *artifacts.ArtifactBuilder
 	knowledgeEngine     *knowledge_engine.Engine
 	trajectoryRecorder  *trajectory_engine.TrajectoryRecorder
@@ -65,8 +55,6 @@ type Engine struct {
 	running     bool
 	mu          sync.Mutex
 	projectRoot string
-
-	analysisMu sync.Mutex
 }
 
 func NewEngine(database *db.DB, cfg config.InsightConfig) *Engine {
@@ -76,11 +64,6 @@ func NewEngine(database *db.DB, cfg config.InsightConfig) *Engine {
 	}
 	e.initLLMClient()
 	e.scheduler = newScheduler(e)
-	e.initPatternEngine()
-	e.initProposalEngine()
-	e.initScorecardEngine()
-	e.initRoutingEngine()
-	e.initWorkflowAnalyzer()
 	e.initArtifactBuilder()
 	e.initKnowledgeEngine()
 	e.initTrajectoryEngine()
@@ -111,11 +94,6 @@ func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg 
 	}
 	e.initLLMClient()
 	e.scheduler = newScheduler(e)
-	e.initPatternEngine()
-	e.initProposalEngine()
-	e.initScorecardEngine()
-	e.initRoutingEngine()
-	e.initWorkflowAnalyzer()
 	e.initArtifactBuilder()
 	e.initKnowledgeEngine()
 	e.initTrajectoryEngine()
@@ -134,11 +112,6 @@ func NewEngineWithEvents(database *db.DB, cfg config.InsightConfig, eventBus eve
 	}
 	e.initLLMClient()
 	e.scheduler = newScheduler(e)
-	e.initPatternEngine()
-	e.initProposalEngine()
-	e.initScorecardEngine()
-	e.initRoutingEngine()
-	e.initWorkflowAnalyzer()
 	e.initArtifactBuilder()
 	e.initKnowledgeEngine()
 	e.initTrajectoryEngine()
@@ -175,40 +148,6 @@ func (e *Engine) initLLMClient() {
 	budgeted := llm.NewBudgetedClient(client, e.database, e.dailyTokenBudget)
 	e.llmClient = budgeted
 	slog.Info("insight: LLM client initialized with budget tracking", "provider", llmCfg.Provider, "model", llmCfg.Model, "daily_budget", e.dailyTokenBudget)
-}
-
-func (e *Engine) initPatternEngine() {
-	eventQuery := patterns.NewDBEventQuery(e.database.SQL())
-	patternStore := patterns.NewDBPatternStore(e.database)
-	config := patterns.DefaultDetectionConfig()
-	e.patternEngine = patterns.NewEngine(eventQuery, patternStore, config)
-}
-
-func (e *Engine) initProposalEngine() {
-	patternStore := patterns.NewDBPatternStore(e.database)
-	proposalStore := proposals.NewDBProposalStore(e.database)
-	config := proposals.DefaultEngineConfig()
-	e.proposalEngine = proposals.NewEngine(patternStore, proposalStore, config)
-}
-
-func (e *Engine) initScorecardEngine() {
-	eventQuery := newScorecardEventQuery(e.database.SQL())
-	scorecardStore := scorecards.NewDBScorecardStore(e.database)
-	config := scorecards.DefaultScorecardConfig()
-	e.scorecardEngine = scorecards.NewEngine(eventQuery, scorecardStore, config)
-}
-
-func (e *Engine) initRoutingEngine() {
-	scorecardStore := scorecards.NewDBScorecardStore(e.database)
-	routingStore := routing.NewDBRoutingStore(e.database)
-	config := routing.DefaultRoutingConfig()
-	e.routingEngine = routing.NewEngine(scorecardStore, routingStore, config)
-}
-
-func (e *Engine) initWorkflowAnalyzer() {
-	eventQuery := newWorkflowEventQuery(e.database.SQL())
-	config := workflow_intelligence.DefaultAnalyzerConfig()
-	e.workflowAnalyzer = workflow_intelligence.NewWorkflowAnalyzer(eventQuery, config)
 }
 
 func (e *Engine) initArtifactBuilder() {
@@ -271,28 +210,6 @@ func (e *Engine) Start(ctx context.Context) error {
 
 	if e.running {
 		return errors.New("insight: engine already running")
-	}
-
-	state, err := e.database.GetInsightState()
-	if err != nil {
-		return fmt.Errorf("get state: %w", err)
-	}
-
-	if state == nil {
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		state = &db.InsightState{
-			LastAnalysis:       now,
-			NextAnalysis:       now,
-			PatternsDetected:   0,
-			ProposalsGenerated: 0,
-			ProposalsAccepted:  0,
-			AcceptanceRate:     0,
-			ModelVersion:       "v1",
-			ConfigJSON:         "{}",
-		}
-		if err := e.database.SaveInsightState(state); err != nil {
-			return fmt.Errorf("init state: %w", err)
-		}
 	}
 
 	e.ctx, e.cancel = context.WithCancel(ctx)
@@ -537,43 +454,6 @@ func (e *Engine) HandleEvent(ctx context.Context, event events.Event) {
 		go e.handleWorkflowWikiStaleness(event.Payload)
 	}
 
-	if event.Type == events.EventGovernanceViolation {
-		go e.handleGovernanceViolation(ctx, event.Payload)
-	}
-}
-
-// handleGovernanceViolation pairs an incoming Guardian governance.violation
-// event with a remediation proposal in Insight. Runs in its own goroutine
-// because proposal persistence is a DB write and must not block the bus.
-//
-// Errors are logged but never surfaced: a failed pairing should not stop
-// other subscribers from processing the same event.
-func (e *Engine) handleGovernanceViolation(ctx context.Context, payload map[string]any) {
-	if e.proposalEngine == nil || e.database == nil {
-		return
-	}
-
-	alertID, _ := payload["alert_id"].(int64)
-	if alertID == 0 {
-		// Some bus encoders round-trip int64 as float64; accept both.
-		if f, ok := payload["alert_id"].(float64); ok {
-			alertID = int64(f)
-		}
-	}
-	file, _ := payload["file"].(string)
-	rules, _ := payload["rules"].(string)
-	severity, _ := payload["severity"].(string)
-
-	proposal := proposals.NewGovernanceRemediationProposal(alertID, file, rules, severity)
-
-	store := proposals.NewDBProposalStore(e.database)
-	if err := store.SaveProposal(ctx, proposal); err != nil {
-		slog.Warn("insight: failed to save governance remediation proposal",
-			"error", err, "alert_id", alertID, "file", file)
-		return
-	}
-	slog.Info("insight: paired governance proposal saved",
-		"proposal_id", proposal.ID, "alert_id", alertID, "file", file)
 }
 
 // handleWorkflowWikiStaleness boosts the staleness score of wiki pages that
@@ -644,160 +524,6 @@ func (e *Engine) SetEventBus(bus events.EventBus) {
 	}
 	e.eventBus = bus
 	e.eventStore = events.NewDBStore(e.database.SQL())
-}
-
-func (e *Engine) PatternEngine() *patterns.Engine {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.patternEngine
-}
-
-func (e *Engine) RunPatternDetection(ctx context.Context) error {
-	if e.patternEngine == nil {
-		return errors.New("insight: pattern engine not initialized")
-	}
-	return e.patternEngine.RunDetection(ctx)
-}
-
-func (e *Engine) ProposalEngine() *proposals.Engine {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.proposalEngine
-}
-
-func (e *Engine) RunProposalGeneration(ctx context.Context) error {
-	if e.proposalEngine == nil {
-		return errors.New("insight: proposal engine not initialized")
-	}
-	return e.proposalEngine.RunGeneration(ctx)
-}
-
-func (e *Engine) ScorecardEngine() *scorecards.Engine {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.scorecardEngine
-}
-
-func (e *Engine) RunScorecardComputation(ctx context.Context) error {
-	if e.scorecardEngine == nil {
-		return errors.New("insight: scorecard engine not initialized")
-	}
-	return e.scorecardEngine.RunComputation(ctx)
-}
-
-func (e *Engine) RoutingEngine() *routing.Engine {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.routingEngine
-}
-
-func (e *Engine) RunRoutingAnalysis(ctx context.Context) error {
-	if e.routingEngine == nil {
-		return errors.New("insight: routing engine not initialized")
-	}
-	return e.routingEngine.RunAnalysis(ctx)
-}
-
-func newScorecardEventQuery(db *sql.DB) scorecards.EventQuery {
-	return &scorecardEventQuery{db: db}
-}
-
-type scorecardEventQuery struct {
-	db *sql.DB
-}
-
-func (q *scorecardEventQuery) GetEventsByTypesInTimeRange(ctx context.Context, eventTypes []string, start, end time.Time, limit int) ([]scorecards.EventForScorecard, error) {
-	if limit <= 0 {
-		limit = 10000
-	}
-	if len(eventTypes) == 0 {
-		return []scorecards.EventForScorecard{}, nil
-	}
-
-	placeholders := ""
-	for i := range eventTypes {
-		if i > 0 {
-			placeholders += ","
-		}
-		placeholders += "?"
-	}
-
-	query := `SELECT id, type, timestamp, source, payload
-		FROM insight_events
-		WHERE type IN (` + placeholders + `) AND timestamp >= ? AND timestamp <= ?
-		ORDER BY timestamp DESC
-		LIMIT ?`
-
-	args := make([]any, 0, len(eventTypes)+3)
-	for _, et := range eventTypes {
-		args = append(args, et)
-	}
-	args = append(args, start.Format(time.RFC3339Nano))
-	args = append(args, end.Format(time.RFC3339Nano))
-	args = append(args, limit)
-
-	rows, err := q.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query events: %w", err)
-	}
-	defer rows.Close()
-
-	var events []scorecards.EventForScorecard
-	for rows.Next() {
-		var e scorecards.EventForScorecard
-		var timestamp, payloadStr string
-		if err := rows.Scan(&e.ID, &e.Type, &timestamp, &e.Source, &payloadStr); err != nil {
-			return nil, fmt.Errorf("scan event: %w", err)
-		}
-		if parsed, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
-			slog.Warn("failed to parse timestamp", "event_id", e.ID, "timestamp", timestamp, "error", err)
-		} else {
-			e.Timestamp = parsed
-		}
-		if err := unmarshalPayload(payloadStr, &e); err != nil {
-			slog.Warn("failed to parse event payload", "event_id", e.ID, "error", err)
-		}
-		events = append(events, e)
-	}
-
-	return events, rows.Err()
-}
-
-func unmarshalPayload(payloadStr string, e *scorecards.EventForScorecard) error {
-	if payloadStr == "" {
-		e.Payload = make(map[string]any)
-		return nil
-	}
-	if err := json.Unmarshal([]byte(payloadStr), &e.Payload); err != nil {
-		return err
-	}
-	if wfID, ok := e.Payload["workflow_id"].(string); ok {
-		e.WorkflowID = wfID
-	}
-	if agentName, ok := e.Payload["agent_name"].(string); ok {
-		e.AgentName = agentName
-	}
-	if phase, ok := e.Payload["phase"].(string); ok {
-		e.Phase = phase
-	}
-	if durMs, ok := e.Payload["duration_ms"].(float64); ok {
-		e.DurationMs = int64(durMs)
-	}
-	return nil
-}
-
-func (e *Engine) WorkflowAnalyzer() *workflow_intelligence.WorkflowAnalyzer {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.workflowAnalyzer
-}
-
-func (e *Engine) RunWorkflowAnalysis(ctx context.Context) error {
-	if e.workflowAnalyzer == nil {
-		return errors.New("insight: workflow analyzer not initialized")
-	}
-	_, err := e.workflowAnalyzer.AnalyzeWorkflowPerformance(ctx)
-	return err
 }
 
 func (e *Engine) ArtifactBuilder() *artifacts.ArtifactBuilder {
@@ -953,76 +679,6 @@ func (e *Engine) RunProductAnalysis(ctx context.Context, projectPath string, pro
 
 	cfg := product_intelligence.ProjectAnalysisConfig{}
 	return e.productIntelligence.AnalyzeProject(ctx, project.ID, cfg)
-}
-
-func newWorkflowEventQuery(db *sql.DB) workflow_intelligence.EventQuery {
-	return &workflowEventQuery{db: db}
-}
-
-type workflowEventQuery struct {
-	db *sql.DB
-}
-
-func (q *workflowEventQuery) GetEventsByTypesInTimeRange(ctx context.Context, eventTypes []string, start, end time.Time, limit int) ([]workflow_intelligence.EventForMetrics, error) {
-	if limit <= 0 {
-		limit = 10000
-	}
-	if len(eventTypes) == 0 {
-		return []workflow_intelligence.EventForMetrics{}, nil
-	}
-
-	placeholders := ""
-	for i := range eventTypes {
-		if i > 0 {
-			placeholders += ","
-		}
-		placeholders += "?"
-	}
-
-	query := `SELECT id, type, timestamp, source, payload
-		FROM insight_events
-		WHERE type IN (` + placeholders + `) AND timestamp >= ? AND timestamp <= ?
-		ORDER BY timestamp DESC
-		LIMIT ?`
-
-	args := make([]any, 0, len(eventTypes)+3)
-	for _, et := range eventTypes {
-		args = append(args, et)
-	}
-	args = append(args, start.Format(time.RFC3339Nano))
-	args = append(args, end.Format(time.RFC3339Nano))
-	args = append(args, limit)
-
-	rows, err := q.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query events: %w", err)
-	}
-	defer rows.Close()
-
-	var events []workflow_intelligence.EventForMetrics
-	for rows.Next() {
-		var e workflow_intelligence.EventForMetrics
-		var timestamp, payloadStr string
-		if err := rows.Scan(&e.ID, &e.Type, &timestamp, &e.Source, &payloadStr); err != nil {
-			return nil, fmt.Errorf("scan event: %w", err)
-		}
-		if parsed, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
-			slog.Warn("failed to parse timestamp", "event_id", e.ID, "timestamp", timestamp, "error", err)
-		} else {
-			e.Timestamp = parsed
-		}
-		if payloadStr != "" {
-			if err := json.Unmarshal([]byte(payloadStr), &e.Payload); err != nil {
-				slog.Warn("failed to parse event payload", "event_id", e.ID, "error", err)
-				e.Payload = make(map[string]any)
-			}
-		} else {
-			e.Payload = make(map[string]any)
-		}
-		events = append(events, e)
-	}
-
-	return events, rows.Err()
 }
 
 func newArtifactEventQuery(db *sql.DB) artifacts.EventQuery {
