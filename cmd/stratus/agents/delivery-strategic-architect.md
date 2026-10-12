@@ -28,7 +28,7 @@ Read, Grep, Glob, Bash (read-only: git log, cat, ls), WebSearch, Write and Edit 
 
 ## Workflow
 
-1. **Assess the current state** - read CLAUDE.md, existing ADRs in `docs/decisions/` or `docs/adr/`, and relevant codebase sections. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find architectural patterns. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for evolution findings and existing knowledge relevant to this task.
+1. **Assess the current state** - read CLAUDE.md, existing ADRs in `docs/decisions/` or `docs/adr/`, and relevant codebase sections. Use `mcp__stratus__retrieve` MCP tool with `corpus: "code"` to find architectural patterns. Use `mcp__stratus__retrieve` with `corpus: "wiki"` to check for existing knowledge relevant to this task.
 2. **Identify the decision space** - what technology or design decisions must be made? What are the constraints?
 3. **Evaluate alternatives** - for each significant decision, evaluate at least 2 options with trade-offs.
 4. **Produce ADRs** - one ADR per decision.

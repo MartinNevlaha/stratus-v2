@@ -13,20 +13,8 @@ import (
 	"strings"
 )
 
-// Sentinel errors for evolution config validation.
+// Sentinel errors for config validation.
 var (
-	// ErrTokenCapRequired is returned when Evolution is enabled but MaxTokensPerCycle is not set.
-	ErrTokenCapRequired = errors.New("evolution: MaxTokensPerCycle must be > 0 when Evolution is enabled")
-
-	// ErrInvalidScoringWeights is returned when any ScoringWeights field is out of range.
-	ErrInvalidScoringWeights = errors.New("evolution: invalid ScoringWeights")
-
-	// ErrInvalidBaselineLimits is returned when any BaselineLimits field is negative.
-	ErrInvalidBaselineLimits = errors.New("evolution: invalid BaselineLimits")
-
-	// ErrInvalidCategory is returned when an unknown or disallowed evolution category is used.
-	ErrInvalidCategory = errors.New("evolution: invalid evolution category")
-
 	// ErrInvalidWikiConfig is returned when a WikiConfig field violates its bounds.
 	// 0 is the unlimited sentinel for page/token count fields; negative values are rejected.
 	ErrInvalidWikiConfig = errors.New("wiki: invalid config")
@@ -62,28 +50,6 @@ func ValidateWikiConfig(cfg *WikiConfig) error {
 		return fmt.Errorf("%w: IngestHTTPTimeoutSec=%d must be >= 0", ErrInvalidWikiConfig, cfg.IngestHTTPTimeoutSec)
 	}
 	return nil
-}
-
-// knownEvolutionCategories is the full set of valid evolution category values.
-var knownEvolutionCategories = map[string]struct{}{
-	"refactor_opportunity": {},
-	"test_gap":             {},
-	"architecture_drift":   {},
-	"feature_idea":         {},
-	"dx_improvement":       {},
-	"doc_drift":            {},
-	"prompt_tuning":        {},
-}
-
-// defaultProjectCategories are the six project-targeted evolution categories
-// applied when AllowedEvolutionCategories is empty.
-var defaultProjectCategories = []string{
-	"refactor_opportunity",
-	"test_gap",
-	"architecture_drift",
-	"feature_idea",
-	"dx_improvement",
-	"doc_drift",
 }
 
 type SyncState struct {
@@ -210,76 +176,24 @@ type WikiConfig struct {
 	IngestHTTPTimeoutSec int `json:"ingest_http_timeout_sec"`
 }
 
-// ScoringWeights holds the weighted blend of static + LLM-judge signals into
-// the final hypothesis rank.
-type ScoringWeights struct {
-	Churn                 float64 `json:"churn"`
-	TestGap               float64 `json:"test_gap"`
-	TODO                  float64 `json:"todo"`
-	Staleness             float64 `json:"staleness"`
-	ADRViolation          float64 `json:"adr_violation"`
-	LLMImpact             float64 `json:"llm_impact"`
-	LLMEffort             float64 `json:"llm_effort"`
-	LLMConfidence         float64 `json:"llm_confidence"`
-	LLMNovelty            float64 `json:"llm_novelty"`
-	MaxTokensPerJudgeCall int     `json:"max_tokens_per_judge_call"`
-}
-
-// BaselineLimits caps the baseline builder inputs.
-type BaselineLimits struct {
-	VexorTopK     int `json:"vexor_top_k"`
-	GitLogCommits int `json:"git_log_commits"`
-	TODOMax       int `json:"todo_max"`
-}
-
-// EvolutionConfig configures the autonomous rule evolution subsystem.
-type EvolutionConfig struct {
-	Enabled             bool  `json:"enabled"`
-	TimeoutMs           int64 `json:"timeout_ms"`
-	MaxHypothesesPerRun int   `json:"max_hypotheses_per_run"`
-	// Deprecated: ignored in proposals-only mode. Retained for backward-compat config files.
-	AutoApplyThreshold float64  `json:"auto_apply_threshold"`
-	ProposalThreshold  float64  `json:"proposal_threshold"`
-	MinSampleSize      int      `json:"min_sample_size"`
-	DailyTokenBudget   int      `json:"daily_token_budget"`
-	Categories         []string `json:"categories"`
-
-	// Opt-in toggle: when true, evolution may also generate Stratus-self hypotheses (prompt_tuning).
-	// Default false — evolution targets the working-directory project.
-	StratusSelfEnabled bool `json:"stratus_self_enabled"`
-
-	// MANDATORY when Evolution enabled: max tokens spent per cycle across all LLM judge calls.
-	// Zero (or unset) causes LoadAndValidate() to return ErrTokenCapRequired.
-	MaxTokensPerCycle int `json:"max_tokens_per_cycle"`
-
-	// ScoringWeights holds the weighted blend of static + LLM-judge signals into the final rank.
-	ScoringWeights ScoringWeights `json:"scoring_weights"`
-
-	// BaselineLimits caps baseline builder inputs (defaults 30 / 200 / 50 when zero).
-	BaselineLimits BaselineLimits `json:"baseline_limits"`
-
-	// AllowedEvolutionCategories is the allowlist of hypothesis categories that generators may emit.
-	// Defaults to the six project categories. prompt_tuning may appear ONLY if StratusSelfEnabled.
-	AllowedEvolutionCategories []string `json:"allowed_evolution_categories"`
-}
-
 // Config holds the stratus configuration.
 type Config struct {
-	Port                     int             `json:"port"`
-	DevMode                  bool            `json:"dev_mode,omitempty"`
-	DataDir                  string          `json:"data_dir"`
-	ProjectRoot              string          `json:"project_root"`
-	Language                 string          `json:"language"`
-	LLM                      LLMConfig       `json:"llm"`
-	Vexor                    VexorConfig     `json:"vexor"`
-	STT                      STTConfig       `json:"stt"`
-	Guardian                 GuardianConfig  `json:"guardian"`
-	SyncState                *SyncState      `json:"sync_state,omitempty"`
-	MetricsBroadcastInterval int             `json:"metrics_broadcast_interval"`
-	Insight                  InsightConfig   `json:"insight"`
-	Wiki                     WikiConfig      `json:"wiki"`
-	Evolution                EvolutionConfig `json:"evolution"`
-	Learn                    LearnConfig     `json:"learn"`
+	Port                     int            `json:"port"`
+	DevMode                  bool           `json:"dev_mode,omitempty"`
+	DataDir                  string         `json:"data_dir"`
+	ProjectRoot              string         `json:"project_root"`
+	Language                 string         `json:"language"`
+	LLM                      LLMConfig      `json:"llm"`
+	Vexor                    VexorConfig    `json:"vexor"`
+	STT                      STTConfig      `json:"stt"`
+	Guardian                 GuardianConfig `json:"guardian"`
+	SyncState                *SyncState     `json:"sync_state,omitempty"`
+	MetricsBroadcastInterval int            `json:"metrics_broadcast_interval"`
+	Insight                  InsightConfig  `json:"insight"`
+	Wiki                     WikiConfig     `json:"wiki"`
+	// DailyTokenBudget caps LLM tokens per day across all subsystems.
+	DailyTokenBudget int         `json:"daily_token_budget"`
+	Learn            LearnConfig `json:"learn"`
 }
 
 // ValidLanguage returns true if s is a supported UI language code.
@@ -374,36 +288,7 @@ func Default() Config {
 			IngestYoutubeBinary:      "yt-dlp",
 			IngestHTTPTimeoutSec:     30,
 		},
-		Evolution: EvolutionConfig{
-			Enabled:             false,
-			TimeoutMs:           600000,
-			MaxHypothesesPerRun: 10,
-			AutoApplyThreshold:  0.85,
-			ProposalThreshold:   0.65,
-			MinSampleSize:       10,
-			DailyTokenBudget:    2000000,
-			Categories:          []string{},
-			StratusSelfEnabled:  false,
-			MaxTokensPerCycle:   0,
-			ScoringWeights: ScoringWeights{
-				Churn:                 0.2,
-				TestGap:               0.2,
-				TODO:                  0.1,
-				Staleness:             0.1,
-				ADRViolation:          0.1,
-				LLMImpact:             0.15,
-				LLMEffort:             0.05,
-				LLMConfidence:         0.05,
-				LLMNovelty:            0.05,
-				MaxTokensPerJudgeCall: 4000,
-			},
-			BaselineLimits: BaselineLimits{
-				VexorTopK:     30,
-				GitLogCommits: 200,
-				TODOMax:       50,
-			},
-			AllowedEvolutionCategories: append([]string{}, defaultProjectCategories...),
-		},
+		DailyTokenBudget: 2000000,
 		Learn: LearnConfig{
 			PipelineTimeoutSec: 180,
 		},
@@ -469,6 +354,7 @@ func Load() Config {
 	// Load .stratus.json — walk up from cwd to find it (like git does).
 	if data, path := findStratusJSON(); data != nil {
 		_ = json.Unmarshal(data, &cfg)
+		applyLegacyDailyTokenBudget(data, &cfg)
 		// If project_root is not set in JSON, derive it from the file location.
 		if cfg.ProjectRoot == "" || cfg.ProjectRoot == Default().ProjectRoot {
 			cfg.ProjectRoot = filepath.Dir(path)
@@ -477,9 +363,6 @@ func Load() Config {
 
 	// Migrate legacy flat Guardian LLM fields into the nested LLM struct.
 	migrateGuardianLegacyLLM(&cfg.Guardian)
-
-	// Apply defaults for evolution fields that may be absent from JSON.
-	applyEvolutionDefaults(&cfg.Evolution)
 
 	// Env vars override JSON values.
 	if v := os.Getenv("STRATUS_DATA_DIR"); v != "" {
@@ -497,138 +380,22 @@ func Load() Config {
 	return cfg
 }
 
-// LoadAndValidate loads the config and validates evolution-related fields.
-// It returns an error if any evolution constraint is violated.
-// Use this in subsystems that depend on evolution being correctly configured.
-func LoadAndValidate() (Config, error) {
-	cfg := Load()
-	if err := validateEvolutionConfig(&cfg.Evolution); err != nil {
-		return cfg, fmt.Errorf("config: %w", err)
+// applyLegacyDailyTokenBudget honours the budget stored under the removed
+// "evolution" block when the top-level key is absent, so existing configs keep
+// their limit.
+func applyLegacyDailyTokenBudget(data []byte, cfg *Config) {
+	var raw struct {
+		DailyTokenBudget *int `json:"daily_token_budget"`
+		Evolution        struct {
+			DailyTokenBudget int `json:"daily_token_budget"`
+		} `json:"evolution"`
 	}
-	return cfg, nil
-}
-
-// applyEvolutionDefaults fills zero-value evolution fields with sensible defaults
-// after JSON unmarshalling. Fields that must be explicitly set (MaxTokensPerCycle)
-// are intentionally left at zero.
-func applyEvolutionDefaults(ev *EvolutionConfig) {
-	sw := &ev.ScoringWeights
-	if sw.Churn == 0 && sw.TestGap == 0 && sw.TODO == 0 &&
-		sw.Staleness == 0 && sw.ADRViolation == 0 &&
-		sw.LLMImpact == 0 && sw.LLMEffort == 0 &&
-		sw.LLMConfidence == 0 && sw.LLMNovelty == 0 &&
-		sw.MaxTokensPerJudgeCall == 0 {
-		// All zero means the user didn't set anything — apply full defaults.
-		sw.Churn = 0.2
-		sw.TestGap = 0.2
-		sw.TODO = 0.1
-		sw.Staleness = 0.1
-		sw.ADRViolation = 0.1
-		sw.LLMImpact = 0.15
-		sw.LLMEffort = 0.05
-		sw.LLMConfidence = 0.05
-		sw.LLMNovelty = 0.05
-		sw.MaxTokensPerJudgeCall = 4000
+	if json.Unmarshal(data, &raw) != nil {
+		return
 	}
-
-	bl := &ev.BaselineLimits
-	if bl.VexorTopK == 0 {
-		bl.VexorTopK = 30
+	if raw.DailyTokenBudget == nil && raw.Evolution.DailyTokenBudget > 0 {
+		cfg.DailyTokenBudget = raw.Evolution.DailyTokenBudget
 	}
-	if bl.GitLogCommits == 0 {
-		bl.GitLogCommits = 200
-	}
-	if bl.TODOMax == 0 {
-		bl.TODOMax = 50
-	}
-
-	if len(ev.AllowedEvolutionCategories) == 0 {
-		ev.AllowedEvolutionCategories = append([]string{}, defaultProjectCategories...)
-	}
-}
-
-// validateEvolutionConfig checks all evolution config constraints and returns
-// a sentinel error (wrapped with context) if any constraint is violated.
-func validateEvolutionConfig(ev *EvolutionConfig) error {
-	// Token cap is mandatory when evolution is enabled.
-	if ev.Enabled && ev.MaxTokensPerCycle <= 0 {
-		return ErrTokenCapRequired
-	}
-
-	// Validate ScoringWeights.
-	if err := validateScoringWeights(&ev.ScoringWeights); err != nil {
-		return err
-	}
-
-	// Validate BaselineLimits.
-	if err := validateBaselineLimits(&ev.BaselineLimits); err != nil {
-		return err
-	}
-
-	// Validate AllowedEvolutionCategories.
-	for _, cat := range ev.AllowedEvolutionCategories {
-		if _, ok := knownEvolutionCategories[cat]; !ok {
-			return fmt.Errorf("%w: %q is not a known category", ErrInvalidCategory, cat)
-		}
-		if cat == "prompt_tuning" && !ev.StratusSelfEnabled {
-			return fmt.Errorf("%w: %q requires StratusSelfEnabled=true", ErrInvalidCategory, cat)
-		}
-	}
-
-	return nil
-}
-
-// validateScoringWeights checks individual field ranges and group sums.
-func validateScoringWeights(sw *ScoringWeights) error {
-	floatFields := []struct {
-		name string
-		val  float64
-	}{
-		{"Churn", sw.Churn},
-		{"TestGap", sw.TestGap},
-		{"TODO", sw.TODO},
-		{"Staleness", sw.Staleness},
-		{"ADRViolation", sw.ADRViolation},
-		{"LLMImpact", sw.LLMImpact},
-		{"LLMEffort", sw.LLMEffort},
-		{"LLMConfidence", sw.LLMConfidence},
-		{"LLMNovelty", sw.LLMNovelty},
-	}
-	for _, f := range floatFields {
-		if f.val < 0 || f.val > 1 {
-			return fmt.Errorf("%w: ScoringWeights.%s=%v out of [0,1]", ErrInvalidScoringWeights, f.name, f.val)
-		}
-	}
-
-	staticSum := sw.Churn + sw.TestGap + sw.TODO + sw.Staleness + sw.ADRViolation
-	if staticSum > 1.0+1e-9 {
-		return fmt.Errorf("%w: static weights sum=%v exceeds 1.0", ErrInvalidScoringWeights, staticSum)
-	}
-
-	llmSum := sw.LLMImpact + sw.LLMEffort + sw.LLMConfidence + sw.LLMNovelty
-	if llmSum > 1.0+1e-9 {
-		return fmt.Errorf("%w: LLM weights sum=%v exceeds 1.0", ErrInvalidScoringWeights, llmSum)
-	}
-
-	if sw.MaxTokensPerJudgeCall <= 0 {
-		return fmt.Errorf("%w: MaxTokensPerJudgeCall must be > 0", ErrInvalidScoringWeights)
-	}
-
-	return nil
-}
-
-// validateBaselineLimits checks that no limit field is negative.
-func validateBaselineLimits(bl *BaselineLimits) error {
-	if bl.VexorTopK < 0 {
-		return fmt.Errorf("%w: VexorTopK=%d must be >= 0", ErrInvalidBaselineLimits, bl.VexorTopK)
-	}
-	if bl.GitLogCommits < 0 {
-		return fmt.Errorf("%w: GitLogCommits=%d must be >= 0", ErrInvalidBaselineLimits, bl.GitLogCommits)
-	}
-	if bl.TODOMax < 0 {
-		return fmt.Errorf("%w: TODOMax=%d must be >= 0", ErrInvalidBaselineLimits, bl.TODOMax)
-	}
-	return nil
 }
 
 // migrateGuardianLegacyLLM populates cfg.LLM from legacy flat fields if the

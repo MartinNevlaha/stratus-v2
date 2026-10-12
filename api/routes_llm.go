@@ -56,7 +56,7 @@ func (s *Server) handleGetLLMStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	used := input + output
 
-	budget := s.cfg.Evolution.DailyTokenBudget
+	budget := s.cfg.DailyTokenBudget
 	remaining := budget - used
 	if remaining < 0 {
 		remaining = 0

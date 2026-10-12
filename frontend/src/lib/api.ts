@@ -40,11 +40,7 @@ import type {
   WikiGraphData,
   WikiQueryResult,
   VaultStatus,
-  EvolutionRun,
-  EvolutionHypothesis,
   WikiConfig,
-  EvolutionConfig,
-  EvolutionStatus,
   InsightProposal,
   OnboardingProgress,
 } from './types'
@@ -353,32 +349,6 @@ export const triggerVaultSync = () =>
 
 export const getVaultStatus = () =>
   get<VaultStatus>('/wiki/vault/status')
-
-// --- Evolution ---
-
-export const listEvolutionRuns = (params?: { status?: string; limit?: number; offset?: number }) => {
-  const q = new URLSearchParams()
-  if (params?.status) q.set('status', params.status)
-  if (params?.limit) q.set('limit', String(params.limit))
-  if (params?.offset) q.set('offset', String(params.offset))
-  return get<{ runs: EvolutionRun[]; count: number }>(`/evolution/runs${q.toString() ? '?' + q : ''}`)
-}
-
-export const getEvolutionRun = (id: string) =>
-  get<{ run: EvolutionRun; hypotheses: EvolutionHypothesis[] }>(`/evolution/runs/${id}`)
-
-export const triggerEvolution = (timeoutMs?: number, categories?: string[]) =>
-  post<{ status: string; run_id: string; message: string }>('/evolution/trigger', {
-    ...(timeoutMs ? { timeout_ms: timeoutMs } : {}),
-    ...(categories?.length ? { categories } : {}),
-  })
-
-export const getEvolutionConfig = () => get<EvolutionConfig>('/evolution/config')
-
-export const updateEvolutionConfig = (cfg: EvolutionConfig) =>
-  post<EvolutionConfig>('/evolution/config', cfg)
-
-export const getEvolutionStatus = () => get<EvolutionStatus>('/evolution/status')
 
 export const getInsightProposals = (params?: { type?: string; status?: string; limit?: number; offset?: number }) => {
   const q = new URLSearchParams()

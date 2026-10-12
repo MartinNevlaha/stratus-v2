@@ -16,9 +16,6 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/artifacts"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop"
-	evolution_baseline "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/baseline"
-	evolution_scoring "github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/scoring"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/ingest"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/knowledge_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
@@ -31,14 +28,13 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_intelligence"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/workflow_synthesis"
-	"github.com/google/uuid"
 )
 
 type Engine struct {
 	database            *db.DB
 	config              config.InsightConfig
 	wikiCfg             config.WikiConfig
-	evoCfg              config.EvolutionConfig
+	dailyTokenBudget    int
 	lang                string
 	scheduler           *Scheduler
 	eventBus            events.EventBus
@@ -57,7 +53,6 @@ type Engine struct {
 	workflowSynthesizer *workflow_synthesis.Synthesizer
 	productIntelligence *product_intelligence.Engine
 	wikiEngine          *wiki_engine.WikiEngine
-	evolutionLoop       *evolution_loop.EvolutionLoop
 	wikiSynth           *wiki_engine.Synthesizer
 	wikiLinker          *wiki_engine.Linker
 	wikiLinkSuggester   *wiki_engine.LinkSuggester
@@ -94,25 +89,25 @@ func NewEngine(database *db.DB, cfg config.InsightConfig) *Engine {
 	return e
 }
 
-// NewEngineWithConfig creates an Engine with explicit WikiConfig and
-// EvolutionConfig, enabling the WikiEngine and EvolutionLoop subsystems.
+// NewEngineWithConfig creates an Engine with an explicit WikiConfig and daily
+// LLM token budget, enabling the WikiEngine subsystem.
 // Language defaults to "en". Use NewEngineWithFullConfig to specify a language.
-func NewEngineWithConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig) *Engine {
-	return NewEngineWithFullConfig(database, cfg, wikiCfg, evoCfg, "en")
+func NewEngineWithConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, dailyTokenBudget int) *Engine {
+	return NewEngineWithFullConfig(database, cfg, wikiCfg, dailyTokenBudget, "en")
 }
 
 // NewEngineWithFullConfig creates an Engine with all subsystem configs.
 // lang is the UI language code ("en", "sk"); pass an empty string to default to "en".
-func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, evoCfg config.EvolutionConfig, lang string) *Engine {
+func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg config.WikiConfig, dailyTokenBudget int, lang string) *Engine {
 	if lang == "" {
 		lang = "en"
 	}
 	e := &Engine{
-		database: database,
-		config:   cfg,
-		wikiCfg:  wikiCfg,
-		evoCfg:   evoCfg,
-		lang:     lang,
+		database:         database,
+		config:           cfg,
+		wikiCfg:          wikiCfg,
+		dailyTokenBudget: dailyTokenBudget,
+		lang:             lang,
 	}
 	e.initLLMClient()
 	e.scheduler = newScheduler(e)
@@ -127,7 +122,6 @@ func NewEngineWithFullConfig(database *db.DB, cfg config.InsightConfig, wikiCfg 
 	e.initWorkflowSynthesizer()
 	e.initProductIntelligence()
 	e.initWikiEngine()
-	e.initEvolutionLoop()
 	return e
 }
 
@@ -178,9 +172,9 @@ func (e *Engine) initLLMClient() {
 	}
 
 	// Wrap with budget tracking if DB is available.
-	budgeted := llm.NewBudgetedClient(client, e.database, e.evoCfg.DailyTokenBudget)
+	budgeted := llm.NewBudgetedClient(client, e.database, e.dailyTokenBudget)
 	e.llmClient = budgeted
-	slog.Info("insight: LLM client initialized with budget tracking", "provider", llmCfg.Provider, "model", llmCfg.Model, "daily_budget", e.evoCfg.DailyTokenBudget)
+	slog.Info("insight: LLM client initialized with budget tracking", "provider", llmCfg.Provider, "model", llmCfg.Model, "daily_budget", e.dailyTokenBudget)
 }
 
 func (e *Engine) initPatternEngine() {
@@ -270,69 +264,6 @@ func (e *Engine) ClusterSynthesizer() *wiki_engine.ClusterSynthesizer { return e
 
 // LinkSuggester exposes the link suggester subsystem.
 func (e *Engine) LinkSuggester() *wiki_engine.LinkSuggester { return e.wikiLinkSuggester }
-
-func (e *Engine) initEvolutionLoop() {
-	evoStore := evolution_loop.NewDBEvolutionStore(e.database)
-
-	wikiStore := wiki_engine.NewDBWikiStore(e.database)
-	wikiFn := func(_ context.Context, h *db.EvolutionHypothesis) (string, error) {
-		content := formatHypothesisForWiki(h)
-		page := &db.WikiPage{
-			ID:          uuid.NewString(),
-			PageType:    "concept",
-			Title:       fmt.Sprintf("Evolution Finding: %s", h.Description),
-			Content:     content,
-			Status:      "published",
-			Tags:        []string{"evolution", h.Category},
-			GeneratedBy: "evolution",
-			Version:     1,
-		}
-		if err := wikiStore.SavePage(page); err != nil {
-			return "", fmt.Errorf("save wiki page: %w", err)
-		}
-		slog.Info("evolution: created wiki proposal page",
-			"page_id", page.ID, "category", h.Category)
-		return page.ID, nil
-	}
-
-	// Wire new target-project analysis dependencies.
-	// TODO: wire real Vexor client once VexorClient adapter is implemented.
-	bldr := evolution_baseline.New(evolution_baseline.Dependencies{
-		DB: e.database,
-		// Vexor: nil — resilient; vexor hits will be skipped until wired.
-	})
-	staticScorer := evolution_scoring.NewStaticScorer()
-	proposalWriter := evolution_loop.NewProposalWriter(e.database)
-
-	// TODO: wire LLM judge via adapter from insight LLM client once interface
-	// alignment is confirmed (scoring.LLMClient vs llm.Client).
-	// For now, LLM judge is disabled (nil) — static-only scoring is used.
-	slog.Info("evolution: LLM judge disabled — using static-only scoring for RunCycle")
-
-	root := e.projectRoot
-	if root == "" {
-		root = "."
-	}
-
-	initLang := e.lang
-	e.evolutionLoop = evolution_loop.NewEvolutionLoop(
-		evoStore,
-		func() config.EvolutionConfig { return e.evoCfg },
-		e.llmClient,
-		evolution_loop.WithWikiFn(wikiFn),
-		evolution_loop.WithLangFn(func() string {
-			if l := config.Load().Language; l != "" {
-				return l
-			}
-			return initLang
-		}),
-		// RunCycle dependencies.
-		evolution_loop.WithBaselineBuilder(bldr),
-		evolution_loop.WithStaticScorer(staticScorer),
-		evolution_loop.WithProposalWriter(proposalWriter),
-		evolution_loop.WithProjectRoot(root),
-	)
-}
 
 func (e *Engine) Start(ctx context.Context) error {
 	e.mu.Lock()
@@ -1311,10 +1242,6 @@ func knowledgeArtifactDataFromDB(a db.Artifact) knowledge_engine.ArtifactData {
 // created without wiki configuration (via NewEngine or NewEngineWithEvents).
 func (e *Engine) WikiEngine() *wiki_engine.WikiEngine { return e.wikiEngine }
 
-// EvolutionLoop returns the EvolutionLoop subsystem. It is nil when the engine
-// was created without evolution configuration.
-func (e *Engine) EvolutionLoop() *evolution_loop.EvolutionLoop { return e.evolutionLoop }
-
 // WikiSynthesizer returns the wiki Synthesizer subsystem.
 func (e *Engine) WikiSynthesizer() *wiki_engine.Synthesizer { return e.wikiSynth }
 
@@ -1366,35 +1293,6 @@ func (e *Engine) RunWikiMaintenance(ctx context.Context) (*wiki_engine.Maintenan
 	result, err := e.wikiEngine.RunMaintenance(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("wiki maintenance: %w", err)
-	}
-	return result, nil
-}
-
-// RunEvolutionCycle executes one full evolution loop run with the given
-// triggerType. It returns nil, nil when the evolution loop has not been
-// initialised.
-//
-// timeoutMs, when > 0, overrides the configured TimeoutMs for this run only.
-// categories, when non-empty, overrides the configured Categories for this
-// run only. Pass 0 and nil to use the values from config.
-func (e *Engine) RunEvolutionCycle(ctx context.Context, triggerType string, timeoutMs int64, categories []string) (*evolution_loop.RunResult, error) {
-	if e.evolutionLoop == nil {
-		return nil, nil
-	}
-
-	// StratusSelfEnabled=true → legacy Run() path (HypothesisGenerator + ExperimentRunner).
-	// Otherwise → RunTargetCycle for target-project analysis.
-	if e.evoCfg.StratusSelfEnabled {
-		result, err := e.evolutionLoop.Run(ctx, triggerType, timeoutMs, categories)
-		if err != nil {
-			return nil, fmt.Errorf("evolution cycle: %w", err)
-		}
-		return result, nil
-	}
-
-	result, err := e.evolutionLoop.RunTargetCycle(ctx, triggerType, timeoutMs, categories)
-	if err != nil {
-		return nil, fmt.Errorf("evolution cycle: %w", err)
 	}
 	return result, nil
 }

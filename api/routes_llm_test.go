@@ -114,7 +114,7 @@ func TestHandleGetLLMStatus_BudgetFields(t *testing.T) {
 	cfg := config.Default()
 	cfg.LLM.Provider = "openai"
 	cfg.LLM.Model = "gpt-4"
-	cfg.Evolution.DailyTokenBudget = 50000
+	cfg.DailyTokenBudget = 50000
 
 	server := &Server{db: database, cfg: &cfg}
 	req := httptest.NewRequest(http.MethodGet, "/api/llm/status", nil)

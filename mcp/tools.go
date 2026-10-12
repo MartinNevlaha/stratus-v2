@@ -595,43 +595,6 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 		},
 	})
 
-	// --- Evolution tools ---
-
-	s.Register(Tool{
-		Name:        "evolution_status",
-		ReadOnly:    true,
-		Description: "Get recent agent evolution runs and their outcomes.",
-		InputSchema: obj(
-			opt("limit", "integer", "Max runs to return (default: 20)"),
-		),
-		Handler: func(args map[string]any) (any, error) {
-			params := neturl.Values{}
-			if n := intArg(args, "limit", 0); n > 0 {
-				params.Set("limit", fmt.Sprintf("%d", n))
-			}
-			return client.get("/api/evolution/runs", params)
-		},
-	})
-
-	s.Register(Tool{
-		Name:        "evolution_trigger",
-		Description: "Trigger an autonomous evolution cycle that tests hypotheses and applies improvements.",
-		InputSchema: obj(
-			opt("timeout_ms", "integer", "Timeout in milliseconds (default: 600000)"),
-			opt("categories", "array", "Hypothesis categories to test: prompt_tuning, workflow_routing, agent_selection, threshold_adjustment"),
-		),
-		Handler: func(args map[string]any) (any, error) {
-			body := map[string]any{}
-			if n := intArg(args, "timeout_ms", 0); n > 0 {
-				body["timeout_ms"] = n
-			}
-			if cats, ok := args["categories"].([]any); ok {
-				body["categories"] = cats
-			}
-			return client.post("/api/evolution/trigger", body)
-		},
-	})
-
 	// --- Vault sync tool ---
 
 	s.Register(Tool{

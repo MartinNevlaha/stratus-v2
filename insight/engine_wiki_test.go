@@ -18,26 +18,13 @@ func makeEngineWithWikiEvo(t *testing.T) *Engine {
 		MaxPagesPerIngest:  10,
 		StalenessThreshold: 0.5,
 	}
-	evoCfg := config.EvolutionConfig{
-		Enabled:             true,
-		TimeoutMs:           5000,
-		MaxHypothesesPerRun: 3,
-		MaxTokensPerCycle:   1000,
-	}
-	return NewEngineWithConfig(database, insightCfg, wikiCfg, evoCfg)
+	return NewEngineWithConfig(database, insightCfg, wikiCfg, 0)
 }
 
 func TestNewEngineWithConfig_WikiEngineInitialized(t *testing.T) {
 	e := makeEngineWithWikiEvo(t)
 	if e.WikiEngine() == nil {
 		t.Fatal("expected WikiEngine to be non-nil after NewEngineWithConfig")
-	}
-}
-
-func TestNewEngineWithConfig_EvolutionLoopInitialized(t *testing.T) {
-	e := makeEngineWithWikiEvo(t)
-	if e.EvolutionLoop() == nil {
-		t.Fatal("expected EvolutionLoop to be non-nil after NewEngineWithConfig")
 	}
 }
 
@@ -77,20 +64,6 @@ func TestEngine_RunWikiMaintenance_NilEngineReturnsNil(t *testing.T) {
 	}
 }
 
-func TestEngine_RunEvolutionCycle_NilEngineReturnsNil(t *testing.T) {
-	database := setupTestDB(t)
-	cfg := config.InsightConfig{Enabled: true, Interval: 1}
-	e := NewEngine(database, cfg)
-
-	result, err := e.RunEvolutionCycle(context.Background(), "scheduled", 0, nil)
-	if err != nil {
-		t.Fatalf("expected nil error when evolutionLoop is nil, got: %v", err)
-	}
-	if result != nil {
-		t.Errorf("expected nil result when evolutionLoop is nil, got: %+v", result)
-	}
-}
-
 func TestEngine_SynthesizeWikiAnswer_NilSynthReturnsError(t *testing.T) {
 	database := setupTestDB(t)
 	cfg := config.InsightConfig{Enabled: true, Interval: 1}
@@ -111,9 +84,7 @@ func TestNewEngineWithConfig_WikiDisabled_SynthesizerStillInitialized(t *testing
 	database := setupTestDB(t)
 	insightCfg := config.InsightConfig{Enabled: true, Interval: 1}
 	wikiCfg := config.WikiConfig{Enabled: false}
-	evoCfg := config.EvolutionConfig{Enabled: false}
-
-	e := NewEngineWithConfig(database, insightCfg, wikiCfg, evoCfg)
+	e := NewEngineWithConfig(database, insightCfg, wikiCfg, 0)
 
 	if e.WikiSynthesizer() == nil {
 		t.Fatal("wikiSynth must not be nil even when wiki.enabled=false; SynthesizeWikiAnswer would return 'wiki synthesizer not initialized'")
@@ -148,19 +119,6 @@ func TestEngine_RunWikiMaintenance_WithWikiEngine(t *testing.T) {
 	}
 	if result.PagesScored != 0 {
 		t.Errorf("expected 0 pages scored on empty DB, got %d", result.PagesScored)
-	}
-}
-
-func TestEngine_RunEvolutionCycle_WithEvolutionLoop(t *testing.T) {
-	e := makeEngineWithWikiEvo(t)
-	ctx := context.Background()
-
-	result, err := e.RunEvolutionCycle(ctx, "scheduled", 0, nil)
-	if err != nil {
-		t.Fatalf("RunEvolutionCycle returned unexpected error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil RunResult")
 	}
 }
 

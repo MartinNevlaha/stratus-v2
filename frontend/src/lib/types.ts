@@ -504,56 +504,6 @@ export interface VaultStatus {
   errors: string[]
 }
 
-export interface EvolutionRun {
-  id: string
-  trigger_type: 'scheduled' | 'manual' | 'event_driven'
-  status: 'running' | 'completed' | 'failed' | 'timeout'
-  hypotheses_count: number
-  experiments_run: number
-  auto_applied: number
-  proposals_created: number
-  wiki_pages_updated: number
-  duration_ms: number
-  timeout_ms: number
-  error_message: string
-  metadata: Record<string, unknown>
-  started_at: string
-  completed_at: string | null
-  created_at: string
-}
-
-export type EvolutionCategory =
-  | 'refactor_opportunity'
-  | 'test_gap'
-  | 'architecture_drift'
-  | 'feature_idea'
-  | 'dx_improvement'
-  | 'doc_drift'
-  | 'idea'
-  | 'prompt_tuning'
-  // Legacy categories — may appear in historical rows
-  | 'workflow_routing'
-  | 'agent_selection'
-  | 'threshold_adjustment'
-
-export interface EvolutionHypothesis {
-  id: string
-  run_id: string
-  category: EvolutionCategory
-  description: string
-  baseline_value: string
-  proposed_value: string
-  metric: string
-  baseline_metric: number
-  experiment_metric: number
-  confidence: number
-  decision: 'auto_applied' | 'proposal_created' | 'rejected' | 'inconclusive'
-  decision_reason: string
-  wiki_page_id: string | null
-  evidence: Record<string, unknown>
-  created_at: string
-}
-
 export interface InsightProposal {
   id: string
   type: string
@@ -571,11 +521,6 @@ export interface InsightProposal {
   updated_at: string
 }
 
-export interface EvolutionStatus {
-  enabled: boolean
-  category_breakdown: Record<string, number>
-}
-
 export interface WikiConfig {
   enabled: boolean
   ingest_on_event: boolean
@@ -586,18 +531,6 @@ export interface WikiConfig {
   vault_sync_on_save: boolean
   onboarding_depth: string
   onboarding_max_pages: number
-}
-
-export interface EvolutionConfig {
-  enabled: boolean
-  timeout_ms: number
-  max_hypotheses_per_run: number
-  auto_apply_threshold: number
-  proposal_threshold: number
-  min_sample_size: number
-  daily_token_budget: number
-  categories: string[]
-  stratus_self_enabled: boolean
 }
 
 export interface OnboardingProgress {

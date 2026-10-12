@@ -12,10 +12,8 @@
     updateWikiConfig,
     getLanguage,
     setLanguage,
-    getEvolutionConfig,
-    updateEvolutionConfig,
   } from '$lib/api'
-  import type { GuardianConfig, InsightConfig, Language, LLMConfig, WikiConfig, EvolutionConfig } from '$lib/types'
+  import type { GuardianConfig, InsightConfig, Language, LLMConfig, WikiConfig } from '$lib/types'
   import { appState } from '$lib/store.svelte'
 
   const emptyLLM = (): LLMConfig => ({
@@ -93,27 +91,20 @@
   let wikiSaveMsg = $state<string | null>(null)
   let wikiSaveError = $state<string | null>(null)
 
-  let evolutionCfg = $state<EvolutionConfig | null>(null)
-  let evolutionSaving = $state(false)
-  let evolutionSaveMsg = $state<string | null>(null)
-  let evolutionSaveError = $state<string | null>(null)
-
   onMount(async () => {
     try {
-      const [guardianCfg, iCfg, llmCfg, wCfg, langRes, evoCfg] = await Promise.all([
+      const [guardianCfg, iCfg, llmCfg, wCfg, langRes] = await Promise.all([
         getGuardianConfig(),
         getInsightConfig(),
         getLLMConfig(),
         getWikiConfig(),
         getLanguage(),
-        getEvolutionConfig(),
       ])
       cfg = guardianCfg
       insightCfg = iCfg
       globalLLM = llmCfg
       wikiCfg = wCfg
       language = langRes.language as Language
-      evolutionCfg = evoCfg
       guardianOverride = cfg.llm.provider !== '' || cfg.llm.base_url !== ''
       insightOverride = insightCfg.llm.provider !== '' || insightCfg.llm.base_url !== ''
     } catch (e) {
@@ -137,22 +128,6 @@
       langSaveError = e instanceof Error ? e.message : 'Save failed'
     } finally {
       langSaving = false
-    }
-  }
-
-  async function saveEvolution() {
-    if (!evolutionCfg) return
-    evolutionSaving = true
-    evolutionSaveMsg = null
-    evolutionSaveError = null
-    try {
-      evolutionCfg = await updateEvolutionConfig(evolutionCfg)
-      evolutionSaveMsg = 'Saved successfully'
-      setTimeout(() => { evolutionSaveMsg = null }, 3000)
-    } catch (e) {
-      evolutionSaveError = e instanceof Error ? e.message : 'Save failed'
-    } finally {
-      evolutionSaving = false
     }
   }
 
@@ -264,7 +239,7 @@
             <option value="en">English</option>
             <option value="sk">Slovenčina</option>
           </select>
-          <span class="hint">Controls the language of Evolution hypotheses and Guardian findings.</span>
+          <span class="hint">Controls the language of Guardian findings.</span>
         </div>
       </div>
 
@@ -279,7 +254,7 @@
     <section class="card">
       <h3>Global LLM</h3>
       <p class="section-desc">
-        Default LLM endpoint used by Insight, Guardian, and wiki/evolution subsystems.
+        Default LLM endpoint used by Insight, Guardian, and wiki subsystems.
         Subsystems can override individual fields.
       </p>
 
@@ -407,49 +382,6 @@
           <span class="err-msg">{wikiSaveError}</span>
         {/if}
       </div>
-    </section>
-
-    <section class="card">
-      <h3>Evolution — Self-Improvement</h3>
-      <p class="section-desc">
-        Configure the autonomous evolution loop that generates improvement proposals for this project.
-        Full evolution settings are available in the Evolution tab.
-      </p>
-
-      {#if evolutionCfg}
-        <div class="form-group row">
-          <label class="checkbox-label" for="evo-stratus-self">
-            <input
-              id="evo-stratus-self"
-              type="checkbox"
-              bind:checked={evolutionCfg.stratus_self_enabled}
-            />
-            Allow Stratus-self evolution (prompt_tuning)
-            <span
-              class="tooltip-icon"
-              title="When enabled, the evolution loop may also generate prompt_tuning hypotheses that tune Stratus's own agent prompts. This is a low-priority opt-in category. Takes effect on the next evolution run."
-            >ⓘ</span>
-          </label>
-        </div>
-        <p class="hint" style="margin-bottom: 12px;">
-          Enables LLM self-tuning — evolution targets Stratus's own prompts in addition to project
-          code. Low-priority category. Does not require a server restart.
-        </p>
-
-        <div class="actions">
-          <button class="btn-primary" onclick={saveEvolution} disabled={evolutionSaving}>
-            {evolutionSaving ? 'Saving...' : 'Save Evolution settings'}
-          </button>
-          {#if evolutionSaveMsg}
-            <span class="ok-msg">{evolutionSaveMsg}</span>
-          {/if}
-          {#if evolutionSaveError}
-            <span class="err-msg">{evolutionSaveError}</span>
-          {/if}
-        </div>
-      {:else}
-        <p class="muted">Loading evolution config…</p>
-      {/if}
     </section>
 
     <section class="card">

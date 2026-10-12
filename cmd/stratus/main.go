@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -29,7 +28,6 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/hooks"
 	"github.com/MartinNevlaha/stratus-v2/insight"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/prompts"
@@ -263,7 +261,7 @@ func cmdServe() {
 	var insightEngine *insight.Engine
 	var insightCancel context.CancelFunc
 	if cfg.Insight.Enabled {
-		insightEngine = insight.NewEngineWithFullConfig(database, cfg.Insight, cfg.Wiki, cfg.Evolution, cfg.Language)
+		insightEngine = insight.NewEngineWithFullConfig(database, cfg.Insight, cfg.Wiki, cfg.DailyTokenBudget, cfg.Language)
 		if eventBus != nil {
 			insightEngine.SetEventBus(eventBus)
 		}
@@ -275,13 +273,7 @@ func cmdServe() {
 		}
 	}
 
-	// Initialize Agent Evolution engine
-	logger := slog.Default()
-	claudeAgentsDir := filepath.Join(cfg.ProjectRoot, ".claude", "agents")
-	opencodeAgentsDir := filepath.Join(cfg.ProjectRoot, ".opencode", "agents")
-	agentEvolutionEngine := agent_evolution.NewEngine(database, agent_evolution.DefaultConfig(), claudeAgentsDir, opencodeAgentsDir, logger)
-
-	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, insightEngine, agentEvolutionEngine, &cfg)
+	srv := api.NewServer(database, coord, vexorClient, hub, termMgr, cfg.ProjectRoot, cfg.STT.Endpoint, cfg.STT.Model, staticFS, Version, syncedVersion, skippedFiles, swarmStore, insightEngine, &cfg)
 	if eventBus != nil {
 		srv.SetEventBus(eventBus)
 	}
@@ -1694,7 +1686,7 @@ func cmdOnboard() {
 	if err != nil {
 		log.Fatalf("onboard: create LLM client: %v", err)
 	}
-	budgetedClient := llm.NewBudgetedClient(bareClient, database, cfg.Evolution.DailyTokenBudget)
+	budgetedClient := llm.NewBudgetedClient(bareClient, database, cfg.DailyTokenBudget)
 	llmClient := llm.NewSubsystemClient(budgetedClient, "onboarding", llm.PriorityMedium)
 
 	// Create wiki store, linker, vault sync

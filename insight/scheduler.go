@@ -103,13 +103,4 @@ func (s *Scheduler) tick(ctx context.Context) {
 			slog.Info("insight: wiki maintenance complete", "scored", mResult.PagesScored, "stale", mResult.PagesMarkedStale)
 		}
 	}
-
-	// Evolution loop
-	if s.engine.evoCfg.Enabled {
-		if evoResult, err := s.engine.RunEvolutionCycle(ctx, "scheduled", 0, nil); err != nil {
-			slog.Error("insight: evolution cycle failed", "error", err)
-		} else if evoResult != nil {
-			slog.Info("insight: evolution complete", "hypotheses", evoResult.HypothesesTested, "auto_applied", evoResult.AutoApplied)
-		}
-	}
 }

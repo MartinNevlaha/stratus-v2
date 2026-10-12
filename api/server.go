@@ -13,10 +13,9 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/events"
 	"github.com/MartinNevlaha/stratus-v2/guardian"
 	"github.com/MartinNevlaha/stratus-v2/insight"
-	"github.com/MartinNevlaha/stratus-v2/events"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/agent_evolution"
 	insightllm "github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/onboarding"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/product_intelligence"
@@ -34,28 +33,27 @@ type Server struct {
 	// does not toast every time; its zero value is ready to use.
 	idleThrottle waitingThrottle
 
-	db                   *db.DB
-	coordinator          *orchestration.Coordinator
-	vexor                *vexor.Client
-	hub                  *Hub
-	terminal             *terminal.Manager
-	projectRoot          string
-	sttEndpoint          string
-	sttModel             string
-	staticFiles          fs.FS
-	version              string
-	syncedVersion        string   // version when assets were last refreshed to disk
-	skippedFiles         []string // asset files skipped in last refresh (user-customized)
-	swarm                *swarm.Store
-	insight              *insight.Engine
-	agentEvolutionEngine *agent_evolution.Engine
-	eventBus             events.EventBus
-	piEngine             *product_intelligence.Engine
-	guardianSvc          *guardian.Guardian
-	guardianLLM          insightllm.Client // shared LLM client for orchestration risk analysis
-	cfg                  *config.Config    // pointer so guardian config updates are reflected
-	vaultSync            *wiki_engine.VaultSync
-	vaultSyncMu          sync.RWMutex // guards vaultSync (rebuilt when vault_path changes)
+	db            *db.DB
+	coordinator   *orchestration.Coordinator
+	vexor         *vexor.Client
+	hub           *Hub
+	terminal      *terminal.Manager
+	projectRoot   string
+	sttEndpoint   string
+	sttModel      string
+	staticFiles   fs.FS
+	version       string
+	syncedVersion string   // version when assets were last refreshed to disk
+	skippedFiles  []string // asset files skipped in last refresh (user-customized)
+	swarm         *swarm.Store
+	insight       *insight.Engine
+	eventBus      events.EventBus
+	piEngine      *product_intelligence.Engine
+	guardianSvc   *guardian.Guardian
+	guardianLLM   insightllm.Client // shared LLM client for orchestration risk analysis
+	cfg           *config.Config    // pointer so guardian config updates are reflected
+	vaultSync     *wiki_engine.VaultSync
+	vaultSyncMu   sync.RWMutex // guards vaultSync (rebuilt when vault_path changes)
 
 	dirtyFiles map[string]struct{}
 	dirtyMu    sync.Mutex
@@ -85,29 +83,27 @@ func NewServer(
 	skippedFiles []string,
 	swarmStore *swarm.Store,
 	insightEngine *insight.Engine,
-	agentEvolutionEng *agent_evolution.Engine,
 	cfg *config.Config,
 ) *Server {
 	s := &Server{
-		db:                   database,
-		coordinator:          coord,
-		vexor:                vexorClient,
-		hub:                  hub,
-		terminal:             termMgr,
-		projectRoot:          projectRoot,
-		sttEndpoint:          sttEndpoint,
-		sttModel:             sttModel,
-		staticFiles:          staticFiles,
-		version:              version,
-		syncedVersion:        syncedVersion,
-		skippedFiles:         skippedFiles,
-		swarm:                swarmStore,
-		insight:              insightEngine,
-		agentEvolutionEngine: agentEvolutionEng,
-		cfg:                  cfg,
-		vaultSync:            newVaultSyncForConfig(cfg, database),
-		dirtyFiles:           make(map[string]struct{}),
-		dirtyCh:              make(chan struct{}, 1),
+		db:            database,
+		coordinator:   coord,
+		vexor:         vexorClient,
+		hub:           hub,
+		terminal:      termMgr,
+		projectRoot:   projectRoot,
+		sttEndpoint:   sttEndpoint,
+		sttModel:      sttModel,
+		staticFiles:   staticFiles,
+		version:       version,
+		syncedVersion: syncedVersion,
+		skippedFiles:  skippedFiles,
+		swarm:         swarmStore,
+		insight:       insightEngine,
+		cfg:           cfg,
+		vaultSync:     newVaultSyncForConfig(cfg, database),
+		dirtyFiles:    make(map[string]struct{}),
+		dirtyCh:       make(chan struct{}, 1),
 	}
 	go s.indexWorker()
 	return s
@@ -388,21 +384,6 @@ func (s *Server) Handler() http.Handler {
 	// Insight LLM
 	mux.HandleFunc("POST /api/insight/llm/test", s.handleTestLLMConnection)
 
-	// Agent Evolution
-	mux.HandleFunc("GET /api/insight/agent-evolution/summary", s.handleGetAgentEvolutionSummary)
-	mux.HandleFunc("GET /api/insight/agent-evolution/opportunities", s.handleGetAgentEvolutionOpportunities)
-	mux.HandleFunc("POST /api/insight/agent-evolution/trigger", s.handleTriggerAgentEvolution)
-	mux.HandleFunc("GET /api/insight/agent-evolution/candidates", s.handleGetAgentCandidates)
-	mux.HandleFunc("GET /api/insight/agent-evolution/candidates/{id}", s.handleGetAgentCandidateByID)
-	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/approve", s.handleApproveAgentCandidate)
-	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/reject", s.handleRejectAgentCandidate)
-	mux.HandleFunc("POST /api/insight/agent-evolution/candidates/{id}/experiment", s.handleStartAgentExperiment)
-	mux.HandleFunc("GET /api/insight/agent-evolution/candidates/{id}/markdown", s.handleGetAgentCandidateMarkdown)
-	mux.HandleFunc("GET /api/insight/agent-evolution/experiments", s.handleGetAgentExperiments)
-	mux.HandleFunc("GET /api/insight/agent-evolution/experiments/{id}", s.handleGetAgentExperimentByID)
-	mux.HandleFunc("GET /api/insight/agent-evolution/experiments/{id}/results", s.handleGetAgentExperimentResults)
-	mux.HandleFunc("POST /api/insight/agent-evolution/experiments/{id}/cancel", s.handleCancelAgentExperiment)
-
 	// Product Intelligence
 	mux.HandleFunc("GET /api/pi/projects", s.handlePIListProjects)
 	mux.HandleFunc("POST /api/pi/projects", s.handlePIRegisterProject)
@@ -488,16 +469,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/kb/problems", s.handleListKBProblems)
 	mux.HandleFunc("GET /api/kb/recommend", s.handleKBRecommend)
 	mux.HandleFunc("GET /api/kb/stats", s.handleKBStats)
-
-	// Evolution
-	mux.HandleFunc("GET /api/evolution/status", s.handleGetEvolutionStatus)
-	mux.HandleFunc("GET /api/evolution/runs", s.handleListEvolutionRuns)
-	mux.HandleFunc("GET /api/evolution/runs/{id}", s.handleGetEvolutionRun)
-	mux.HandleFunc("POST /api/evolution/trigger", s.handleTriggerEvolution)
-	mux.HandleFunc("GET /api/evolution/config", s.handleGetEvolutionConfig)
-	mux.HandleFunc("POST /api/evolution/config", s.handleUpdateEvolutionConfig)
-
-	// Code Analysis
 
 	// Global config
 	mux.HandleFunc("GET /api/config/language", s.handleGetLanguage)

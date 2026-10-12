@@ -9,13 +9,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/internal/insight/llm"
-	"github.com/MartinNevlaha/stratus-v2/internal/insight/evolution_loop/generators"
 )
 
 // allowedProposalTypes is the complete allowlist of proposal types accepted by
@@ -41,7 +41,10 @@ var allowedProposalTypes = map[string]struct{}{
 
 // computeProposalHash returns the server-side idempotency hash for a proposal.
 func computeProposalHash(proposalType, title string, signalRefs []string) string {
-	input := generators.SignalHashInputs(proposalType, title, signalRefs)
+	sorted := make([]string, len(signalRefs))
+	copy(sorted, signalRefs)
+	sort.Strings(sorted)
+	input := strings.Join(append([]string{proposalType, title}, sorted...), "|")
 	sum := sha256.Sum256([]byte(input))
 	return fmt.Sprintf("%x", sum)
 }

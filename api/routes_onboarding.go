@@ -152,7 +152,7 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 			s.onboardingMu.Unlock()
 			return
 		}
-		budgetedClient := llm.NewBudgetedClient(bareClient, s.db, s.cfg.Evolution.DailyTokenBudget)
+		budgetedClient := llm.NewBudgetedClient(bareClient, s.db, s.cfg.DailyTokenBudget)
 		llmClient := llm.NewSubsystemClient(budgetedClient, "onboarding", llm.PriorityMedium)
 
 		wikiStore := wiki_engine.NewDBWikiStore(s.db)
