@@ -317,10 +317,57 @@ var redirectWritePatterns = []string{
 // to compare against a baseline.
 var writeCommandRe = regexp.MustCompile(
 	`\b(?:tee|install|rmdir|rm|mkdir|mv|cp|dd|touch|chmod|chown|truncate)\b` +
-		`|\bgit\s+(?:-\S+\s+(?:\S+\s+)?)*(?:add|commit|push|merge|rebase|cherry-pick|reset)\b`)
+		`|\bgit\s+(?:-\S+\s+(?:\S+\s+)?)*(?:(?:add|commit|push|rebase|cherry-pick|reset)\b|merge(?:\s|$))`)
+
+// heredocStartRe matches a heredoc opener (`<<EOF`, `<<-'EOF'`, `<<"EOF"`) and captures its delimiter.
+var heredocStartRe = regexp.MustCompile(`<<-?\s*['"]?(\w+)['"]?`)
+
+// stripHeredocBodies removes the body of every heredoc, keeping the shell text around it.
+// A body is data handed to a program, not shell syntax: `>` in `python - <<EOF` source
+// (`missing_count>0`, `"->x"`) is not a redirect. A redirect on the opener line
+// (`cat > f <<EOF`) or after the terminator stays visible. An unterminated body is dropped
+// to the end of the command.
+func stripHeredocBodies(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	var kept []string
+	for i := 0; i < len(lines); i++ {
+		kept = append(kept, lines[i])
+		m := heredocStartRe.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		for i++; i < len(lines); i++ {
+			if strings.TrimSpace(lines[i]) == m[1] {
+				break
+			}
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// scratchpadWriteRe matches a write whose target is the session scratchpad
+// (/tmp/claude-<uid>/<project>/<session>/scratchpad[/...]): a redirect, or mkdir/touch/tee
+// aimed at it. The scratchpad is where Claude keeps throwaway output, and a reviewer needs
+// it for test logs. Only these operators are exempt -- `cp x <scratchpad>` or a second,
+// out-of-scratchpad target in the same command still reads as a write.
+var scratchpadWriteRe = regexp.MustCompile(
+	`(?:\d?&?>>?|\b(?:mkdir(?:\s+-\S+)*|touch|tee(?:\s+-\S+)*))\s*` +
+		`/tmp/claude-\d+/[^\s/"']+/[^\s/"']+/scratchpad(?:/[^\s"';|&()<>]*)?`)
+
+// stripScratchpadWrites drops scratchpad-targeted writes. A path with `..` could climb out
+// of the scratchpad, so it is left in place and judged as an ordinary write.
+func stripScratchpadWrites(cmd string) string {
+	return scratchpadWriteRe.ReplaceAllStringFunc(cmd, func(m string) string {
+		if strings.Contains(m, "..") {
+			return m
+		}
+		return " "
+	})
+}
 
 // isWriteBashCommand detects write operations in bash commands.
 func isWriteBashCommand(cmd string) bool {
+	cmd = stripScratchpadWrites(stripHeredocBodies(cmd))
 	// Normalize whitespace: replace tabs with spaces for consistent pattern matching
 	normalizedCmd := strings.ReplaceAll(cmd, "\t", " ")
 	// Drop descriptor duplication first. `pytest ... 2>&1 | tail` is how this repo's

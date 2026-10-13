@@ -812,3 +812,70 @@ func TestIsWriteBashCommandWordBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// `git merge-base` only reads history, but `merge` is in the git write list and matched
+// on a word boundary ("merge-base"), denying a reviewer the ancestry check it needs.
+func TestIsWriteBashCommandMergeBaseIsReadOnly(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"git merge-base --is-ancestor abc123 def456 && echo ok", false},
+		{"git -C /repo merge-base HEAD main", false},
+		{"git merge feature", true},
+		{"git -C /repo merge feature", true},
+	}
+	for _, tt := range tests {
+		if got := isWriteBashCommand(tt.cmd); got != tt.want {
+			t.Errorf("isWriteBashCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+		}
+	}
+}
+
+// A heredoc body is data fed to a program, not shell syntax: a `>` inside Python source
+// (`missing_count>0`, `"->rewards"`) is not a redirect. The shell head still counts.
+func TestIsWriteBashCommandIgnoresHeredocBody(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"python comparison in body", "uv run python - <<'EOF'\nprint('missing_count>0')\nEOF", false},
+		{"arrow in body", "python3 - <<EOF\nprint(\"->rewards\")\nEOF", false},
+		{"redirect in head before heredoc", "cat > out.txt <<'EOF'\nhello\nEOF", true},
+		{"redirect after heredoc", "python3 - <<'EOF'\nprint(1)\nEOF\necho x > out.txt", true},
+		{"unterminated heredoc keeps head only", "python3 - <<'EOF'\nprint('a>b')", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isWriteBashCommand(tt.cmd); got != tt.want {
+				t.Errorf("isWriteBashCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+// A reviewer needs the session scratchpad for test logs; writes there are not repo writes.
+func TestIsWriteBashCommandScratchpadWritesAreAllowed(t *testing.T) {
+	sp := "/tmp/claude-1000/-home-martin-projects-app/6939f2e0-4a02/scratchpad"
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"mkdir and redirects", "mkdir -p " + sp + " && (uv run pytest -q > " + sp + "/t.log 2>&1; echo \"exit=$?\" >> " + sp + "/t.log)", false},
+		{"redirect to nested file", "go test ./... > " + sp + "/out/go.log", false},
+		{"tee into scratchpad", "go test ./... | tee " + sp + "/go.log", false},
+		{"redirect outside scratchpad", "go test ./... > /tmp/other.log", true},
+		{"scratchpad plus repo write", "echo x > " + sp + "/a; echo y > src/main.go", true},
+		{"dotdot escapes scratchpad", "echo x > " + sp + "/../../../../etc/passwd", true},
+		{"rm in scratchpad still a write", "rm -rf " + sp + "/old", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isWriteBashCommand(tt.cmd); got != tt.want {
+				t.Errorf("isWriteBashCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
