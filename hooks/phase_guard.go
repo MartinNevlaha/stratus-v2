@@ -106,23 +106,65 @@ func architectWriteDenial(event HookEvent) string {
 		if command != "" && !isWriteBashCommand(command) {
 			return ""
 		}
-		return fmt.Sprintf("%s may not write through Bash; write design docs and ADRs with Write or Edit "+
+		if command != "" && isDocsOnlyBashWrite(command, architectProjectRoot(event)) {
+			return ""
+		}
+		return fmt.Sprintf("%s may not write through Bash except Markdown files under docs/ "+
+			"(cat > docs/plans/x.md <<'EOF'); write design docs and ADRs with Write or Edit "+
 			"under docs/ (for example docs/plans/ or docs/decisions/).", event.AgentType)
 	}
 	path, _ := event.ToolInput["file_path"].(string)
 	if path == "" {
 		path, _ = event.ToolInput["notebook_path"].(string)
 	}
-	root := os.Getenv("CLAUDE_PROJECT_DIR")
-	if root == "" {
-		root = event.Cwd
-	}
-	if isProjectDoc(path, root) {
+	if isProjectDoc(path, architectProjectRoot(event)) {
 		return ""
 	}
 	return fmt.Sprintf("%s writes only Markdown design docs and ADRs under a docs/ directory "+
 		"(for example docs/plans/ or docs/decisions/); %q is not one. Hand source changes to an engineering agent.",
 		event.AgentType, path)
+}
+
+func architectProjectRoot(event HookEvent) string {
+	if root := os.Getenv("CLAUDE_PROJECT_DIR"); root != "" {
+		return root
+	}
+	return event.Cwd
+}
+
+// docsRedirectRe captures the target of a redirect; docsMkdirRe the directories of mkdir.
+var (
+	docsRedirectRe = regexp.MustCompile(`\d?>>?\s*["']?([^\s"'|;&<>()]+)["']?`)
+	docsMkdirRe    = regexp.MustCompile(`\bmkdir(?:\s+-\S+)*\s+(?:"[^"]+"|'[^']+'|[^\s;&|]+)(?:\s+(?:"[^"]+"|'[^']+'|[^\s;&|]+))*`)
+)
+
+// isDocsOnlyBashWrite reports whether every write in a Bash command lands on a Markdown file
+// (redirect) or directory (mkdir) under docs/ -- the same files Write and Edit allow an
+// architect. Any other write command or target means the command is not docs-only.
+func isDocsOnlyBashWrite(command, root string) bool {
+	rest := stripScratchpadWrites(stripHeredocBodies(command))
+	rest = fdDupRe.ReplaceAllString(rest, " ")
+	rest = devNullRe.ReplaceAllString(rest, " ")
+	for _, m := range docsRedirectRe.FindAllStringSubmatch(rest, -1) {
+		if !isProjectDoc(m[1], root) {
+			return false
+		}
+	}
+	rest = docsRedirectRe.ReplaceAllString(rest, " ")
+	var mkdirOK = true
+	rest = docsMkdirRe.ReplaceAllStringFunc(rest, func(m string) string {
+		for _, arg := range strings.Fields(m)[1:] {
+			arg = strings.Trim(arg, `"'`)
+			if strings.HasPrefix(arg, "-") {
+				continue
+			}
+			if !isProjectDoc(filepath.Join(arg, "x.md"), root) {
+				mkdirOK = false
+			}
+		}
+		return " "
+	})
+	return mkdirOK && !isWriteBashCommand(rest)
 }
 
 func isProjectDoc(path, root string) bool {
@@ -316,7 +358,9 @@ var redirectWritePatterns = []string{
 // `git worktree add` -- a scratch tree is not a repository write, and a reviewer needs one
 // to compare against a baseline.
 var writeCommandRe = regexp.MustCompile(
-	`\b(?:tee|install|rmdir|rm|mkdir|mv|cp|dd|touch|chmod|chown|truncate)\b` +
+	`\b(?:tee|install|rmdir|rm|mkdir|mv|cp|touch|chmod|chown|truncate)\b` +
+		// dd only writes with if=/of=; bare `dd` is also a date-format token (`MM-DD`).
+		`|\bdd\s+(?:if|of|bs|count|conv|seek|skip)=` +
 		`|\bgit\s+(?:-\S+\s+(?:\S+\s+)?)*(?:(?:add|commit|push|rebase|cherry-pick|reset)\b|merge(?:\s|$))`)
 
 // heredocStartRe matches a heredoc opener (`<<EOF`, `<<-'EOF'`, `<<"EOF"`) and captures its delimiter.
@@ -365,9 +409,30 @@ func stripScratchpadWrites(cmd string) string {
 	})
 }
 
+// operatorArrowRe matches operators that contain `>` but are not redirects: jsonb
+// `->`/`->>`/`#>`/`#>>`, and `=>`.
+var operatorArrowRe = regexp.MustCompile(`->>?|#>>?|=>`)
+
+// quotedStringRe matches a single- or double-quoted string.
+var quotedStringRe = regexp.MustCompile(`'[^']*'|"(?:[^"\\]|\\.)*"`)
+
+// opaqueQuotesRe matches commands whose quoted text can itself be executed or be a program
+// (`sh -c "rm x"`, `awk '{print > "f"}'`, `$(...)`), so quoted text must stay visible.
+var opaqueQuotesRe = regexp.MustCompile("\\b(?:ba|z)?sh\\b|\\beval\\b|\\bxargs\\b|\\bsource\\b|\\b(?:g?awk|sed|perl)\\b|\\$\\(|`")
+
+// stripQuotedStrings blanks the content of quoted strings: a `>` or `MM-DD` inside a SQL
+// literal is data, not a redirect or a command. Left alone when the quotes may hold code.
+func stripQuotedStrings(cmd string) string {
+	if opaqueQuotesRe.MatchString(cmd) {
+		return cmd
+	}
+	return quotedStringRe.ReplaceAllString(cmd, `""`)
+}
+
 // isWriteBashCommand detects write operations in bash commands.
 func isWriteBashCommand(cmd string) bool {
-	cmd = stripScratchpadWrites(stripHeredocBodies(cmd))
+	cmd = stripQuotedStrings(stripScratchpadWrites(stripHeredocBodies(cmd)))
+	cmd = operatorArrowRe.ReplaceAllString(cmd, " ")
 	// Normalize whitespace: replace tabs with spaces for consistent pattern matching
 	normalizedCmd := strings.ReplaceAll(cmd, "\t", " ")
 	// Drop descriptor duplication first. `pytest ... 2>&1 | tail` is how this repo's

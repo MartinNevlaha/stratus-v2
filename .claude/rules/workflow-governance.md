@@ -78,7 +78,8 @@ what it reviews.
 
 Role discipline: `PhaseGuard` also holds `delivery-system-architect` and
 `delivery-strategic-architect` to Markdown files under a `docs/` directory (design docs,
-ADRs), in the project or a swarm worktree; their writes anywhere else are denied.
+ADRs), in the project or a swarm worktree; their writes anywhere else are denied. A Bash
+redirect or `mkdir` is allowed only when every target is such a file or directory.
 
 ## Stratus Server Requirement
 

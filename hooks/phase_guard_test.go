@@ -879,3 +879,29 @@ func TestIsWriteBashCommandScratchpadWritesAreAllowed(t *testing.T) {
 		})
 	}
 }
+
+// Measured live 2026-10-14: jsonb operators (`->>`), a date format (`MM-DD` read as `dd`) and
+// `>` inside a quoted SQL string denied a read-only `docker exec ... psql` to a reviewer.
+func TestIsWriteBashCommandQuotedAndOperatorTextIsReadOnly(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"jsonb arrow operator", `psql -Atc "SELECT provenance->>'skill_version' FROM t"`, false},
+		{"date format dd in quotes", `psql -Atc "SELECT to_char(created_at,'MM-DD HH24:MI') FROM t"`, false},
+		{"dd in sh -c string", `docker exec db sh -c "psql -Atc \"SELECT to_char(c,'MM-DD')\""`, false},
+		{"comparison in quoted sql", `psql -c "SELECT * FROM t WHERE n > 5" | head`, false},
+		{"jsonb path operator", `psql -c "SELECT r #>> '{a,b}' FROM t"`, false},
+		{"real dd still a write", "dd if=/dev/zero of=disk.img bs=1M", true},
+		{"redirect after quoted arg", `echo "a" > out.txt`, true},
+		{"rm inside quotes passed to sh -c", `sh -c "rm -rf build"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isWriteBashCommand(tt.cmd); got != tt.want {
+				t.Errorf("isWriteBashCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
