@@ -905,3 +905,218 @@ func TestIsWriteBashCommandQuotedAndOperatorTextIsReadOnly(t *testing.T) {
 		})
 	}
 }
+
+// Measured live 2026-10-16 (session 93c81c8c, two specs in parallel): every delegation was
+// denied AMBIGUOUS_WORKFLOW although each brief opened with `Workflow ID: <id>`, because
+// the prompt-ID path counted document paths (`<id>-design.md`, `<id>-plan.md`) and slugs of
+// inactive workflows as further candidates, demanded exactly one, and otherwise fell
+// through to session resolution. The tests below pin the parsing that fixes it.
+
+func twoParallelSpecs(t *testing.T) {
+	t.Helper()
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "sess", "type": "spec", "phase": "implement"},
+			{"id": "spec-b", "session_id": "sess", "type": "spec", "phase": "design"},
+		},
+	})
+}
+
+func resolvedID(t *testing.T, toolInput map[string]any) string {
+	t.Helper()
+	wf, err := fetchWorkflowForTaskStrict(toolInput, "sess")
+	if err != nil {
+		t.Fatalf("expected prompt to resolve a workflow, got error: %v", err)
+	}
+	id, _ := wf["id"].(string)
+	return id
+}
+
+func TestDelegationGuard_LabeledPromptIDWinsOverDocPaths(t *testing.T) {
+	twoParallelSpecs(t)
+
+	id := resolvedID(t, map[string]any{
+		"subagent_type": "delivery-system-architect",
+		"prompt": "Workflow ID: spec-b\nPhase: design.\n\nRead docs/plans/spec-b-discovery.md first; " +
+			"keep it shorter than docs/plans/spec-a-design.md and docs/plans/spec-a-plan.md.",
+	})
+	if id != "spec-b" {
+		t.Fatalf("expected labeled spec-b, got %q", id)
+	}
+}
+
+func TestDelegationGuard_StructuredHeaderAndRepeatedLabelResolve(t *testing.T) {
+	twoParallelSpecs(t)
+
+	id := resolvedID(t, map[string]any{
+		"subagent_type": "delivery-system-architect",
+		"prompt": "workflow_id: spec-b\nphase: design\ntask_index: none\nsession_id: sess\n" +
+			"**Workflow ID:** `spec-b`\n\nWrite docs/plans/spec-b-design.md.",
+	})
+	if id != "spec-b" {
+		t.Fatalf("expected spec-b from repeated labels, got %q", id)
+	}
+}
+
+func TestDelegationGuard_UnlabeledMentionOfOneActiveWorkflowResolves(t *testing.T) {
+	twoParallelSpecs(t)
+
+	id := resolvedID(t, map[string]any{
+		"subagent_type": "delivery-backend-engineer",
+		"prompt": "Implement task 3 under workflow spec-a per the plan. Background: " +
+			"docs/plans/spec-old-thing-design.md and ADR-222 from spec-prepojeny-pravny-graf.",
+	})
+	if id != "spec-a" {
+		t.Fatalf("expected the only active workflow mentioned (spec-a), got %q", id)
+	}
+}
+
+func TestDelegationGuard_DocPathIsNotAMention(t *testing.T) {
+	twoParallelSpecs(t)
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Agent",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+			"prompt":        "Read docs/plans/spec-a-design.md and implement task 2.",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected a bare document path not to identify a workflow")
+	}
+	if !strings.Contains(decision.Reason, ambiguousWorkflowErr) || !strings.Contains(decision.Reason, resolutionSession) {
+		t.Fatalf("expected session ambiguity, got %q", decision.Reason)
+	}
+	if !strings.Contains(decision.Reason, "Workflow ID: <id>") {
+		t.Fatalf("expected an actionable hint naming the Workflow ID line, got %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuard_UnlabeledMentionsOfSeveralActiveWorkflowsReportThem(t *testing.T) {
+	twoParallelSpecs(t)
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Agent",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+			"prompt":        "Coordinate the spec-a worktree with spec-b.",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected two unlabeled active mentions to block")
+	}
+	if !strings.Contains(decision.Reason, ambiguousWorkflowErr) || !strings.Contains(decision.Reason, "prompt: spec-a, spec-b") {
+		t.Fatalf("expected the mentioned IDs in the diagnostics, got %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuard_TwoDifferentLabeledIDsBlock(t *testing.T) {
+	twoParallelSpecs(t)
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Agent",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+			"prompt":        "Workflow ID: spec-a\n...\nworkflow_id: spec-b\nImplement.",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected two different labeled IDs to block")
+	}
+	if !strings.Contains(decision.Reason, ambiguousWorkflowErr) || !strings.Contains(decision.Reason, resolutionExplicitPrompt) {
+		t.Fatalf("expected explicit_prompt ambiguity, got %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuard_LabeledUnknownIDBlocksWithoutFallback(t *testing.T) {
+	setDashboardState(t, dashboardState{
+		Workflows: []map[string]any{
+			{"id": "spec-a", "session_id": "sess", "type": "spec", "phase": "implement"},
+		},
+	})
+
+	decision := DelegationGuard(HookEvent{
+		ToolName:  "Agent",
+		SessionID: "sess",
+		ToolInput: map[string]any{
+			"subagent_type": "delivery-backend-engineer",
+			"prompt":        "Workflow ID: spec-typo\nImplement task 1.",
+		},
+	})
+
+	if decision.Continue {
+		t.Fatalf("expected a labeled unknown ID to block rather than bind the session workflow")
+	}
+	if !strings.Contains(decision.Reason, workflowNotFoundErr) || !strings.Contains(decision.Reason, resolutionExplicitPrompt) {
+		t.Fatalf("expected not-found from explicit_prompt, got %q", decision.Reason)
+	}
+}
+
+func TestDelegationGuard_StructuredIDWithOwnDocPathIsNotMismatch(t *testing.T) {
+	twoParallelSpecs(t)
+
+	wf, err := fetchWorkflowForTaskStrict(map[string]any{
+		"subagent_type": "delivery-backend-engineer",
+		"workflow_id":   "spec-a",
+		"prompt":        "Read docs/plans/spec-a-design.md and implement task 2.",
+	}, "sess")
+	if err != nil {
+		t.Fatalf("expected own document path not to count as a mismatch, got %v", err)
+	}
+	if id, _ := wf["id"].(string); id != "spec-a" {
+		t.Fatalf("expected spec-a, got %q", id)
+	}
+}
+
+func TestDelegationGuard_StructuredIDWithLabeledMatchIgnoresIncidentalMention(t *testing.T) {
+	twoParallelSpecs(t)
+
+	_, err := fetchWorkflowForTaskStrict(map[string]any{
+		"subagent_type": "delivery-backend-engineer",
+		"workflow_id":   "spec-a",
+		"prompt":        "Workflow ID: spec-a\nDo not touch the spec-b worktree.",
+	}, "sess")
+	if err != nil {
+		t.Fatalf("expected labeled agreement to allow an incidental mention, got %v", err)
+	}
+}
+
+func TestDelegationGuard_StructuredIDContradictedByUnlabeledMentionBlocks(t *testing.T) {
+	twoParallelSpecs(t)
+
+	_, err := fetchWorkflowForTaskStrict(map[string]any{
+		"subagent_type": "delivery-backend-engineer",
+		"workflow_id":   "spec-a",
+		"prompt":        "Implement task 4 of spec-b.",
+	}, "sess")
+	if err == nil || !strings.Contains(err.Error(), workflowIDMismatchErr) {
+		t.Fatalf("expected WORKFLOW_ID_MISMATCH when the prompt names only another workflow, got %v", err)
+	}
+}
+
+func TestMentionsWorkflowID_WholeTokenOnly(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		{"under workflow spec-a per the plan", true},
+		{"spec-a", true},
+		{"(spec-a)", true},
+		{"docs/plans/evidence/spec-a/ground-truth.md", true},
+		{"docs/plans/spec-a-design.md", false},
+		{"myspec-a", false},
+		{"spec-a_v2", false},
+		{"spec-ab", false},
+	}
+	for _, c := range cases {
+		if got := mentionsWorkflowID(c.text, "spec-a"); got != c.want {
+			t.Errorf("mentionsWorkflowID(%q) = %v, want %v", c.text, got, c.want)
+		}
+	}
+}

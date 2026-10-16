@@ -16,7 +16,13 @@ import (
 const noActiveWorkflowReason = "No active workflow registered. Use mcp__stratus__register_workflow first."
 
 const unresolvedWorkflowReason = "WORKFLOW_NOT_RESOLVED: No workflow could be resolved for this delegation. " +
-	"If several workflows are active in parallel, pass the exact workflow_id as structured tool input."
+	"If several workflows are active in parallel, " + workflowIDHint + "."
+
+// workflowIDHint tells a coordinator how to make a delegation resolvable. Claude Code's
+// Agent tool has no workflow_id parameter, so the prompt line is the channel there.
+const workflowIDHint = "name the workflow once at the top of the prompt as `Workflow ID: <id>` " +
+	"(document paths such as <id>-design.md and slugs of inactive workflows are ignored), " +
+	"or pass workflow_id as structured input where the tool accepts it"
 
 const (
 	workflowNotFoundErr      = "WORKFLOW_NOT_FOUND"
@@ -29,9 +35,14 @@ const (
 	resolutionGlobal         = "global_fallback"
 )
 
-// workflowIDRe matches an explicit workflow ID (spec-/bug-/e2e- prefixed) embedded in a
-// Task prompt. Mirrors the OpenCode plugin regex so both runtimes resolve identically.
-var workflowIDRe = regexp.MustCompile(`\b(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}\b`)
+// workflowIDPattern is the shape of a workflow ID (spec-/bug-/e2e- prefixed slug). Mirrors
+// the OpenCode plugin so both runtimes resolve identically.
+const workflowIDPattern = `(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}`
+
+// labeledWorkflowIDRe matches the `Workflow ID: <id>` / `workflow_id: <id>` line the
+// workflow skills put at the top of every brief, tolerating markdown emphasis and quotes.
+var labeledWorkflowIDRe = regexp.MustCompile(
+	"(?i)workflow[ _-]?id[*`\"']*\\s*[:=]\\s*[*`\"']*(" + workflowIDPattern + ")")
 
 // PhaseGuard blocks disallowed tools during certain workflow phases.
 func PhaseGuard(event HookEvent) Decision {
@@ -570,6 +581,7 @@ type workflowResolutionError struct {
 	Source      string
 	SessionID   string
 	Candidates  []string
+	Hint        string
 }
 
 func (e *workflowResolutionError) Error() string {
@@ -588,6 +600,9 @@ func (e *workflowResolutionError) Error() string {
 	}
 	if len(e.Candidates) > 0 {
 		parts = append(parts, "candidates: "+strings.Join(e.Candidates, ", "))
+	}
+	if e.Hint != "" {
+		parts = append(parts, "hint: "+e.Hint)
 	}
 	return strings.Join(parts, "\n")
 }
@@ -642,9 +657,12 @@ func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map
 	}
 
 	toolID := workflowIDFromToolInput(toolInput)
-	promptIDs := workflowIDsFromPrompt(toolInput, workflows)
-	promptID := singleWorkflowID(promptIDs)
-	if toolID != "" && promptHasDifferentWorkflowID(promptIDs, toolID) {
+	labeled, mentioned := promptWorkflowIDs(toolInput, workflows)
+	promptIDs := labeled
+	if len(promptIDs) == 0 {
+		promptIDs = mentioned
+	}
+	if toolID != "" && promptContradicts(labeled, mentioned, toolID) {
 		return nil, &workflowResolutionError{
 			Code:        workflowIDMismatchErr,
 			RequestedID: toolID,
@@ -658,10 +676,29 @@ func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map
 	if toolID != "" {
 		return requireExactWorkflow(toolID, resolutionExplicitTool, sessionID, workflows)
 	}
-	if promptID != "" {
-		return requireExactWorkflow(promptID, resolutionExplicitPrompt, sessionID, workflows)
+	// A labeled line is the brief's own statement: one is authoritative, two different
+	// ones are a confused brief and must not be guessed at. Without a label, a bare
+	// mention of exactly one active workflow identifies it.
+	if len(labeled) > 1 {
+		return nil, &workflowResolutionError{
+			Code:       ambiguousWorkflowErr,
+			PromptID:   strings.Join(labeled, ", "),
+			Source:     resolutionExplicitPrompt,
+			SessionID:  sessionID,
+			Candidates: labeled,
+			Hint:       workflowIDHint,
+		}
+	}
+	if len(labeled) == 1 {
+		return requireExactWorkflow(labeled[0], resolutionExplicitPrompt, sessionID, workflows)
+	}
+	if len(mentioned) == 1 {
+		return requireExactWorkflow(mentioned[0], resolutionExplicitPrompt, sessionID, workflows)
 	}
 
+	// The prompt names no workflow, or several without a label: fall back to session
+	// ownership, and report what the prompt did name so the denial is actionable.
+	promptNote := strings.Join(mentioned, ", ")
 	if sessionID != "" {
 		sessionMatches := workflowsForSession(workflows, sessionID)
 		if len(sessionMatches) == 1 {
@@ -670,9 +707,11 @@ func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map
 		if len(sessionMatches) > 1 {
 			return nil, &workflowResolutionError{
 				Code:       ambiguousWorkflowErr,
+				PromptID:   promptNote,
 				Source:     resolutionSession,
 				SessionID:  sessionID,
 				Candidates: workflowIDs(sessionMatches),
+				Hint:       workflowIDHint,
 			}
 		}
 	}
@@ -683,9 +722,11 @@ func fetchWorkflowForTaskStrict(toolInput map[string]any, sessionID string) (map
 	if len(workflows) > 1 {
 		return nil, &workflowResolutionError{
 			Code:       ambiguousWorkflowErr,
+			PromptID:   promptNote,
 			Source:     resolutionGlobal,
 			SessionID:  sessionID,
 			Candidates: workflowIDs(workflows),
+			Hint:       workflowIDHint,
 		}
 	}
 
@@ -722,43 +763,74 @@ func workflowIDFromToolInput(toolInput map[string]any) string {
 	return ""
 }
 
-func workflowIDsFromPrompt(toolInput map[string]any, workflows []map[string]any) []string {
+// promptWorkflowIDs reads the workflow IDs a Task prompt names. Labeled IDs come from a
+// `Workflow ID: <id>` / `workflow_id: <id>` line, deduplicated in order of appearance.
+// Mentioned IDs are active workflows whose ID occurs as a whole token. A token that merely
+// contains an ID (`spec-a-design.md`, `spec-a-plan.md`) is a document path, and a slug of a
+// workflow that is not active is context, not identification: measured 2026-10-16, counting
+// both as candidates denied every delegation of a session running two specs in parallel.
+func promptWorkflowIDs(toolInput map[string]any, workflows []map[string]any) (labeled, mentioned []string) {
 	taskText := getTaskText(toolInput)
 	if taskText == "" {
-		return nil
+		return nil, nil
 	}
 	seen := map[string]struct{}{}
-	var ids []string
-	for _, wf := range workflows {
-		if id, _ := wf["id"].(string); id != "" && strings.Contains(taskText, id) {
-			seen[id] = struct{}{}
-			ids = append(ids, id)
-		}
-	}
-	for _, id := range workflowIDRe.FindAllString(taskText, -1) {
-		if _, ok := seen[id]; ok {
+	for _, m := range labeledWorkflowIDRe.FindAllStringSubmatch(taskText, -1) {
+		if _, ok := seen[m[1]]; ok {
 			continue
 		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+		seen[m[1]] = struct{}{}
+		labeled = append(labeled, m[1])
 	}
-	return ids
+	for _, wf := range workflows {
+		if id, _ := wf["id"].(string); id != "" && mentionsWorkflowID(taskText, id) {
+			mentioned = append(mentioned, id)
+		}
+	}
+	return labeled, mentioned
 }
 
-func singleWorkflowID(ids []string) string {
-	if len(ids) == 1 {
-		return ids[0]
+// promptContradicts reports whether the prompt names a workflow other than the structured
+// one. Any labeled ID must match it; without a label, bare mentions contradict only when
+// none of them is the structured ID, since a brief may cite a sibling workflow for context.
+func promptContradicts(labeled, mentioned []string, toolID string) bool {
+	if len(labeled) > 0 {
+		for _, id := range labeled {
+			if id != toolID {
+				return true
+			}
+		}
+		return false
 	}
-	return ""
+	if len(mentioned) == 0 {
+		return false
+	}
+	for _, id := range mentioned {
+		if id == toolID {
+			return false
+		}
+	}
+	return true
 }
 
-func promptHasDifferentWorkflowID(ids []string, toolID string) bool {
-	for _, id := range ids {
-		if id != toolID {
+// mentionsWorkflowID reports whether id occurs in text as a whole token: `spec-a-design.md`
+// and `myspec-a` contain spec-a but do not name it.
+func mentionsWorkflowID(text, id string) bool {
+	for start := 0; ; start++ {
+		i := strings.Index(text[start:], id)
+		if i < 0 {
+			return false
+		}
+		start += i
+		end := start + len(id)
+		if (start == 0 || !isSlugByte(text[start-1])) && (end == len(text) || !isSlugByte(text[end])) {
 			return true
 		}
 	}
-	return false
+}
+
+func isSlugByte(b byte) bool {
+	return b == '-' || b == '_' || ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') || ('0' <= b && b <= '9')
 }
 
 func workflowByID(workflows []map[string]any, id string) map[string]any {

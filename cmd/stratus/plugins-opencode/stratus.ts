@@ -21,7 +21,15 @@ const noActiveWorkflowReason = "No active workflow registered. Use /spec or /bug
 
 const unresolvedWorkflowReason =
   "No workflow could be resolved for this delegation. Register a workflow with /spec or /bug first. " +
-  "If several workflows are active in parallel, include the exact workflow ID in the Task prompt so the correct flow is selected."
+  "If several workflows are active in parallel, name the one this delegation belongs to once at the top of the " +
+  "Task prompt as `Workflow ID: <id>` (document paths such as <id>-design.md and slugs of inactive workflows are ignored)."
+
+// Mirrors hooks/phase_guard.go so both runtimes resolve identically.
+const WORKFLOW_ID_PATTERN = "(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}"
+
+// The `Workflow ID: <id>` / `workflow_id: <id>` line the workflow skills put at the top of
+// every brief, tolerating markdown emphasis and quotes.
+const LABELED_WORKFLOW_ID_RE = new RegExp(`workflow[ _-]?id[*\`"']*\\s*[:=]\\s*[*\`"']*(${WORKFLOW_ID_PATTERN})`, "gi")
 
 interface Workflow {
   id: string
@@ -67,9 +75,33 @@ function getTaskText(args: Record<string, unknown>): string {
     .join("\n")
 }
 
-function extractWorkflowIDFromTaskArgs(args: Record<string, unknown>): string | null {
-  const match = getTaskText(args).match(/\b(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}\b/)
-  return match?.[0] ?? null
+function isSlugChar(ch: string): boolean {
+  return /[A-Za-z0-9_-]/.test(ch)
+}
+
+// Whole-token occurrence: `spec-a-design.md` and `myspec-a` contain spec-a but do not name it.
+function mentionsWorkflowID(text: string, id: string): boolean {
+  for (let i = text.indexOf(id); i >= 0; i = text.indexOf(id, i + 1)) {
+    const end = i + id.length
+    if ((i === 0 || !isSlugChar(text[i - 1])) && (end === text.length || !isSlugChar(text[end]))) return true
+  }
+  return false
+}
+
+// Labeled IDs come from a `Workflow ID: <id>` line, deduplicated in order; mentioned IDs are
+// active workflows named as a whole token. Document paths and slugs of inactive workflows are
+// context, not identification.
+function promptWorkflowIDs(
+  args: Record<string, unknown>,
+  workflows: Workflow[],
+): { labeled: string[]; mentioned: string[] } {
+  const taskText = getTaskText(args)
+  const labeled: string[] = []
+  for (const m of taskText.matchAll(LABELED_WORKFLOW_ID_RE)) {
+    if (!labeled.includes(m[1])) labeled.push(m[1])
+  }
+  const mentioned = workflows.filter((wf) => wf.id && mentionsWorkflowID(taskText, wf.id)).map((wf) => wf.id)
+  return { labeled, mentioned }
 }
 
 async function getActiveWorkflow(sessionID?: string): Promise<Workflow | null> {
@@ -107,29 +139,20 @@ async function getWorkflowForSessionStrict(sessionID?: string): Promise<Workflow
 }
 
 async function getWorkflowForTaskStrict(args: Record<string, unknown>, sessionID?: string): Promise<Workflow | null> {
-  const taskText = getTaskText(args)
   const state = await fetchDashboardStateStrict()
   const workflows = state.workflows ?? []
+  const { labeled, mentioned } = promptWorkflowIDs(args, workflows)
 
-  // 1. Explicit workflow ID embedded in the task text — the most reliable signal and
-  //    the only one that disambiguates parallel workflows sharing a session. Supports
-  //    workflow IDs that do not use the spec-/bug-/e2e- prefix.
-  const textMatches = workflows.filter((wf) => wf.id && taskText.includes(wf.id))
-  if (textMatches.length === 1) return textMatches[0]
-  if (textMatches.length > 1) {
-    // Multiple IDs appear in the prompt: prefer one owned by this session; otherwise
-    // it is genuinely ambiguous and we must not pick by list order.
-    return textMatches.find((wf) => sessionID && wf.session_id === sessionID) ?? null
+  // 1. A labeled `Workflow ID: <id>` line is the brief's own statement: one is
+  //    authoritative, two different ones are a confused brief and must not be guessed at.
+  //    Without a label, a bare mention of exactly one active workflow identifies it.
+  if (labeled.length > 1) return null
+  const promptID = labeled[0] ?? (mentioned.length === 1 ? mentioned[0] : undefined)
+  if (promptID) {
+    return workflows.find((wf) => wf.id === promptID) ?? (await fetchWorkflowByID(promptID))
   }
 
-  // 2. Fall back to the prefix regex for explicit IDs not present in dashboard state.
-  const explicitWorkflowID = extractWorkflowIDFromTaskArgs(args)
-  if (explicitWorkflowID) {
-    const wf = await fetchWorkflowByID(explicitWorkflowID)
-    if (wf) return wf
-  }
-
-  // 3. Last resort: session ownership — but only when it resolves to a single workflow.
+  // 2. Last resort: session ownership — but only when it resolves to a single workflow.
   //    Picking the first of several session-mates is exactly what let parallel flows mix.
   if (sessionID) {
     const sessionMatches = workflows.filter((wf) => wf.session_id === sessionID)

@@ -52,6 +52,14 @@
    prompt text disagree, Stratus must block with `WORKFLOW_ID_MISMATCH` rather
    than choosing either value.
 
+   Claude Code's Agent tool has no `workflow_id` parameter, so there the prompt line
+   is the channel. Stratus reads a labeled `Workflow ID: <id>` / `workflow_id: <id>`
+   line first (two different labeled IDs block as `AMBIGUOUS_WORKFLOW`); without one,
+   a bare mention of exactly one active workflow ID identifies it. Document paths such
+   as `docs/plans/<id>-design.md` and slugs of inactive workflows are ignored, so a
+   brief may cite them freely. Only when the prompt names no workflow does Stratus fall
+   back to the session's single active workflow.
+
 ### Enforcement
 
 The guards below are hooks of the `stratus` Claude Code plugin (`.claude/skills/stratus/hooks/hooks.json`);
