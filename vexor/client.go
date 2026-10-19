@@ -25,6 +25,7 @@ type Result struct {
 type Client struct {
 	binaryPath   string
 	model        string
+	root         string
 	timeout      time.Duration
 	indexTimeout time.Duration
 }
@@ -51,6 +52,13 @@ func New(binaryPath, model string, timeoutSec, indexTimeoutSec int) *Client {
 	}
 }
 
+// WithRoot pins every search and index to the given project directory, so
+// results do not depend on the working directory of the calling process.
+func (c *Client) WithRoot(root string) *Client {
+	c.root = root
+	return c
+}
+
 // Available checks if the vexor binary is in PATH.
 func (c *Client) Available() bool {
 	_, err := exec.LookPath(c.binaryPath)
@@ -69,13 +77,11 @@ func (c *Client) Search(query string, topK int, mode string) ([]Result, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, c.binaryPath,
-		"search",
-		"--format", "porcelain",
-		"--top", strconv.Itoa(topK),
-		"--mode", mode,
-		query,
-	)
+	args := []string{"search", "--format", "porcelain", "--top", strconv.Itoa(topK), "--mode", mode}
+	if c.root != "" {
+		args = append(args, "--path", c.root)
+	}
+	cmd := exec.CommandContext(ctx, c.binaryPath, append(args, query)...)
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -94,7 +100,11 @@ func (c *Client) Index(_ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.indexTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, c.binaryPath, "index")
+	args := []string{"index"}
+	if c.root != "" {
+		args = append(args, "--path", c.root)
+	}
+	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("vexor index timeout after %v", c.indexTimeout)

@@ -234,7 +234,7 @@ func cmdServe() {
 	// Insight toggle, and no-op cost is negligible when nobody subscribes.
 	eventBus := events.NewInMemoryBus(1000)
 	coord.SetEventBus(eventBus)
-	vexorClient := vexor.New(cfg.Vexor.BinaryPath, cfg.Vexor.Model, cfg.Vexor.TimeoutSec, cfg.Vexor.IndexTimeoutSec)
+	vexorClient := vexor.New(cfg.Vexor.BinaryPath, cfg.Vexor.Model, cfg.Vexor.TimeoutSec, cfg.Vexor.IndexTimeoutSec).WithRoot(cfg.ProjectRoot)
 	hub := api.NewHub()
 	termMgr := terminal.NewManager()
 

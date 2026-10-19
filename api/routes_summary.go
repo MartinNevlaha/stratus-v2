@@ -91,7 +91,7 @@ func (s *Server) generateChangeSummary(workflowID, baseCommit string) {
 	// 4. Vexor similarity search — find similar past changes
 	if s.vexor.Available() && len(changedFiles) > 0 {
 		query := "changes in " + strings.Join(modules, ", ")
-		results, err := s.vexor.Search(query, 5, "hybrid")
+		results, err := s.vexor.Search(query, 5, "auto")
 		if err == nil {
 			for _, r := range results {
 				excerpt := r.Heading
