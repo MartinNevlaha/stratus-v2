@@ -99,6 +99,12 @@ Present the plan to the user using the `question` tool. **Wait for explicit appr
 
 **Present diagnosis to user using the `question` tool.**
 
+Before asking, write a short summary as plain text in the same turn, so the user sees it above the dialog:
+- **Diagnosis** — 2–3 lines: the root cause and the affected files.
+- **Fix** — the approach and the ordered steps, one line each, plus the test that will prove it.
+
+Do not put the summary only inside the question options.
+
 - If TRIVIAL: Get approval to proceed directly to fix
 - If COMPLEX: Get approval for the plan
 

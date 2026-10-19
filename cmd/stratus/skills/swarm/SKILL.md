@@ -126,7 +126,13 @@ Each ticket should have:
 
 ### 1h. Present the plan
 
-Present the plan to the user via `AskUserQuestion` (approve or request changes) and proceed only after approval.
+Before asking, write a short summary as plain text in the same turn, so the user sees it above the dialog:
+- **Design** — 2–4 lines: the chosen decomposition strategy and why, and what is out of scope.
+- **Plan** — the tickets, one line each, with domain, dependencies and the main files touched.
+
+Do not put the summary only inside the question options.
+
+Then present the plan to the user via `AskUserQuestion` (approve or request changes) and proceed only after approval.
 
 Transition to implement:
 ```bash

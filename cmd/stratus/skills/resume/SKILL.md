@@ -83,7 +83,7 @@ Delegate to `delivery-code-reviewer`. If `[must_fix]` → back to `implement`. O
 Save memory events via `mcp__stratus__save_memory`. Transition to `complete` — the coordinator runs the learn pipeline (artifact build, knowledge update, wiki autodoc) automatically.
 
 ### bug — `analyze`
-Delegate to `delivery-debugger`. Present diagnosis, get approval. Transition to `fix`.
+Delegate to `delivery-debugger`. Summarize diagnosis and fix plan in plain text, then get approval via `AskUserQuestion`. Transition to `fix`.
 
 ### bug — `fix`
 Delegate to appropriate agent. Record delegation. Transition to `review`.

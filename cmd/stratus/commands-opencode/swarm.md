@@ -129,7 +129,9 @@ curl -sS -X POST $BASE/api/swarm/missions/<mission-id>/tickets/batch \
 
 ### 1h. Present & Approve
 
-Present the plan to the user using the `question` tool. Include:
+Before asking, write a short summary as plain text in the same turn, so the user sees it above the dialog: the **Design** (2–4 lines: decomposition strategy, why, what is out of scope) and the **Plan** (tickets, one line each). Do not put the summary only inside the question options.
+
+Then present the plan to the user using the `question` tool. Include:
 - Chosen decomposition strategy and why
 - Ticket list with domains, priorities, and dependencies
 - Expected agent assignments

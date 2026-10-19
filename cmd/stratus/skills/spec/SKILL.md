@@ -81,7 +81,13 @@ Use the Plan output to:
 1. Write the plan to `docs/plans/<slug>-plan.md`
 2. Extract the ordered task list
 
-Present the plan and task list to the user for approval via AskUserQuestion.
+Before asking, write a short summary as plain text in the same turn, so the user sees it above the dialog:
+- **Design** — 2–4 lines: the chosen approach, the key decision or tradeoff, and what is out of scope.
+- **Plan** — the ordered tasks, one line each, with the main files touched.
+
+Do not just point at `docs/plans/<slug>-plan.md` and do not put the summary only inside the question options.
+
+Then present the plan and task list to the user for approval via AskUserQuestion.
 
 ### Step 5 — Transition to Implement
 

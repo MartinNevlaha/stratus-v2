@@ -63,7 +63,13 @@ curl -sS -X POST $BASE/api/workflows/<slug>/tasks \
   -d '{"tasks": ["Task title 1", "Task title 2", ...]}'
 ```
 
-Present the plan and task list to the user using the `question` tool — get explicit approval before implementing.
+Before asking, write a short summary as plain text in the same turn, so the user sees it above the dialog:
+- **Design** — 2–4 lines: the chosen approach, the key decision or tradeoff, and what is out of scope.
+- **Plan** — the ordered tasks, one line each, with the main files touched.
+
+Do not put the summary only inside the question options.
+
+Then present the plan and task list to the user using the `question` tool — get explicit approval before implementing.
 
 On approval, transition to implement:
 
