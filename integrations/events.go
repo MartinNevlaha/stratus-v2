@@ -2,6 +2,7 @@
 package integrations
 
 type Event struct {
+	DeliveryRole    string   `json:"delivery_role,omitempty"`
 	Kind            string   `json:"event"`
 	NativeSessionID string   `json:"session_id"`
 	WorkflowID      string   `json:"workflow_id,omitempty"`

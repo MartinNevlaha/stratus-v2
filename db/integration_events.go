@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/MartinNevlaha/stratus-v2/integrations"
@@ -58,6 +59,46 @@ func (d *DB) ApplyIntegrationActivity(ctx context.Context, in IntegrationActivit
 	ts := nowTS()
 	kind := in.Event.Kind
 	id := in.AgentKey
+	if id != "" {
+		var existingWorkflow string
+		e := tx.QueryRowContext(ctx, `SELECT workflow_id FROM workflow_agents WHERE id=?`, id).Scan(&existingWorkflow)
+		if e != nil && e != sql.ErrNoRows {
+			return out, e
+		}
+		if existingWorkflow != "" && existingWorkflow != in.WorkflowID {
+			return out, fmt.Errorf("native run already belongs to another workflow")
+		}
+	}
+	if in.Event.NativeAgentID != "" {
+		var role string
+		e := tx.QueryRowContext(ctx, `SELECT delivery_role FROM codex_agent_roles WHERE workflow_id=? AND session_id=? AND native_agent_id=?`, in.WorkflowID, in.SessionKey, in.Event.NativeAgentID).Scan(&role)
+		if e != nil && e != sql.ErrNoRows {
+			return out, e
+		}
+		if kind == "agent_role" {
+			var other string
+			e := tx.QueryRowContext(ctx, `SELECT workflow_id FROM codex_agent_roles WHERE session_id=? AND native_agent_id=? AND workflow_id!=? LIMIT 1`, in.SessionKey, in.Event.NativeAgentID, in.WorkflowID).Scan(&other)
+			if e != nil && e != sql.ErrNoRows {
+				return out, e
+			}
+			if other != "" {
+				return out, fmt.Errorf("native worker already belongs to another workflow")
+			}
+			if role != "" && role != in.Event.DeliveryRole {
+				return out, fmt.Errorf("conflicting explicit agent role")
+			}
+			role = in.Event.DeliveryRole
+			if _, e = tx.ExecContext(ctx, `INSERT OR IGNORE INTO codex_agent_roles(workflow_id,session_id,native_agent_id,delivery_role) VALUES(?,?,?,?)`, in.WorkflowID, in.SessionKey, in.Event.NativeAgentID, role); e != nil {
+				return out, e
+			}
+			if _, e = tx.ExecContext(ctx, `UPDATE workflow_agents SET agent_type=?, native_agent_id=? WHERE workflow_id=? AND session_id=? AND (native_agent_id=? OR id=?)`, role, in.Event.NativeAgentID, in.WorkflowID, in.SessionKey, in.Event.NativeAgentID, id); e != nil {
+				return out, e
+			}
+		}
+		if role != "" {
+			in.Event.AgentType = role
+		}
+	}
 	if id != "" {
 		status := "running"
 		if kind == "agent_stop" || kind == "turn_stop" {
@@ -126,4 +167,22 @@ func (d *DB) ListIntegrationSteps(ctx context.Context, wf, agent string, limit i
 		items[i], items[j] = items[j], items[i]
 	}
 	return items, e
+}
+
+// CodexAgentRole exposes only bindings whose persisted workflow still has that owner.
+func (d *DB) CodexAgentRole(session, agent, workflow string) (role, id string, err error) {
+	rows, err := d.sql.Query(`SELECT r.delivery_role,r.workflow_id FROM codex_agent_roles r JOIN workflows w ON w.id=r.workflow_id WHERE r.session_id=? AND r.native_agent_id=? AND (?='' OR r.workflow_id=?) AND json_extract(w.state_json,'$.runtime')='codex' AND json_extract(w.state_json,'$.session_id')=r.session_id AND json_extract(w.state_json,'$.aborted') IS NOT 1 AND w.phase!='complete'`, session, agent, workflow, workflow)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if id != "" {
+			return "", "", fmt.Errorf("ambiguous agent role binding")
+		}
+		if err = rows.Scan(&role, &id); err != nil {
+			return "", "", err
+		}
+	}
+	return role, id, rows.Err()
 }

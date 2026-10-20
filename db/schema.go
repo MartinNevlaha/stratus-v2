@@ -655,6 +655,15 @@ CREATE TABLE IF NOT EXISTS llm_token_usage (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_date_sub
     ON llm_token_usage(date, subsystem);
 
+CREATE TABLE IF NOT EXISTS codex_agent_roles (
+ workflow_id TEXT NOT NULL,
+ session_id TEXT NOT NULL,
+ native_agent_id TEXT NOT NULL,
+ delivery_role TEXT NOT NULL,
+ PRIMARY KEY(workflow_id,session_id,native_agent_id),
+    FOREIGN KEY(workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
 -- Workflow agents: subagents observed by hooks inside spec/bug/e2e workflows
 CREATE TABLE IF NOT EXISTS workflow_agents (
     native_agent_id TEXT NOT NULL DEFAULT '',

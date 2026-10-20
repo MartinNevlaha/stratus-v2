@@ -14,7 +14,7 @@ var roleLabel = regexp.MustCompile(`(?im)^\s*Delivery role:\s*(delivery-[a-z0-9-
 func policyInput(h HookEvent, root string) (hooks.DeliveryPolicyInput, string, error) {
 	in := hooks.DeliveryPolicyInput{Role: h.AgentType, ProjectRoot: root, WorkingDir: h.Cwd}
 	id, _ := h.ToolInput["workflow_id"].(string)
-	in.Delegation = h.ToolName == "spawn_agent" || h.ToolName == "Agent" || h.ToolName == "Task"
+	in.Delegation = nativeTool(h.ToolName) == "spawn_agent"
 	if in.Delegation {
 		for _, k := range []string{"agent_type", "subagent_type", "type"} {
 			if role, ok := h.ToolInput[k].(string); ok && strings.HasPrefix(role, "delivery-") {

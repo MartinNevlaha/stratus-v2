@@ -8,6 +8,7 @@ import (
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,19 +29,22 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 	}
 	in, id, policyErr := policyInput(h, "")
 	delivery := strings.HasPrefix(in.Role, "delivery-")
+	classified := in
+	classified.Role = "delivery-unknown"
+	needsRole := !delivery && h.AgentID != "" && (hooks.DeliveryPolicyNeedsWorkflow(classified) || h.ToolName == "apply_patch")
 	if kind == "guard" {
 		if h.Name != "PreToolUse" {
 			emit(map[string]any{})
 			return 0
 		}
-		if !delivery {
+		if !delivery && !needsRole {
 			emit(map[string]any{})
 			return 0
 		}
-		if policyErr != nil {
+		if delivery && policyErr != nil {
 			return deny(policyErr.Error())
 		}
-		if !hooks.DeliveryPolicyNeedsWorkflow(in) {
+		if delivery && !hooks.DeliveryPolicyNeedsWorkflow(in) {
 			emit(map[string]any{})
 			return 0
 		}
@@ -48,7 +52,7 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 	cfg, e := ResolveProject(h.Cwd)
 	if e != nil {
 		fmt.Fprintln(stderr, "Stratus Codex:", e)
-		if kind == "guard" && delivery {
+		if kind == "guard" && (delivery || needsRole) {
 			return deny("Cannot verify Stratus workflow: " + e.Error())
 		}
 		emit(map[string]any{})
@@ -93,7 +97,44 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 	}
 	switch kind {
 	case "guard":
-		in, id, policyErr = policyInput(h, cfg.ProjectRoot)
+		if needsRole {
+			q := url.Values{"session_id": {h.SessionID}, "agent_id": {h.AgentID}}
+			if id != "" {
+				q.Set("workflow_id", id)
+			}
+			res, err := client.Get(base + "/api/integrations/codex/agents/role?" + q.Encode())
+			if err != nil {
+				return deny("Cannot verify native worker role: " + err.Error())
+			}
+			var binding struct {
+				Role     string `json:"delivery_role"`
+				Workflow string `json:"workflow_id"`
+			}
+			err = json.NewDecoder(res.Body).Decode(&binding)
+			res.Body.Close()
+			if err != nil || res.StatusCode != 200 {
+				return deny("Cannot verify native worker role")
+			}
+			if binding.Role == "" {
+				emit(map[string]any{})
+				return 0
+			}
+			if !strings.HasPrefix(binding.Role, "delivery-") || binding.Workflow == "" || id != "" && id != binding.Workflow {
+				return deny("Conflicting native worker binding")
+			}
+			h.AgentType = binding.Role
+			input := make(map[string]any, len(h.ToolInput)+1)
+			for k, v := range h.ToolInput {
+				input[k] = v
+			}
+			input["workflow_id"] = binding.Workflow
+			h.ToolInput = input
+		}
+		policyRoot := cfg.ProjectRoot
+		if wt, ok := linkedWorktree(cfg.ProjectRoot, h.Cwd); ok {
+			policyRoot = wt
+		}
+		in, id, policyErr = policyInput(h, policyRoot)
 		if policyErr != nil {
 			return deny(policyErr.Error())
 		}
@@ -150,7 +191,12 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 		if e != nil {
 			fmt.Fprintln(stderr, "Stratus Codex telemetry:", e)
 		}
-		emit(map[string]any{})
+		if h.Name == "SubagentStart" && h.AgentID != "" {
+			notice := fmt.Sprintf("Native parent Codex session ID: %s\nNative worker ID: %s\nNative turn ID: %s\nRead Workflow ID and Delivery role from your brief. If both are explicit, call bind_agent_role with workflow_id from the brief, session_id set to this exact parent ID, agent_id set to this exact worker ID, and delivery_role from the brief. Do not guess a missing role or identity. Reviewers must end with Verdict: PASS or Verdict: FAIL and label findings [must_fix], [should_fix], or [suggestion].", h.SessionID, h.AgentID, h.TurnID)
+			emit(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "SubagentStart", "additionalContext": notice}})
+		} else {
+			emit(map[string]any{})
+		}
 	default:
 		fmt.Fprintln(stderr, "Stratus Codex: unsupported handler", kind)
 		return 1

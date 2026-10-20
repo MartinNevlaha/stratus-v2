@@ -206,3 +206,23 @@ func TestRuntimeMCP_SwarmAllowsConsistentOwnedTargets(t *testing.T) {
 		t.Fatal(writes)
 	}
 }
+
+func TestRuntimeMCP_BindNativeAgentRole(t *testing.T) {
+	var body map[string]any
+	s := runtimeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.Write([]byte(`{"runtime":"codex"}`))
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Write([]byte(`{}`))
+	})
+	tool, ok := s.tools["bind_agent_role"]
+	if !ok {
+		t.Fatal("native role binding tool missing")
+	}
+	_, err := tool.Handler(map[string]any{"workflow_id": "spec-codex", "session_id": "s1", "agent_id": "native-worker", "delivery_role": "delivery-code-reviewer"})
+	if err != nil || body["session_id"] != "s1" || body["event"] != "agent_role" || body["agent_id"] != "native-worker" {
+		t.Fatal(body, err)
+	}
+}

@@ -36,6 +36,19 @@ func RegisterToolsForRuntime(s *Server, base string, h *http.Client, opts Runtim
 		}
 		s.tools[name] = tool
 	}
+	s.Register(Tool{Name: "bind_agent_role", Description: "Bind your exact native worker ID from SubagentStart to the explicit Delivery role in your brief. Never infer a role from timing or names.", InputSchema: obj(req("workflow_id", "string", "Explicit owned workflow"), req("session_id", "string", "Native parent Codex session ID"), req("agent_id", "string", "Your native worker ID from SubagentStart"), req("delivery_role", "string", "Explicit delivery-* role from your brief")), Handler: func(args map[string]any) (any, error) {
+		if _, e := codexSessionArgs(args); e != nil {
+			return nil, e
+		}
+		if e := c.guardMutation("bind_agent_role", args, opts); e != nil {
+			return nil, e
+		}
+		body := map[string]any{"event": "agent_role"}
+		for _, k := range []string{"workflow_id", "session_id", "agent_id", "delivery_role"} {
+			body[k] = args[k]
+		}
+		return c.post("/api/integrations/codex/events", body)
+	}})
 	register := s.tools["register_workflow"]
 	register.Description = "Register a Codex-owned spec, bug, or e2e workflow before tracked delivery. Pass the exact native session ID from SessionStart."
 	register.InputSchema = obj(

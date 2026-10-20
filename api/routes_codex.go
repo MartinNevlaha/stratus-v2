@@ -8,6 +8,7 @@ import (
 	codexadapter "github.com/MartinNevlaha/stratus-v2/integrations/codex"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -23,13 +24,17 @@ func (s *Server) handleCodexEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch e.Kind {
-	case "session_start", "agent_start", "agent_stop", "tool", "waiting", "turn_stop", "interrupt", "session_end":
+	case "agent_role", "session_start", "agent_start", "agent_stop", "tool", "waiting", "turn_stop", "interrupt", "session_end":
 	default:
 		jsonErr(w, 400, "unsupported event")
 		return
 	}
 	if (e.Kind == "agent_start" || e.Kind == "agent_stop") && e.NativeAgentID == "" || e.Kind == "tool" && e.ToolName == "" {
 		jsonErr(w, 400, "agent identity or tool name missing")
+		return
+	}
+	if e.Kind == "agent_role" && (e.NativeAgentID == "" || e.WorkflowID == "" || !regexp.MustCompile(`^delivery-[a-z][a-z0-9-]{0,100}$`).MatchString(e.DeliveryRole)) {
+		jsonErr(w, 400, "explicit worker identity, workflow and delivery role required")
 		return
 	}
 	owner := orchestration.WorkflowOwner{Runtime: "codex", NativeSessionID: e.NativeSessionID}
@@ -85,7 +90,7 @@ func (s *Server) handleCodexEvent(w http.ResponseWriter, r *http.Request) {
 	paths := []string{}
 	if e.Succeeded != nil && *e.Succeeded {
 		for _, p := range e.Files {
-			if p, ok := codexadapter.ProjectPath(s.projectRoot, p); ok {
+			if p, ok := codexadapter.RepositoryPath(s.projectRoot, p); ok {
 				paths = append(paths, p)
 			}
 		}
@@ -163,4 +168,18 @@ func (s *Server) handleCodexWorkflows(w http.ResponseWriter, r *http.Request) {
 		states = []*orchestration.WorkflowState{}
 	}
 	json200(w, map[string]any{"workflows": states})
+}
+
+func (s *Server) handleCodexAgentRole(w http.ResponseWriter, r *http.Request) {
+	session, agent := r.URL.Query().Get("session_id"), r.URL.Query().Get("agent_id")
+	if strings.TrimSpace(session) == "" || strings.TrimSpace(agent) == "" {
+		jsonErr(w, 400, "session_id and agent_id required")
+		return
+	}
+	role, id, err := s.db.CodexAgentRole("codex:"+session, agent, r.URL.Query().Get("workflow_id"))
+	if err != nil {
+		jsonErr(w, 409, "agent role could not be resolved")
+		return
+	}
+	json200(w, map[string]string{"delivery_role": role, "workflow_id": id})
 }

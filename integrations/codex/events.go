@@ -62,24 +62,12 @@ func normalizeForProject(h HookEvent, root string) (integrations.Event, error) {
 			break
 		}
 	}
-	var response map[string]any
+	var response any
 	if json.Unmarshal(h.ToolResponse, &response) == nil {
-		if v, ok := response["success"].(bool); ok {
-			e.Succeeded = &v
-		} else if v, ok := response["exit_code"].(float64); ok {
-			b := v == 0
-			e.Succeeded = &b
-		} else if v, ok := response["isError"].(bool); ok {
-			b := !v
-			e.Succeeded = &b
-		}
+		e.Succeeded = toolOutcome(response)
 	}
-	if e.Succeeded == nil {
-		var response string
-		if json.Unmarshal(h.ToolResponse, &response) == nil && strings.HasPrefix(response, "Success.") {
-			b := true
-			e.Succeeded = &b
-		}
+	if (nativeTool(h.ToolName) == "spawn_agent" || nativeTool(h.ToolName) == "followup_task") && strings.HasPrefix(e.Summary, "gAAAA") {
+		e.Summary = "Native delegation: brief unavailable to hooks"
 	}
 	if h.ToolName == "apply_patch" && e.Succeeded != nil && *e.Succeeded {
 		command, _ := h.ToolInput["command"].(string)
@@ -126,6 +114,9 @@ func CoordinatorKey(session, turn string) string {
 func EventKey(e integrations.Event) string {
 	if e.Kind == "tool" && (e.ToolUseID == "" || e.TurnID == "") {
 		return ""
+	}
+	if e.Kind == "agent_role" {
+		return digest([]string{"codex", e.NativeSessionID, e.Kind, e.NativeAgentID, e.WorkflowID, e.DeliveryRole})
 	}
 	return digest([]string{"codex", e.NativeSessionID, e.Kind, e.NativeAgentID, e.TurnID, e.ToolUseID})
 }

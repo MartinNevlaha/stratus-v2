@@ -62,5 +62,5 @@ func operationProjectPath(root, cwd, path string) (string, bool) {
 	if !filepath.IsAbs(path) && cwd != "" {
 		path = filepath.Join(cwd, path)
 	}
-	return ProjectPath(root, path)
+	return RepositoryPath(root, path)
 }
