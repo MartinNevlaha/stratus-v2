@@ -153,11 +153,21 @@ var (
 // (redirect) or directory (mkdir) under docs/ -- the same files Write and Edit allow an
 // architect. Any other write command or target means the command is not docs-only.
 func isDocsOnlyBashWrite(command, root string) bool {
+	return isDocsOnlyBashWriteAt(command, root, root)
+}
+
+func isDocsOnlyBashWriteAt(command, root, cwd string) bool {
+	isDoc := func(path string) bool {
+		if cwd != "" && !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		return isProjectDoc(path, root)
+	}
 	rest := stripScratchpadWrites(stripHeredocBodies(command))
 	rest = fdDupRe.ReplaceAllString(rest, " ")
 	rest = devNullRe.ReplaceAllString(rest, " ")
 	for _, m := range docsRedirectRe.FindAllStringSubmatch(rest, -1) {
-		if !isProjectDoc(m[1], root) {
+		if !isDoc(m[1]) {
 			return false
 		}
 	}
@@ -169,7 +179,7 @@ func isDocsOnlyBashWrite(command, root string) bool {
 			if strings.HasPrefix(arg, "-") {
 				continue
 			}
-			if !isProjectDoc(filepath.Join(arg, "x.md"), root) {
+			if !isDoc(filepath.Join(arg, "x.md")) {
 				mkdirOK = false
 			}
 		}

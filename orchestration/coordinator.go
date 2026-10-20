@@ -628,7 +628,16 @@ func (c *Coordinator) SetDesignContent(id, content string) (*WorkflowState, erro
 
 // ListActive returns all non-completed, non-aborted workflows.
 func (c *Coordinator) ListActive() ([]*WorkflowState, error) {
-	rows, err := c.db.SQL().Query(`SELECT id, type, phase, complexity, state_json, created_at, updated_at FROM workflows WHERE JSON_EXTRACT(state_json, '$.aborted') IS NOT 1 AND phase != 'complete' ORDER BY updated_at DESC LIMIT 10`)
+	return c.listActive(`SELECT id, type, phase, complexity, state_json, created_at, updated_at FROM workflows WHERE JSON_EXTRACT(state_json, '$.aborted') IS NOT 1 AND phase != 'complete' ORDER BY updated_at DESC LIMIT 10`)
+}
+
+// ListActiveForRuntime is exhaustive; adapter ownership must not use dashboard limits.
+func (c *Coordinator) ListActiveForRuntime(runtime string) ([]*WorkflowState, error) {
+	return c.listActive(`SELECT id, type, phase, complexity, state_json, created_at, updated_at FROM workflows WHERE JSON_EXTRACT(state_json, '$.aborted') IS NOT 1 AND phase != 'complete' AND JSON_EXTRACT(state_json, '$.runtime') = ? ORDER BY updated_at DESC`, runtime)
+}
+
+func (c *Coordinator) listActive(query string, args ...any) ([]*WorkflowState, error) {
+	rows, err := c.db.SQL().Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

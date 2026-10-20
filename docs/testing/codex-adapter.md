@@ -131,3 +131,38 @@ For rollback, set `enabled = false` on `.codex/config.toml`'s
 instructions, `.stratus.json`, `.claude/`, and `.opencode/`. Restart the clients.
 For an interrupted installation, resolve the reported conflict and rerun the same
 Codex init/refresh; writes are atomic per file and repeated merges are idempotent.
+
+## Independent review and repair
+
+A fresh-context independent reviewer inspected `883bca0..6123dc0`, including the
+five plan focus cases, and reproduced seven Important findings. One additional
+metadata finding was raised from Minor to Important: advertising an optional
+Claude placeholder conflicted with the required native identity and could stop
+registration. All eight findings were repaired in one native TDD pass:
+
+| Finding | Repair and regression evidence |
+| --- | --- |
+| Swarm foreign targets | Cross-check all supplied workers, recipients, tickets and missions before mutation; foreign target tests fail before the fix and pass afterward; consistent owned targets still succeed |
+| Capped ownership discovery | Resolve explicit event IDs directly and expose exhaustive active Codex discovery for hooks/MCP, retaining the legacy dashboard limit; older-owned and hidden-ambiguity tests pass |
+| Native delegation arguments | Parse `message` and `prompt`, checking conflicting workflow/role labels; native default-worker delivery brief now requires an owned workflow |
+| Nested operation paths | Resolve patch paths against event CWD, then project root; architect patch and shell writes use the actual working directory |
+| Read-only exploration during outage | Require verified ownership for writes/delegation, allowing read-only operations without the API |
+| Wiki queries | Guard an explicit set of workflow mutations; shared wiki/memory operations retain their existing contracts |
+| Stop before start | Insert terminal verdict/counts atomically without reopening the agent |
+| Registration contract | Codex-only schema requires the native session ID and removes the Claude placeholder |
+
+Fifteen regression tests were observed failing before their respective fixes,
+then passing. The complete Go suite passed after the repair; frontend and OpenCode
+sources were unchanged by this pass. The reviewer independently confirmed the
+committed frontend build is byte-identical to a fresh build. No second review was
+dispatched. No minor findings remain deferred.
+
+The subprocess target matrix planned under Task 9 ran in Task 11's shared
+real-binary harness instead. This delayed detection of a possible installer
+regression until integration verification; the complete matrix passed.
+
+Review scope decisions: local HTTP authentication remains the existing product
+boundary, not an adapter authorization mechanism; a local caller can still submit
+requests directly. Monitoring remains limited to host-provided events/identity;
+missing fields can produce incomplete activity views. These decisions do not
+remove the outstanding live acceptance checks above.

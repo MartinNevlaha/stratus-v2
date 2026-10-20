@@ -40,6 +40,9 @@ func Decode(r io.Reader) (HookEvent, error) {
 	return h, e
 }
 func Normalize(h HookEvent) (integrations.Event, error) {
+	return normalizeForProject(h, h.Cwd)
+}
+func normalizeForProject(h HookEvent, root string) (integrations.Event, error) {
 	e := integrations.Event{NativeSessionID: h.SessionID, TurnID: h.TurnID, NativeAgentID: h.AgentID, AgentType: h.AgentType, ToolName: h.ToolName, ToolUseID: h.ToolUseID, MainAgent: h.MainAgent, Report: clipBytes(h.LastAssistantMessage, 16<<10)}
 	kinds := map[string]string{"SessionStart": "session_start", "SubagentStart": "agent_start", "SubagentStop": "agent_stop", "PostToolUse": "tool", "PermissionRequest": "waiting", "Stop": "turn_stop", "Interrupt": "interrupt", "SessionEnd": "session_end"}
 	e.Kind = kinds[h.Name]
@@ -53,7 +56,7 @@ func Normalize(h HookEvent) (integrations.Event, error) {
 		return e, fmt.Errorf("tool name required")
 	}
 	e.WorkflowID, _ = h.ToolInput["workflow_id"].(string)
-	for _, k := range []string{"command", "file_path", "path", "description", "prompt"} {
+	for _, k := range []string{"command", "file_path", "path", "description", "message", "prompt"} {
 		if v, ok := h.ToolInput[k].(string); ok && v != "" {
 			e.Summary = clipRunes(v, 400)
 			break
@@ -85,7 +88,7 @@ func Normalize(h HookEvent) (integrations.Event, error) {
 			return e, err
 		}
 		for _, p := range paths {
-			if p, ok := ProjectPath(h.Cwd, p); ok {
+			if p, ok := operationProjectPath(root, h.Cwd, p); ok {
 				e.Files = append(e.Files, p)
 			}
 		}

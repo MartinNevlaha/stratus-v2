@@ -174,6 +174,18 @@ func TestCodexE2E_MCPAndEvents(t *testing.T) {
 	if w["runtime"] != "codex" || w["session_id"] != "codex:s1" {
 		t.Fatal(w)
 	}
+	dispatch := m.tool(t, "delivery_dispatch", map[string]any{"session_id": "s1"})
+	encoded, _ := json.Marshal(dispatch)
+	if !bytes.Contains(encoded, []byte("spec-codex")) {
+		t.Fatal("owned workflow missing from real MCP dispatch", string(encoded))
+	}
+	contextBody, _ := json.Marshal(map[string]any{"hook_event_name": "SessionStart", "cwd": f.root, "session_id": "s1"})
+	contextCmd := exec.Command(f.bin, "codex-hook", "context")
+	contextCmd.Dir, contextCmd.Env, contextCmd.Stdin = f.root, f.env, bytes.NewReader(contextBody)
+	contextOutput, err := contextCmd.CombinedOutput()
+	if err != nil || !bytes.Contains(contextOutput, []byte("Owned workflow: spec-codex")) || bytes.Contains(contextOutput, []byte("API unavailable")) {
+		t.Fatal("real hook context failed", err, string(contextOutput))
+	}
 	for _, kind := range []string{"SubagentStart", "PostToolUse", "SubagentStop"} {
 		body, _ := json.Marshal(map[string]any{"hook_event_name": kind, "cwd": f.root, "session_id": "s1", "agent_id": "a1", "agent_type": "worker", "turn_id": "t1", "tool_name": "Bash", "tool_use_id": "u1", "tool_input": map[string]any{"command": "pwd"}})
 		cmd := exec.Command(f.bin, "codex-hook", "activity")

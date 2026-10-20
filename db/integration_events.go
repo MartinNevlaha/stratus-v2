@@ -64,12 +64,12 @@ func (d *DB) ApplyIntegrationActivity(ctx context.Context, in IntegrationActivit
 			status = "done"
 		}
 		if kind == "agent_start" || kind == "agent_stop" || in.Event.MainAgent {
-			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO workflow_agents(id,workflow_id,session_id,agent_type,phase,task_index,status,started_at,last_activity,ended_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, in.WorkflowID, in.SessionKey, in.Event.AgentType, in.Phase, in.TaskIndex, status, ts, ts, func() string {
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO workflow_agents(id,workflow_id,session_id,agent_type,phase,task_index,status,started_at,last_activity,ended_at,verdict,must_fix,should_fix,suggestion) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, in.WorkflowID, in.SessionKey, in.Event.AgentType, in.Phase, in.TaskIndex, status, ts, ts, func() string {
 				if status == "done" {
 					return ts
 				}
 				return ""
-			}())
+			}(), in.Verdict.Verdict, in.Verdict.MustFix, in.Verdict.ShouldFix, in.Verdict.Suggestion)
 			if err != nil {
 				return out, err
 			}

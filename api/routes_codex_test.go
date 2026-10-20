@@ -76,3 +76,25 @@ func TestCodexTranscript_UsesNormalizedEvents(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
+func TestReview_ExplicitOwnedEventOutsideDashboardLimit(t *testing.T) {
+	s := codexTestServer(t)
+	for _, suffix := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"} {
+		s.coordinator.Start("spec-"+suffix, orchestration.WorkflowSpec, orchestration.ComplexitySimple, "unrelated")
+	}
+	w := postCodex(t, s, `{"event":"agent_start","session_id":"s1","workflow_id":"spec-codex","agent_id":"a1"}`)
+	if w.Code != 200 {
+		t.Fatalf("explicit active owned workflow dropped: %d %s", w.Code, w.Body.String())
+	}
+}
+func TestReview_AmbiguityMustIncludeHiddenOwnedWorkflow(t *testing.T) {
+	s := codexTestServer(t)
+	for _, suffix := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"} {
+		s.coordinator.Start("spec-"+suffix, orchestration.WorkflowSpec, orchestration.ComplexitySimple, "unrelated")
+	}
+	s.coordinator.StartOwned("spec-new", orchestration.WorkflowSpec, orchestration.ComplexitySimple, "new", orchestration.WorkflowOwner{Runtime: "codex", NativeSessionID: "s1"})
+	w := postCodex(t, s, `{"event":"agent_start","session_id":"s1","agent_id":"a1"}`)
+	if w.Code != 409 {
+		t.Fatalf("ambiguous event incorrectly assigned: %d %s", w.Code, w.Body.String())
+	}
+}

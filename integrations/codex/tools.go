@@ -53,3 +53,14 @@ func ProjectPath(root, path string) (string, bool) {
 	}
 	return filepath.ToSlash(rel), true
 }
+
+// Resolve against the operation CWD before expressing a path relative to the project.
+func operationProjectPath(root, cwd, path string) (string, bool) {
+	if cwd == "" {
+		cwd = root
+	}
+	if !filepath.IsAbs(path) && cwd != "" {
+		path = filepath.Join(cwd, path)
+	}
+	return ProjectPath(root, path)
+}

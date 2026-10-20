@@ -63,3 +63,88 @@ func TestCodexHook_UnknownSchema(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestReview_ReadOnlyDeliveryExplorationDuringOutage(t *testing.T) {
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "offline", 503) })
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "session_id": "s1", "agent_type": "delivery-backend-engineer", "tool_name": "Bash", "tool_input": map[string]any{"command": "git diff"}})
+	var out, stderr bytes.Buffer
+	Run("guard", bytes.NewReader(body), &out, &stderr, nil)
+	if strings.Contains(out.String(), `"deny"`) {
+		t.Fatalf("read-only tool denied: %s", out.String())
+	}
+}
+func TestReview_NestedPatchPathsUseProjectRoot(t *testing.T) {
+	var event struct {
+		Files []string `json:"files"`
+	}
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&event)
+		w.Write([]byte(`{}`))
+	})
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "PostToolUse", "cwd": filepath.Join(root, "nested"), "session_id": "s1", "tool_name": "apply_patch", "tool_input": map[string]any{"command": "*** Begin Patch\n*** Add File: a.go\n+x\n*** End Patch"}, "tool_response": map[string]any{"success": true}})
+	var out, stderr bytes.Buffer
+	Run("activity", bytes.NewReader(body), &out, &stderr, nil)
+	if len(event.Files) != 1 || event.Files[0] != "nested/a.go" {
+		t.Fatalf("wrong project-relative files: %#v, stderr=%s", event.Files, stderr.String())
+	}
+}
+func TestReview_NativeSpawnMessageCarriesDeliveryRole(t *testing.T) {
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"workflows":[]}`)) })
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "session_id": "s1", "tool_name": "spawn_agent", "tool_input": map[string]any{"agent_type": "default", "message": "Workflow ID: spec-missing\nDelivery role: delivery-backend-engineer\nImplement the change."}})
+	var out, stderr bytes.Buffer
+	Run("guard", bytes.NewReader(body), &out, &stderr, nil)
+	if !strings.Contains(out.String(), `"deny"`) {
+		t.Fatalf("identifiable native delivery delegation bypassed guard: %s", out.String())
+	}
+}
+func TestReview_NestedDocsPatchIsNotProjectDocs(t *testing.T) {
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"workflows":[{"id":"spec-codex","runtime":"codex","session_id":"codex:s1","phase":"design"}]}`))
+	})
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "cwd": filepath.Join(root, "nested"), "session_id": "s1", "agent_type": "delivery-system-architect", "tool_name": "apply_patch", "tool_input": map[string]any{"command": "*** Begin Patch\n*** Add File: docs/a.md\n+x\n*** End Patch"}})
+	var out, stderr bytes.Buffer
+	Run("guard", bytes.NewReader(body), &out, &stderr, nil)
+	if !strings.Contains(out.String(), `"deny"`) {
+		t.Fatalf("nested directory misread as top-level docs: %s", out.String())
+	}
+}
+
+func TestReview_HookDoesNotUseDashboardLimit(t *testing.T) {
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/integrations/codex/workflows" {
+			w.Write([]byte(`{"workflows":[{"id":"spec-old","runtime":"codex","session_id":"codex:s1","phase":"implement"},{"id":"spec-new","runtime":"codex","session_id":"codex:s1","phase":"implement"}]}`))
+			return
+		}
+		w.Write([]byte(`{"workflows":[{"id":"spec-new","runtime":"codex","session_id":"codex:s1","phase":"implement"}]}`))
+	})
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "cwd": root, "session_id": "s1", "agent_type": "delivery-backend-engineer", "tool_name": "Bash", "tool_input": map[string]any{"command": "touch a.go"}})
+	var out, stderr bytes.Buffer
+	Run("guard", bytes.NewReader(body), &out, &stderr, nil)
+	if !strings.Contains(out.String(), `"deny"`) {
+		t.Fatal("ambiguous write allowed", out.String())
+	}
+}
+
+func TestReview_NestedDocsShellIsNotProjectDocs(t *testing.T) {
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"workflows":[{"id":"spec-codex","runtime":"codex","session_id":"codex:s1","phase":"design"}]}`))
+	})
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "cwd": filepath.Join(root, "nested"), "session_id": "s1", "agent_type": "delivery-system-architect", "tool_name": "Bash", "tool_input": map[string]any{"command": "printf x > docs/a.md"}})
+	var out, stderr bytes.Buffer
+	Run("guard", bytes.NewReader(body), &out, &stderr, nil)
+	if !strings.Contains(out.String(), `"deny"`) {
+		t.Fatal("nested shell directory misread as project docs", out.String())
+	}
+}
+
+func TestReview_NestedArchitectCanWriteActualProjectDocs(t *testing.T) {
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"workflows":[{"id":"spec-codex","runtime":"codex","session_id":"codex:s1","phase":"design"}]}`))
+	})
+	body, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "cwd": filepath.Join(root, "nested"), "session_id": "s1", "agent_type": "delivery-system-architect", "tool_name": "apply_patch", "tool_input": map[string]any{"command": "*** Begin Patch\n*** Add File: " + filepath.Join(root, "docs/a.md") + "\n+x\n*** End Patch"}})
+	var out, stderr bytes.Buffer
+	Run("guard", bytes.NewReader(body), &out, &stderr, nil)
+	if strings.Contains(out.String(), `"deny"`) {
+		t.Fatal("actual project docs rejected before root discovery", out.String())
+	}
+}

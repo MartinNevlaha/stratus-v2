@@ -26,7 +26,7 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 		emit(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
 		return 0
 	}
-	in, id, policyErr := policyInput(h, h.Cwd)
+	in, id, policyErr := policyInput(h, "")
 	delivery := strings.HasPrefix(in.Role, "delivery-")
 	if kind == "guard" {
 		if h.Name != "PreToolUse" {
@@ -39,6 +39,10 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 		}
 		if policyErr != nil {
 			return deny(policyErr.Error())
+		}
+		if !hooks.DeliveryPolicyNeedsWorkflow(in) {
+			emit(map[string]any{})
+			return 0
 		}
 	}
 	cfg, e := ResolveProject(h.Cwd)
@@ -73,7 +77,7 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 		return nil
 	}
 	state := func() ([]*orchestration.WorkflowState, error) {
-		res, e := client.Get(base + "/api/dashboard/state")
+		res, e := client.Get(base + "/api/integrations/codex/workflows")
 		if e != nil {
 			return nil, e
 		}
@@ -89,7 +93,10 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 	}
 	switch kind {
 	case "guard":
-		in.ProjectRoot = cfg.ProjectRoot
+		in, id, policyErr = policyInput(h, cfg.ProjectRoot)
+		if policyErr != nil {
+			return deny(policyErr.Error())
+		}
 		states, e := state()
 		if e != nil {
 			return deny("Cannot verify Stratus workflow: " + e.Error())
@@ -126,14 +133,14 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 		} else {
 			notice += "\nStratus API unavailable; workflow status is not verified."
 		}
-		if normalized, e := Normalize(h); e == nil {
+		if normalized, e := normalizeForProject(h, cfg.ProjectRoot); e == nil {
 			if e = post(normalized); e != nil {
 				fmt.Fprintln(stderr, "Stratus Codex telemetry:", e)
 			}
 		}
 		emit(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "SessionStart", "additionalContext": notice}})
 	case "activity":
-		normalized, e := Normalize(h)
+		normalized, e := normalizeForProject(h, cfg.ProjectRoot)
 		if e == nil {
 			if normalized.WorkflowID == "" {
 				normalized.WorkflowID = id

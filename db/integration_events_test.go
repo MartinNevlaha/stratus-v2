@@ -92,3 +92,17 @@ func TestIntegrationActivity_StopBeforeStart(t *testing.T) {
 		t.Fatal("stale owner accepted")
 	}
 }
+
+func TestReview_StopBeforeStartRetainsVerdict(t *testing.T) {
+	d := integrationDB(t)
+	in := activity("agent_stop", "stop")
+	in.Verdict = ReviewVerdict{Verdict: "fail", MustFix: 2}
+	in.Event.Report = "Verdict: FAIL\nMust Fix: 2"
+	if _, err := d.ApplyIntegrationActivity(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	a, err := d.GetWorkflowAgent("spec-codex", "codex-agent-a1")
+	if err != nil || a.Verdict != "fail" || a.MustFix != 2 {
+		t.Fatalf("terminal report verdict lost: %+v err=%v", a, err)
+	}
+}

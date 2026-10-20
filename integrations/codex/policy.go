@@ -12,28 +12,38 @@ var workflowLabel = regexp.MustCompile(`(?im)^\s*(?:Workflow ID|workflow_id):\s*
 var roleLabel = regexp.MustCompile(`(?im)^\s*Delivery role:\s*(delivery-[a-z0-9-]+)\s*$`)
 
 func policyInput(h HookEvent, root string) (hooks.DeliveryPolicyInput, string, error) {
-	in := hooks.DeliveryPolicyInput{Role: h.AgentType, ProjectRoot: root}
+	in := hooks.DeliveryPolicyInput{Role: h.AgentType, ProjectRoot: root, WorkingDir: h.Cwd}
 	id, _ := h.ToolInput["workflow_id"].(string)
-	prompt, _ := h.ToolInput["prompt"].(string)
-	if m := workflowLabel.FindAllStringSubmatch(prompt, -1); len(m) == 1 {
-		if id != "" && id != m[0][1] {
-			return in, id, fmt.Errorf("conflicting workflow IDs")
-		}
-		id = m[0][1]
-	} else if len(m) > 1 {
-		return in, id, fmt.Errorf("ambiguous workflow labels")
-	}
 	in.Delegation = h.ToolName == "spawn_agent" || h.ToolName == "Agent" || h.ToolName == "Task"
 	if in.Delegation {
 		for _, k := range []string{"agent_type", "subagent_type", "type"} {
-			if s, ok := h.ToolInput[k].(string); ok && strings.HasPrefix(s, "delivery-") {
-				in.Role = s
+			if role, ok := h.ToolInput[k].(string); ok && strings.HasPrefix(role, "delivery-") {
+				in.Role = role
 				break
 			}
 		}
-		if m := roleLabel.FindStringSubmatch(prompt); len(m) == 2 {
-			in.Role = m[1]
+	}
+	var labelErr error
+	briefRole := ""
+	for _, key := range []string{"message", "prompt"} {
+		brief, _ := h.ToolInput[key].(string)
+		for _, m := range workflowLabel.FindAllStringSubmatch(brief, -1) {
+			if id != "" && id != m[1] {
+				labelErr = fmt.Errorf("conflicting workflow IDs")
+			}
+			id = m[1]
 		}
+		if in.Delegation {
+			for _, m := range roleLabel.FindAllStringSubmatch(brief, -1) {
+				if briefRole != "" && briefRole != m[1] {
+					labelErr = fmt.Errorf("conflicting delivery roles")
+				}
+				briefRole, in.Role = m[1], m[1]
+			}
+		}
+	}
+	if labelErr != nil {
+		return in, id, labelErr
 	}
 	if h.ToolName == "Bash" || h.ToolName == "exec_command" {
 		in.Command, _ = h.ToolInput["command"].(string)
@@ -47,7 +57,18 @@ func policyInput(h HookEvent, root string) (hooks.DeliveryPolicyInput, string, e
 		if e != nil {
 			return in, id, e
 		}
-		in.WritePaths = paths
+		for _, path := range paths {
+			if root == "" {
+				// Classify writes before discovery; validate against the resolved root later.
+				in.WritePaths = append(in.WritePaths, path)
+				continue
+			}
+			p, ok := operationProjectPath(root, h.Cwd, path)
+			if !ok {
+				return in, id, fmt.Errorf("patch path is outside the project")
+			}
+			in.WritePaths = append(in.WritePaths, p)
+		}
 	}
 	return in, id, nil
 }

@@ -46,9 +46,22 @@ func (s *Server) handleCodexEvent(w http.ResponseWriter, r *http.Request) {
 		json200(w, map[string]any{"recorded": true})
 		return
 	}
-	active, err := s.coordinator.ListActive()
+	var active []*orchestration.WorkflowState
+	if e.WorkflowID != "" {
+		var explicit *orchestration.WorkflowState
+		explicit, err = s.coordinator.Get(e.WorkflowID)
+		if err == nil {
+			active = []*orchestration.WorkflowState{explicit}
+		}
+	} else {
+		active, err = s.coordinator.ListActiveForRuntime("codex")
+	}
 	if err != nil {
-		jsonErr(w, 500, "list workflows failed")
+		code := http.StatusInternalServerError
+		if errors.Is(err, orchestration.ErrWorkflowNotFound) {
+			code = http.StatusNotFound
+		}
+		jsonErr(w, code, err.Error())
 		return
 	}
 	wf, err := orchestration.ResolveOwned(active, e.WorkflowID, owner)
@@ -137,4 +150,17 @@ func runtimeAgents(agents []db.WorkflowAgent, runtime string) []db.WorkflowAgent
 		}
 	}
 	return agents
+}
+
+// Ownership discovery is separate from the deliberately bounded dashboard snapshot.
+func (s *Server) handleCodexWorkflows(w http.ResponseWriter, r *http.Request) {
+	states, err := s.coordinator.ListActiveForRuntime("codex")
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list Codex workflows failed")
+		return
+	}
+	if states == nil {
+		states = []*orchestration.WorkflowState{}
+	}
+	json200(w, map[string]any{"workflows": states})
 }
