@@ -5,6 +5,8 @@ PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA synchronous = NORMAL;
 
+CREATE TABLE IF NOT EXISTS integration_event_receipts (runtime TEXT NOT NULL,event_key TEXT NOT NULL,PRIMARY KEY(runtime,event_key));
+
 CREATE TABLE IF NOT EXISTS schema_versions (
     version INTEGER PRIMARY KEY,
     applied TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
