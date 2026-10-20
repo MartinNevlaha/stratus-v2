@@ -105,7 +105,7 @@ func TestCodexEvent_NoCrossRuntime(t *testing.T) {
 }
 func TestCodexTranscript_UsesNormalizedEvents(t *testing.T) {
 	s := codexTestServer(t)
-	postCodex(t, s, `{"event":"agent_start","session_id":"s1","agent_id":"a1","agent_type":"worker"}`)
+	postCodex(t, s, `{"event":"agent_start","session_id":"s1","agent_id":"a1","agent_type":"worker","turn_id":"t1"}`)
 	postCodex(t, s, `{"event":"tool","session_id":"s1","agent_id":"a1","tool_name":"Bash","summary":"pwd","turn_id":"t1","tool_use_id":"u1"}`)
 	agents, _ := s.db.ListWorkflowAgents("spec-codex")
 	r := httptest.NewRequest("GET", "/", nil)
