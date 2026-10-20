@@ -120,6 +120,35 @@ func TestCodexTranscript_UsesNormalizedEvents(t *testing.T) {
 	}
 }
 
+func TestCodexReviewAPI_NewerUnverifiedReviewerDoesNotInheritPASS(t *testing.T) {
+	s := codexTestServer(t)
+	for _, body := range []string{
+		`{"event":"agent_stop","session_id":"s1","agent_id":"old","turn_id":"t1","agent_type":"delivery-code-reviewer","report":"Verdict: PASS"}`,
+		`{"event":"agent_stop","session_id":"s1","agent_id":"new","turn_id":"t2","agent_type":"delivery-code-reviewer","report":"Important finding: behavior is incorrect"}`,
+	} {
+		if w := postCodex(t, s, body); w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+	}
+	_, err := s.db.SQL().Exec(`UPDATE workflow_agents SET started_at=CASE native_agent_id WHEN 'old' THEN '2026-10-20T10:00:00Z' ELSE '2026-10-20T11:00:00Z' END`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/", nil)
+	r.SetPathValue("id", "spec-codex")
+	w := httptest.NewRecorder()
+	s.handleListWorkflowAgents(w, r)
+	var body struct {
+		Review struct {
+			Status string `json:"status"`
+		} `json:"review"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != 200 || body.Review.Status != "unverified" {
+		t.Fatal(w.Body.String())
+	}
+}
+
 func TestReview_ExplicitOwnedEventOutsideDashboardLimit(t *testing.T) {
 	s := codexTestServer(t)
 	for _, suffix := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"} {

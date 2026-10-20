@@ -349,10 +349,14 @@ func (s *Server) handleListWorkflowAgents(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusInternalServerError, "list agents failed")
 		return
 	}
+	body := map[string]any{"agents": agents, "conflicts": fileConflicts(agents)}
 	if wf, e := s.coordinator.Get(id); e == nil {
-		agents = runtimeAgents(agents, wf.Runtime)
+		body["agents"] = runtimeAgents(agents, wf.Runtime)
+		if wf.Runtime == "codex" {
+			body["review"] = db.CodexReview(agents, string(wf.Phase), wf.CurrentTask)
+		}
 	}
-	json200(w, map[string]any{"agents": agents, "conflicts": fileConflicts(agents)})
+	json200(w, body)
 }
 
 func (s *Server) handleListWorkflowLogs(w http.ResponseWriter, r *http.Request) {

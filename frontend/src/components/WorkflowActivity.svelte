@@ -7,11 +7,12 @@
   import TaskBoard from './TaskBoard.svelte'
   import ReviewPanel from './ReviewPanel.svelte'
   import TaskGraph from './TaskGraph.svelte'
-  import type { WorkflowState, WorkflowAgent, WorkflowLog, WorkflowDenial } from '$lib/types'
+  import type { WorkflowState, WorkflowAgent, WorkflowLog, WorkflowDenial, ReviewState } from '$lib/types'
 
   let { wf }: { wf: WorkflowState } = $props()
 
   let agents = $state<WorkflowAgent[]>([])
+  let review = $state<ReviewState | undefined>()
   let conflicts = $state<string[]>([])
   let logs = $state<WorkflowLog[]>([])
   let denials = $state<WorkflowDenial[]>([])
@@ -30,6 +31,7 @@
       const [a, l, d] = await Promise.all([getWorkflowAgents(wf.id), getWorkflowLogs(wf.id), getWorkflowDenials(wf.id)])
       if (seq !== loadSeq) return
       agents = a.agents
+      review = a.review
       conflicts = a.conflicts
       logs = l
       denials = d.denials
@@ -105,7 +107,7 @@
 {/if}
 
 {#if agents.length > 0}
-  <ReviewPanel {agents} />
+  <ReviewPanel {agents} {review} />
   <div class="section">
     <div class="label">Agents ({running} running / {agents.length})</div>
     <div class="agents">

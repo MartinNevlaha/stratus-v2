@@ -62,6 +62,8 @@ export interface Task {
 }
 
 export interface WorkflowAgent {
+  native_agent_id?: string
+  turn_id?: string
   runtime?: string
   usage_available?: boolean
   id: string
@@ -104,7 +106,18 @@ export interface MissionAgent extends WorkflowAgent {
   idle: boolean
 }
 
+export interface ReviewState {
+  status: 'awaiting' | 'running' | 'unverified' | 'outdated' | 'PASS' | 'FAIL'
+  agent_id?: string
+  must_fix: number
+  should_fix: number
+  suggestion: number
+  reviews: number
+  loops: number
+}
+
 export interface WorkflowAgentsResponse {
+  review?: ReviewState
   agents: WorkflowAgent[]
   conflicts: string[]
 }

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { relativeTime } from '$lib/ui'
-  import type { WorkflowAgent } from '$lib/types'
+  import type { WorkflowAgent, ReviewState } from '$lib/types'
 
-  let { agents }: { agents: WorkflowAgent[] } = $props()
+  let { agents, review }: { agents: WorkflowAgent[]; review?: ReviewState } = $props()
 
   // Reviews = agents that reported a verdict, oldest first.
   let reviews = $derived(agents.filter(a => a.verdict))
@@ -11,7 +11,17 @@
   let loops = $derived(reviews.filter(r => r.verdict === 'FAIL').length)
 </script>
 
-{#if latest}
+{#if review}
+  <div class="review">
+    <div class="head"><span class="label">Current review</span>
+      <span class="badge" class:pass={review.status === 'PASS'} class:fail={review.status === 'FAIL'}>{({awaiting: 'Awaiting review', running: 'Running', unverified: 'Unverified', outdated: 'Outdated', PASS: 'PASS', FAIL: 'FAIL'})[review.status]}</span>
+      <span class="loops">{review.loops} loops · {review.reviews} reviews for this task</span>
+    </div>
+    {#if review.status === 'PASS' || review.status === 'FAIL'}
+      <div class="counts"><span class="sev must">{review.must_fix} must_fix</span><span class="sev should">{review.should_fix} should_fix</span><span class="sev sugg">{review.suggestion} suggestion</span></div>
+    {/if}
+  </div>
+{:else if latest}
   <div class="review">
     <div class="head">
       <span class="label">Review</span>
