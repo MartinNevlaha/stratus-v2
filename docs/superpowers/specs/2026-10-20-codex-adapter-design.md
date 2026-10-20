@@ -2,7 +2,7 @@
 
 Date: 2026-10-20
 
-Status: Scope approved; written specification awaiting review
+Status: Specification approved by Martin on 2026-10-20
 
 Scope: First version of a project-local Codex adapter
 
@@ -210,4 +210,4 @@ The official sources below establish the supported extension points. Payload cov
 - [Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents): optional native subagent capabilities and project agent definitions.
 - [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference): supported configuration fields; model/permission settings remain user-owned.
 
-Before implementation, review this specification. After approval, create a separate Superpowers implementation plan with concrete tasks, test commands, and the chosen execution method. This document does not authorize product-code changes by itself.
+Create a separate Superpowers implementation plan with concrete tasks and test commands. Review that plan and select its execution method before changing product code.
