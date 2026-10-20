@@ -250,6 +250,10 @@ func (s *Server) handleAgentTranscript(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "agent not found")
 		return
 	}
+	if wf, err := s.coordinator.Get(a.WorkflowID); err == nil && wf.Runtime == "codex" {
+		s.codexTranscript(w, r, a)
+		return
+	}
 	path := subagentTranscriptPath(a.TranscriptPath, a.ID)
 	if path == "" {
 		jsonErr(w, http.StatusNotFound, "no transcript recorded for this agent")
@@ -299,7 +303,7 @@ func (s *Server) handleListAllAgents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		for _, a := range agents {
+		for _, a := range runtimeAgents(agents, wf.Runtime) {
 			idle := false
 			if a.Status == "running" {
 				if t, err := time.Parse("2006-01-02T15:04:05.000Z", a.LastActivity); err == nil && time.Since(t) > staleAgentAfter {
@@ -344,6 +348,9 @@ func (s *Server) handleListWorkflowAgents(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list agents failed")
 		return
+	}
+	if wf, e := s.coordinator.Get(id); e == nil {
+		agents = runtimeAgents(agents, wf.Runtime)
 	}
 	json200(w, map[string]any{"agents": agents, "conflicts": fileConflicts(agents)})
 }

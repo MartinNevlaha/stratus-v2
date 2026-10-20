@@ -9,6 +9,7 @@ import (
 )
 
 type IntegrationActivity struct {
+	Verdict                                           ReviewVerdict
 	Event                                             integrations.Event
 	EventKey, SessionKey, AgentKey, WorkflowID, Phase string
 	TaskIndex                                         *int
@@ -89,7 +90,7 @@ func (d *DB) ApplyIntegrationActivity(ctx context.Context, in IntegrationActivit
 			}
 		}
 		if kind == "agent_stop" || kind == "turn_stop" {
-			_, err = tx.ExecContext(ctx, `UPDATE workflow_agents SET status='done',ended_at=?,last_activity=? WHERE id=? AND workflow_id=? AND status='running'`, ts, ts, id, in.WorkflowID)
+			_, err = tx.ExecContext(ctx, `UPDATE workflow_agents SET status='done',ended_at=?,last_activity=?,verdict=?,must_fix=?,should_fix=?,suggestion=? WHERE id=? AND workflow_id=? AND status='running'`, ts, ts, in.Verdict.Verdict, in.Verdict.MustFix, in.Verdict.ShouldFix, in.Verdict.Suggestion, id, in.WorkflowID)
 			if err != nil {
 				return out, err
 			}

@@ -9,6 +9,8 @@ import (
 
 // WorkflowAgent is a subagent run observed by hooks inside a normal (non-swarm) workflow.
 type WorkflowAgent struct {
+	Runtime        string   `json:"runtime,omitempty"`
+	UsageAvailable *bool    `json:"usage_available,omitempty"`
 	ID             string   `json:"id"`
 	WorkflowID     string   `json:"workflow_id"`
 	SessionID      string   `json:"session_id"`

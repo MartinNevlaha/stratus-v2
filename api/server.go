@@ -305,6 +305,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/workflows/{id}/comparison", s.handleRunComparison)
 	mux.HandleFunc("GET /api/workflow-agents/attention", s.handleAttention)
 	mux.HandleFunc("POST /api/workflow-agents/events", s.handleWorkflowAgentEvent)
+	mux.HandleFunc("POST /api/integrations/codex/events", s.handleCodexEvent)
 	mux.HandleFunc("PUT /api/workflow-agents/{id}/status", s.handleSetWorkflowAgentStatus)
 
 	// System
