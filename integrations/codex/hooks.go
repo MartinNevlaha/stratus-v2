@@ -99,9 +99,6 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 	case "guard":
 		if needsRole {
 			q := url.Values{"session_id": {h.SessionID}, "agent_id": {h.AgentID}}
-			if id != "" {
-				q.Set("workflow_id", id)
-			}
 			res, err := client.Get(base + "/api/integrations/codex/agents/role?" + q.Encode())
 			if err != nil {
 				return deny("Cannot verify native worker role: " + err.Error())

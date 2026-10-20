@@ -171,7 +171,7 @@ func (d *DB) ListIntegrationSteps(ctx context.Context, wf, agent string, limit i
 
 // CodexAgentRole exposes only bindings whose persisted workflow still has that owner.
 func (d *DB) CodexAgentRole(session, agent, workflow string) (role, id string, err error) {
-	rows, err := d.sql.Query(`SELECT r.delivery_role,r.workflow_id FROM codex_agent_roles r JOIN workflows w ON w.id=r.workflow_id WHERE r.session_id=? AND r.native_agent_id=? AND (?='' OR r.workflow_id=?) AND json_extract(w.state_json,'$.runtime')='codex' AND json_extract(w.state_json,'$.session_id')=r.session_id AND json_extract(w.state_json,'$.aborted') IS NOT 1 AND w.phase!='complete'`, session, agent, workflow, workflow)
+	rows, err := d.sql.Query(`SELECT r.delivery_role,r.workflow_id FROM codex_agent_roles r JOIN workflows w ON w.id=r.workflow_id WHERE r.session_id=? AND r.native_agent_id=? AND (?='' OR r.workflow_id=?) AND json_extract(w.state_json,'$.runtime')='codex' AND json_extract(w.state_json,'$.session_id')=r.session_id`, session, agent, workflow, workflow)
 	if err != nil {
 		return "", "", err
 	}

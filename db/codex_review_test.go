@@ -26,3 +26,13 @@ func TestCodexReview_CurrentWork(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexReview_WorkContinuesAfterPASS(t *testing.T) {
+	agents := []WorkflowAgent{
+		{ID: "worker", Phase: "plan", Status: "running", StartedAt: "2026-10-20T10:00:00.000Z", LastActivity: "2026-10-20T10:05:00.000Z"},
+		{ID: "review", Phase: "plan", Status: "done", AgentType: "delivery-code-reviewer", Verdict: "PASS", StartedAt: "2026-10-20T10:01:00.000Z", EndedAt: "2026-10-20T10:02:00.000Z"},
+	}
+	if got := CodexReview(agents, "plan", nil); got.Status != "outdated" {
+		t.Fatal(got)
+	}
+}

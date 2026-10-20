@@ -327,3 +327,74 @@ func TestCodexE2E_LiveBrowser(t *testing.T) {
 		t.Fatal("browser smoke timed out")
 	}
 }
+
+func TestCodexE2E_ReusedWorkersAndCurrentReview(t *testing.T) {
+	f := newCodexE2E(t)
+	m := f.mcp(t, "codex")
+	m.tool(t, "register_workflow", map[string]any{"id": "spec-codex", "type": "spec", "title": "Live event repair", "session_id": "s1"})
+	for _, phase := range []orchestration.Phase{orchestration.PhaseImplement, orchestration.PhaseVerify} {
+		if _, err := f.coordinator.Transition("spec-codex", phase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, role := range map[string]string{"worker": "delivery-backend-engineer", "reviewer": "delivery-code-reviewer"} {
+		m.tool(t, "bind_agent_role", map[string]any{"workflow_id": "spec-codex", "session_id": "s1", "agent_id": id, "delivery_role": role})
+	}
+	hook := func(kind, event, id, turn, report string) string {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"hook_event_name": event, "cwd": f.root, "session_id": "s1", "agent_id": id, "turn_id": turn, "agent_type": "default", "last_assistant_message": report, "tool_name": "Bash", "tool_use_id": event + id + turn, "tool_input": map[string]any{"command": "touch a.go"}})
+		c := exec.Command(f.bin, "codex-hook", kind)
+		c.Dir = f.root
+		c.Env = f.env
+		c.Stdin = bytes.NewReader(b)
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatal(err, string(out))
+		}
+		return string(out)
+	}
+	review := func(want string) {
+		t.Helper()
+		res, err := http.Get(f.api.URL + "/api/workflows/spec-codex/agents")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var got struct {
+			Review db.ReviewState `json:"review"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Review.Status != want {
+			t.Fatalf("review %+v want %s", got.Review, want)
+		}
+	}
+	hook("activity", "SubagentStart", "worker", "w1", "")
+	hook("activity", "SubagentStart", "reviewer", "r1", "")
+	hook("activity", "SubagentStop", "reviewer", "r1", "Verdict: PASS")
+	review("PASS")
+	if out := hook("guard", "PreToolUse", "worker", "w1", ""); !strings.Contains(out, `"deny"`) {
+		t.Fatal("bound default worker bypassed verify write guard", out)
+	}
+	hook("activity", "PostToolUse", "worker", "w1", "")
+	review("outdated")
+	hook("activity", "PostToolUse", "reviewer", "r2", "")
+	review("running")
+	hook("activity", "SubagentStop", "reviewer", "r2", "### Important Finding\nRequires a fix")
+	review("unverified")
+	hook("activity", "SubagentStop", "reviewer", "r1", "Verdict: PASS")
+	review("unverified")
+	agents, err := f.database.ListWorkflowAgents("spec-codex")
+	if err != nil || len(agents) != 3 {
+		t.Fatal(agents, err)
+	}
+	for _, a := range agents {
+		if a.AgentType == "default" {
+			t.Fatal("lost bound role", a)
+		}
+		if a.TurnID == "r1" && (a.Status != "done" || a.Verdict != "PASS") {
+			t.Fatal("historical run changed", a)
+		}
+	}
+}

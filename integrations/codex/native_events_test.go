@@ -123,3 +123,23 @@ func TestNativeWorker_ReadOnlyDoesNotNeedAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeWorker_ExplicitWorkflowCannotHideBinding(t *testing.T) {
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/agents/role") {
+			if r.URL.Query().Get("workflow_id") == "spec-other" {
+				w.Write([]byte(`{}`))
+				return
+			}
+			w.Write([]byte(`{"delivery_role":"delivery-backend-engineer","workflow_id":"spec-codex"}`))
+			return
+		}
+		w.Write([]byte(`{"workflows":[{"id":"spec-other","runtime":"codex","session_id":"codex:s1","phase":"implement"}]}`))
+	})
+	body, _ := json.Marshal(HookEvent{Name: "PreToolUse", Cwd: root, SessionID: "s1", AgentID: "a1", ToolName: "Bash", ToolInput: map[string]any{"command": "touch a.go", "workflow_id": "spec-other"}})
+	var out, stderr bytes.Buffer
+	Run("guard", bytes.NewReader(body), &out, &stderr, nil)
+	if !strings.Contains(out.String(), `"deny"`) {
+		t.Fatal(out.String())
+	}
+}

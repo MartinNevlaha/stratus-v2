@@ -97,3 +97,18 @@ func TestCodexAgentRole_BindingBeforeStartAndDuplicate(t *testing.T) {
 		t.Fatal("foreign role exposed", w.Body.String())
 	}
 }
+
+func TestCodexAgentRole_AbortedWorkflowRetainsGuardIdentity(t *testing.T) {
+	s := codexTestServer(t)
+	w := postCodex(t, s, `{"event":"agent_role","workflow_id":"spec-codex","session_id":"s1","agent_id":"a1","delivery_role":"delivery-backend-engineer"}`)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if _, err := s.coordinator.Abort("spec-codex"); err != nil {
+		t.Fatal(err)
+	}
+	role, id, err := s.db.CodexAgentRole("codex:s1", "a1", "")
+	if err != nil || role != "delivery-backend-engineer" || id != "spec-codex" {
+		t.Fatal("guard lost explicit worker identity", role, id, err)
+	}
+}

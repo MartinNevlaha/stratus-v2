@@ -55,7 +55,7 @@ func CodexReview(agents []WorkflowAgent, phase string, task *int) ReviewState {
 		end = latest.StartedAt
 	}
 	for _, a := range agents {
-		if relevant(a) && a.ID != latest.ID && a.StartedAt > end {
+		if relevant(a) && a.ID != latest.ID && (a.StartedAt > end || a.LastActivity > end) {
 			out.Status = "outdated"
 			break
 		}
