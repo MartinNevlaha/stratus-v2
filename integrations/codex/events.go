@@ -106,6 +106,17 @@ func AgentKey(session, agent string) string {
 	}
 	return "codex-agent-" + digest([]string{session, agent})
 }
+
+// AgentRunKey isolates repeated native turns without reopening historical runs.
+func AgentRunKey(session, agent, turn string) string {
+	if turn == "" {
+		return AgentKey(session, agent)
+	}
+	if session == "" || agent == "" {
+		return ""
+	}
+	return "codex-run-" + digest([]string{session, agent, turn})
+}
 func CoordinatorKey(session, turn string) string {
 	if session == "" || turn == "" {
 		return ""

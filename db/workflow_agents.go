@@ -9,6 +9,8 @@ import (
 
 // WorkflowAgent is a subagent run observed by hooks inside a normal (non-swarm) workflow.
 type WorkflowAgent struct {
+	NativeAgentID  string   `json:"native_agent_id,omitempty"`
+	TurnID         string   `json:"turn_id,omitempty"`
 	Runtime        string   `json:"runtime,omitempty"`
 	UsageAvailable *bool    `json:"usage_available,omitempty"`
 	ID             string   `json:"id"`
@@ -44,7 +46,7 @@ type ReviewVerdict struct {
 
 const wfAgentCols = `id, workflow_id, session_id, agent_type, phase, task_index, status, started_at,
 	ended_at, last_activity, tool_calls, last_tool, files, transcript_path, verdict, must_fix, should_fix, suggestion,
-	tokens_in, tokens_out`
+	tokens_in, tokens_out, native_agent_id, turn_id`
 
 func nowTS() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
 
@@ -210,7 +212,7 @@ func scanWorkflowAgents(rows *sql.Rows) ([]WorkflowAgent, error) {
 		var files string
 		if err := rows.Scan(&a.ID, &a.WorkflowID, &a.SessionID, &a.AgentType, &a.Phase, &task, &a.Status,
 			&a.StartedAt, &a.EndedAt, &a.LastActivity, &a.ToolCalls, &a.LastTool, &files, &a.TranscriptPath,
-			&a.Verdict, &a.MustFix, &a.ShouldFix, &a.Suggestion, &a.TokensIn, &a.TokensOut); err != nil {
+			&a.Verdict, &a.MustFix, &a.ShouldFix, &a.Suggestion, &a.TokensIn, &a.TokensOut, &a.NativeAgentID, &a.TurnID); err != nil {
 			return nil, fmt.Errorf("scan workflow agent: %w", err)
 		}
 		if task.Valid {

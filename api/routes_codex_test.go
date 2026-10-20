@@ -40,6 +40,49 @@ func TestCodexEvent_OwnedLifecycle(t *testing.T) {
 		t.Fatal(wf)
 	}
 }
+
+func TestCodexEvent_ReusedAgentHasIndependentTurns(t *testing.T) {
+	s := codexTestServer(t)
+	for _, event := range []string{
+		`{"event":"agent_start","session_id":"s1","agent_id":"a1","turn_id":"t1"}`,
+		`{"event":"agent_stop","session_id":"s1","agent_id":"a1","turn_id":"t1","report":"Verdict: FAIL\n[must_fix] old finding"}`,
+		`{"event":"tool","session_id":"s1","agent_id":"a1","turn_id":"t2","tool_use_id":"new","tool_name":"Bash"}`,
+		`{"event":"agent_start","session_id":"s1","agent_id":"a1","turn_id":"t1"}`,
+		`{"event":"tool","session_id":"s1","agent_id":"a1","turn_id":"t1","tool_use_id":"late","tool_name":"Bash"}`,
+	} {
+		if w := postCodex(t, s, event); w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	agents, err := s.db.ListWorkflowAgents("spec-codex")
+	if err != nil || len(agents) != 2 {
+		t.Fatalf("expected terminal old run and running new run: %+v, %v", agents, err)
+	}
+	var old, current map[string]any
+	for _, a := range agents {
+		b, _ := json.Marshal(a)
+		var v map[string]any
+		json.Unmarshal(b, &v)
+		if v["turn_id"] == "t1" {
+			old = v
+		} else if v["turn_id"] == "t2" {
+			current = v
+		}
+	}
+	if old["status"] != "done" || old["verdict"] != "FAIL" || current["status"] != "running" || current["native_agent_id"] != "a1" || current["tool_calls"] != float64(1) {
+		t.Fatal(old, current)
+	}
+	w := postCodex(t, s, `{"event":"agent_stop","session_id":"s1","agent_id":"a1","turn_id":"t2","report":"Verdict: PASS"}`)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	agents, _ = s.db.ListWorkflowAgents("spec-codex")
+	for _, a := range agents {
+		if a.Status != "done" {
+			t.Fatal(a)
+		}
+	}
+}
 func TestCodexEvent_AmbiguousSession(t *testing.T) {
 	s := codexTestServer(t)
 	s.coordinator.StartOwned("spec-other", orchestration.WorkflowSpec, orchestration.ComplexitySimple, "x", orchestration.WorkflowOwner{Runtime: "codex", NativeSessionID: "s1"})

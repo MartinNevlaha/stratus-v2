@@ -106,3 +106,29 @@ func TestReview_StopBeforeStartRetainsVerdict(t *testing.T) {
 		t.Fatalf("terminal report verdict lost: %+v err=%v", a, err)
 	}
 }
+
+func TestIntegrationIdentityMigration_PreservesLegacyAgents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.StartWorkflowAgent(WorkflowAgent{ID: "legacy", WorkflowID: "spec-legacy", SessionID: "s1", AgentType: "delivery-backend-engineer"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"native_agent_id", "turn_id"} {
+		if _, err = d.SQL().Exec("ALTER TABLE workflow_agents DROP COLUMN " + column); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.Close()
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	a, err := d.GetWorkflowAgent("spec-legacy", "legacy")
+	if err != nil || a.Status != "running" || a.NativeAgentID != "" || a.TurnID != "" || a.AgentType != "delivery-backend-engineer" {
+		t.Fatal(a, err)
+	}
+}

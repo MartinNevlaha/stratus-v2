@@ -657,6 +657,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_date_sub
 
 -- Workflow agents: subagents observed by hooks inside spec/bug/e2e workflows
 CREATE TABLE IF NOT EXISTS workflow_agents (
+    native_agent_id TEXT NOT NULL DEFAULT '',
+    turn_id TEXT NOT NULL DEFAULT '',
     id              TEXT PRIMARY KEY,
     workflow_id     TEXT NOT NULL,
     session_id      TEXT NOT NULL DEFAULT '',

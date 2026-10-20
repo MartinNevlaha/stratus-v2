@@ -185,6 +185,8 @@ func (d *DB) migrateWikiPagesWorkflowColumns() error {
 // migrations contains ALTER TABLE statements for columns added after the initial schema.
 // Each runs on every startup; duplicate-column errors are silently ignored.
 var migrations = []string{
+	`ALTER TABLE workflow_agents ADD COLUMN native_agent_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE workflow_agents ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE missions ADD COLUMN strategy TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE missions ADD COLUMN strategy_outcome TEXT NOT NULL DEFAULT '{}'`,
 	`CREATE INDEX IF NOT EXISTS idx_insight_events_source ON insight_events(source)`,

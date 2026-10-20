@@ -77,7 +77,7 @@ func (s *Server) handleCodexEvent(w http.ResponseWriter, r *http.Request) {
 		json200(w, map[string]any{"recorded": false})
 		return
 	}
-	agent := codexadapter.AgentKey(e.NativeSessionID, e.NativeAgentID)
+	agent := codexadapter.AgentRunKey(e.NativeSessionID, e.NativeAgentID, e.TurnID)
 	if e.MainAgent && e.NativeAgentID == "" {
 		agent = codexadapter.CoordinatorKey(e.NativeSessionID, e.TurnID)
 		e.AgentType = "coordinator"
