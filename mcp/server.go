@@ -27,9 +27,10 @@ const instructions = `Stratus tracks this project's spec/bug/e2e workflows, memo
 
 // Server handles MCP JSON-RPC communication over stdio.
 type Server struct {
-	tools  map[string]Tool
-	reader *bufio.Reader
-	writer io.Writer
+	instructions string
+	tools        map[string]Tool
+	reader       *bufio.Reader
+	writer       io.Writer
 }
 
 // Tool represents a callable MCP tool.
@@ -124,7 +125,12 @@ func (s *Server) handle(req jsonRPCRequest) {
 			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "stratus", "version": "2.0.0"},
-			"instructions":    instructions,
+			"instructions": func() string {
+				if s.instructions != "" {
+					return s.instructions
+				}
+				return instructions
+			}(),
 		})
 
 	case "ping":

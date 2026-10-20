@@ -580,7 +580,11 @@ func cmdMCPServe() {
 
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	srv := mcp.New()
-	mcp.RegisterTools(srv, apiBase, httpClient)
+	opts, err := parseMCPRuntime(os.Args[2:])
+	if err != nil {
+		log.Fatal(err)
+	}
+	mcp.RegisterToolsForRuntime(srv, apiBase, httpClient, opts)
 
 	if err := srv.Serve(); err != nil {
 		log.Fatalf("mcp serve error: %v", err)
