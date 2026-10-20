@@ -89,6 +89,8 @@ func main() {
 		cmdMCPServe()
 	case "hook":
 		cmdHook()
+	case "codex-hook":
+		cmdCodexHook()
 	case "init":
 		cmdInit()
 	case "update":
