@@ -294,11 +294,13 @@ func (s *Server) handleAnalyzeWorkflow(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID         string `json:"id"`
-		Type       string `json:"type"`       // "spec" | "bug" | "e2e"
-		Complexity string `json:"complexity"` // "simple" | "complex"
-		Title      string `json:"title"`
-		SessionID  string `json:"session_id"` // Claude Code session — optional
+		ID              string `json:"id"`
+		Type            string `json:"type"`       // "spec" | "bug" | "e2e"
+		Complexity      string `json:"complexity"` // "simple" | "complex"
+		Title           string `json:"title"`
+		SessionID       string `json:"session_id"` // Claude Code session — optional
+		Runtime         string `json:"runtime"`
+		NativeSessionID string `json:"runtime_session_id"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
@@ -318,12 +320,27 @@ func (s *Server) handleStartWorkflow(w http.ResponseWriter, r *http.Request) {
 	if body.Complexity == "complex" {
 		complexity = orchestration.ComplexityComplex
 	}
-	state, err := s.coordinator.Start(body.ID, wtype, complexity, body.Title)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, err.Error())
+	owner := orchestration.WorkflowOwner{Runtime: body.Runtime, NativeSessionID: body.NativeSessionID}
+	if body.Runtime == "codex" {
+		key, e := orchestration.SessionKey(owner)
+		if e != nil || (body.SessionID != "" && body.SessionID != key) {
+			jsonErr(w, 400, "invalid Codex session identity")
+			return
+		}
+	} else if body.Runtime != "" {
+		jsonErr(w, 400, "unsupported runtime")
 		return
 	}
-	if body.SessionID != "" {
+	state, err := s.coordinator.StartOwned(body.ID, wtype, complexity, body.Title, owner)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, orchestration.ErrOwnershipConflict) {
+			status = 409
+		}
+		jsonErr(w, status, err.Error())
+		return
+	}
+	if body.SessionID != "" && body.Runtime == "" {
 		if err2 := s.coordinator.SetSessionID(body.ID, body.SessionID); err2 == nil {
 			state.SessionID = body.SessionID
 		}
@@ -564,7 +581,9 @@ func (s *Server) handleAbortWorkflow(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		SessionID string `json:"session_id"`
+		SessionID       string `json:"session_id"`
+		Runtime         string `json:"runtime"`
+		NativeSessionID string `json:"runtime_session_id"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid body: "+err.Error())
@@ -574,11 +593,28 @@ func (s *Server) handleSetWorkflowSession(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusBadRequest, "session_id is required")
 		return
 	}
-	state, err := s.coordinator.UpdateSessionID(id, body.SessionID)
+	var state *orchestration.WorkflowState
+	var err error
+	if body.Runtime == "codex" {
+		owner := orchestration.WorkflowOwner{Runtime: body.Runtime, NativeSessionID: body.NativeSessionID}
+		key, e := orchestration.SessionKey(owner)
+		if e != nil || key != body.SessionID {
+			jsonErr(w, 400, "invalid Codex session identity")
+			return
+		}
+		state, err = s.coordinator.BindOwner(id, owner)
+	} else if body.Runtime != "" {
+		jsonErr(w, 400, "unsupported runtime")
+		return
+	} else {
+		state, err = s.coordinator.UpdateSessionID(id, body.SessionID)
+	}
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, orchestration.ErrWorkflowNotFound) {
 			status = http.StatusNotFound
+		} else if errors.Is(err, orchestration.ErrOwnershipConflict) {
+			status = 409
 		}
 		jsonErr(w, status, err.Error())
 		return

@@ -35,24 +35,26 @@ type ChangeSummary struct {
 
 // WorkflowState is the full state of a workflow.
 type WorkflowState struct {
-	ID            string              `json:"id"`
-	Type          WorkflowType        `json:"type"`
-	Phase         Phase               `json:"phase"`
-	Complexity    Complexity          `json:"complexity"`
-	Delegated     map[string][]string `json:"delegated_agents"` // phase → agent list
-	Tasks         []Task              `json:"tasks"`
-	CurrentTask   *int                `json:"current_task,omitempty"`
-	TotalTasks    int                 `json:"total_tasks"`
-	Aborted       bool                `json:"aborted"`
-	Title         string              `json:"title"`
-	SessionID     string              `json:"session_id,omitempty"` // Claude Code session that owns this workflow
-	PlanContent   string              `json:"plan_content,omitempty"`
-	DesignContent string              `json:"design_content,omitempty"`
-	BaseCommit    string              `json:"base_commit,omitempty"`    // git HEAD at workflow creation
-	ChangeSummary *ChangeSummary      `json:"change_summary,omitempty"` // populated on complete
-	RunSummary    string              `json:"run_summary,omitempty"`    // markdown report written on complete
-	CreatedAt     string              `json:"created_at"`
-	UpdatedAt     string              `json:"updated_at"`
+	ID               string              `json:"id"`
+	Runtime          string              `json:"runtime,omitempty"`
+	RuntimeSessionID string              `json:"runtime_session_id,omitempty"`
+	Type             WorkflowType        `json:"type"`
+	Phase            Phase               `json:"phase"`
+	Complexity       Complexity          `json:"complexity"`
+	Delegated        map[string][]string `json:"delegated_agents"` // phase → agent list
+	Tasks            []Task              `json:"tasks"`
+	CurrentTask      *int                `json:"current_task,omitempty"`
+	TotalTasks       int                 `json:"total_tasks"`
+	Aborted          bool                `json:"aborted"`
+	Title            string              `json:"title"`
+	SessionID        string              `json:"session_id,omitempty"` // Claude Code session that owns this workflow
+	PlanContent      string              `json:"plan_content,omitempty"`
+	DesignContent    string              `json:"design_content,omitempty"`
+	BaseCommit       string              `json:"base_commit,omitempty"`    // git HEAD at workflow creation
+	ChangeSummary    *ChangeSummary      `json:"change_summary,omitempty"` // populated on complete
+	RunSummary       string              `json:"run_summary,omitempty"`    // markdown report written on complete
+	CreatedAt        string              `json:"created_at"`
+	UpdatedAt        string              `json:"updated_at"`
 }
 
 // Task is a single work item within a workflow.
@@ -73,12 +75,12 @@ type Coordinator struct {
 	// delegations at once, and an unguarded Get→save would drop all but the last.
 	mu sync.Mutex
 
-	db                  *db.DB
-	wikiStore           WikiAutodocStore
-	enricher            WikiEnricher
-	artifactBuilder     LearnArtifactBuilder
-	knowledgeEngine     LearnKnowledgeEngine
-	learnEventStore     LearnEventStore
+	db                   *db.DB
+	wikiStore            WikiAutodocStore
+	enricher             WikiEnricher
+	artifactBuilder      LearnArtifactBuilder
+	knowledgeEngine      LearnKnowledgeEngine
+	learnEventStore      LearnEventStore
 	learnPipelineTimeout time.Duration
 }
 
@@ -126,14 +128,29 @@ func (c *Coordinator) SetLearnPipelineTimeout(d time.Duration) {
 
 // Start creates a new workflow or returns an existing one with the same ID.
 func (c *Coordinator) Start(id string, wtype WorkflowType, complexity Complexity, title string) (*WorkflowState, error) {
+	return c.StartOwned(id, wtype, complexity, title, WorkflowOwner{})
+}
+
+func (c *Coordinator) StartOwned(id string, wtype WorkflowType, complexity Complexity, title string, owner WorkflowOwner) (*WorkflowState, error) {
+	key, err := SessionKey(owner)
+	if err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	existing, err := c.Get(id)
 	if err == nil {
+		if existing.Runtime != owner.Runtime || (owner.Runtime == "codex" && existing.SessionID != key) {
+			return nil, ErrOwnershipConflict
+		}
 		return existing, nil
+	}
+	if !errors.Is(err, ErrWorkflowNotFound) {
+		return nil, err
 	}
 
 	state := &WorkflowState{
+		Runtime: owner.Runtime, RuntimeSessionID: owner.NativeSessionID, SessionID: key,
 		ID:         id,
 		Type:       wtype,
 		Phase:      InitialPhase(wtype),
@@ -654,6 +671,9 @@ func (c *Coordinator) SetSessionID(id, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	if state.Runtime == "codex" {
+		return ErrOwnershipConflict
+	}
 	if state.SessionID != "" {
 		return nil // already captured — don't overwrite
 	}
@@ -670,6 +690,9 @@ func (c *Coordinator) UpdateSessionID(id, sessionID string) (*WorkflowState, err
 	state, err := c.Get(id)
 	if err != nil {
 		return nil, err
+	}
+	if state.Runtime == "codex" {
+		return nil, ErrOwnershipConflict
 	}
 	state.SessionID = sessionID
 	return state, c.save(state)
