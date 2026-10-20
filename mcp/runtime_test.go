@@ -64,3 +64,14 @@ func TestRuntimeMCP_BindAndDispatch(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+func TestLegacyResolution_ExcludesCodex(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"workflows":[{"id":"spec-codex","runtime":"codex","phase":"plan"}]}`))
+	}))
+	defer api.Close()
+	c := &apiClient{base: api.URL, http: api.Client()}
+	id, e := resolveDispatchWorkflowID(c, map[string]any{})
+	if e != nil || id != "" {
+		t.Fatal(id, e)
+	}
+}

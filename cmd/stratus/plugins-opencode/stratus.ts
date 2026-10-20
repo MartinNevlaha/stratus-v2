@@ -32,6 +32,7 @@ const WORKFLOW_ID_PATTERN = "(?:bug|spec|e2e)-[a-z0-9][a-z0-9-]{0,120}"
 const LABELED_WORKFLOW_ID_RE = new RegExp(`workflow[ _-]?id[*\`"']*\\s*[:=]\\s*[*\`"']*(${WORKFLOW_ID_PATTERN})`, "gi")
 
 interface Workflow {
+  runtime?: string
   id: string
   type: string
   phase: string
@@ -46,7 +47,9 @@ async function fetchDashboardState(): Promise<DashboardState | null> {
   try {
     const res = await fetch(`${BASE}/api/dashboard/state`)
     if (!res.ok) return null
-    return await res.json()
+    const state: DashboardState = await res.json()
+    state.workflows = (state.workflows ?? []).filter(wf => wf.runtime !== "codex")
+    return state
   } catch {
     return null
   }
@@ -57,7 +60,9 @@ async function fetchDashboardStateStrict(): Promise<DashboardState> {
   if (!res.ok) {
     throw new Error(`Stratus API returned status ${res.status}`)
   }
-  return await res.json()
+  const state: DashboardState = await res.json()
+  state.workflows = (state.workflows ?? []).filter(wf => wf.runtime !== "codex")
+  return state
 }
 
 async function fetchWorkflowByID(id: string): Promise<Workflow | null> {
@@ -66,7 +71,8 @@ async function fetchWorkflowByID(id: string): Promise<Workflow | null> {
   if (!res.ok) {
     throw new Error(`Stratus API returned status ${res.status}`)
   }
-  return await res.json()
+  const workflow: Workflow = await res.json()
+  return workflow.runtime === "codex" ? null : workflow
 }
 
 function getTaskText(args: Record<string, unknown>): string {

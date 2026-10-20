@@ -659,6 +659,14 @@ func (c *apiClient) put(path string, body any) (any, error) {
 
 func resolveDispatchWorkflowID(client *apiClient, args map[string]any) (string, error) {
 	if id, ok := args["workflow_id"].(string); ok && strings.TrimSpace(id) != "" {
+		wf, e := client.get("/api/workflows/"+neturl.PathEscape(strings.TrimSpace(id)), nil)
+		if e != nil {
+			return "", e
+		}
+		m, _ := wf.(map[string]any)
+		if m["runtime"] == "codex" {
+			return "", fmt.Errorf("workflow runtime ownership conflict")
+		}
 		return strings.TrimSpace(id), nil
 	}
 
@@ -666,7 +674,13 @@ func resolveDispatchWorkflowID(client *apiClient, args map[string]any) (string, 
 	if err != nil {
 		return "", err
 	}
-	workflows := dashboardWorkflows(dash)
+	all := dashboardWorkflows(dash)
+	workflows := make([]map[string]any, 0, len(all))
+	for _, wf := range all {
+		if wf["runtime"] != "codex" {
+			workflows = append(workflows, wf)
+		}
+	}
 	if len(workflows) == 0 {
 		return "", nil
 	}

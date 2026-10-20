@@ -894,6 +894,9 @@ func fetchWorkflowByID(id string) (map[string]any, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&wf); err != nil {
 		return nil, fmt.Errorf("failed to decode stratus response: %w", err)
 	}
+	if wf["runtime"] == "codex" {
+		return nil, nil
+	}
 	return wf, nil
 }
 
@@ -967,6 +970,13 @@ func fetchDashboardStateStrict() (*dashboardState, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 		return nil, fmt.Errorf("failed to decode stratus response: %w", err)
 	}
+	filtered := state.Workflows[:0]
+	for _, wf := range state.Workflows {
+		if wf != nil && wf["runtime"] != "codex" {
+			filtered = append(filtered, wf)
+		}
+	}
+	state.Workflows = filtered
 	return &state, nil
 }
 

@@ -1120,3 +1120,16 @@ func TestMentionsWorkflowID_WholeTokenOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyResolution_ExcludesCodex(t *testing.T) {
+	setDashboardState(t, dashboardState{Workflows: []map[string]any{{"id": "spec-codex", "runtime": "codex", "session_id": "codex:s1", "phase": "verify", "type": "spec"}}})
+	if wf := fetchActiveWorkflow("legacy"); wf != nil {
+		t.Fatal(wf)
+	}
+}
+func TestLegacyResolution_ExplicitCodexDenied(t *testing.T) {
+	setDashboardState(t, dashboardState{Workflows: []map[string]any{{"id": "spec-codex", "runtime": "codex", "session_id": "codex:s1", "phase": "verify", "type": "spec"}}})
+	if wf, e := fetchWorkflowForTaskStrict(map[string]any{"prompt": "Workflow ID: spec-codex"}, "legacy"); e == nil && wf != nil {
+		t.Fatal(wf)
+	}
+}
