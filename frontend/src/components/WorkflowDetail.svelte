@@ -107,8 +107,11 @@
   <div class="head">
     <span class="type">{isSwarm ? 'swarm' : wf.type === 'spec' && wf.complexity === 'complex' ? 'spec-complex' : wf.type}</span>
     <span class="id">{wf.id}</span>
+    {#if wf.runtime === 'codex'}<span class="phase">Codex</span>{/if}
     <span class="phase">{wf.aborted ? 'aborted' : wf.phase}</span>
-    {#if tokensIn + tokensOut > 0}
+    {#if wf.runtime === 'codex' && agents.every(a => a.usage_available !== true)}
+      <span class="tokens">Usage unavailable</span>
+    {:else if tokensIn + tokensOut > 0}
       <span class="tokens" title="Tokens used by subagents (input incl. cache / output)">{formatTokens(tokensIn)} in · {formatTokens(tokensOut)} out</span>
     {/if}
     <button class="copy" onclick={copySummary} title="Copy a markdown summary of this run">

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { continuationForID } from '$lib/runtime'
   import { appState } from '$lib/store'
   import { reportError } from '$lib/errors'
   import { listGuardianAlerts, dismissGuardianAlert, dismissAllGuardianAlerts, deleteGuardianAlert, killSwarmWorker, runGuardianScan, startWorkflow, recordDelegation, listAgents } from '$lib/api'
@@ -161,8 +162,8 @@
                 </button>
               {/if}
               {#if alert.type === 'stale_workflow' && alert.metadata?.workflow_id}
-                <button class="alert-action" onclick={() => navigator.clipboard.writeText(`/resume ${alert.metadata.workflow_id}`)} title="Copy resume command">
-                  Copy /resume
+                <button class="alert-action" onclick={async () => navigator.clipboard.writeText(await continuationForID(String(alert.metadata.workflow_id), appState.dashboard?.workflows ?? []))} title="Copy resume command">
+                  Continue workflow
                 </button>
               {/if}
               {#if alert.type === 'stale_worker' && alert.metadata?.worker_id}

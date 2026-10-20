@@ -31,6 +31,8 @@ export interface ChangeSummary {
 }
 
 export interface WorkflowState {
+  runtime?: string
+  runtime_session_id?: string
   id: string
   type: 'spec' | 'bug' | 'e2e'
   phase: string
@@ -60,6 +62,8 @@ export interface Task {
 }
 
 export interface WorkflowAgent {
+  runtime?: string
+  usage_available?: boolean
   id: string
   workflow_id: string
   session_id: string
@@ -89,8 +93,10 @@ export interface TranscriptStep {
 }
 
 export interface AgentTranscript {
+  runtime?: string
+  usage_available?: boolean
   steps: TranscriptStep[]
-  usage: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number }
+  usage: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number } | null
 }
 
 export interface MissionAgent extends WorkflowAgent {

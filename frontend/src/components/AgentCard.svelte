@@ -26,7 +26,9 @@
     <span class="chip task">task {agent.task_index + 1}</span>
   {/if}
   <span class="chip">{agent.tool_calls} {agent.tool_calls === 1 ? 'call' : 'calls'}</span>
-  {#if agent.tokens_in + agent.tokens_out > 0}
+  {#if agent.usage_available === false}
+    <span class="chip">Usage unavailable</span>
+  {:else if agent.tokens_in + agent.tokens_out > 0}
     <span class="chip" title="input incl. cache / output tokens">{formatTokens(agent.tokens_in)} in · {formatTokens(agent.tokens_out)} out</span>
   {/if}
   {#if agent.files.length > 0}

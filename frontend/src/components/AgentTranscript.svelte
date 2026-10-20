@@ -41,10 +41,15 @@
         <div class="step text">{step.text}</div>
       {/if}
     {/each}
+    {#if data.steps.length === 0}<div class="empty">No activity report available.</div>{/if}
+    {#if data.usage_available === false || !data.usage}
+      <div class="usage">Usage unavailable</div>
+    {:else}
     <div class="usage">
       {formatTokens(data.usage.input_tokens + data.usage.cache_read_tokens + data.usage.cache_creation_tokens)} in ·
       {formatTokens(data.usage.output_tokens)} out
     </div>
+    {/if}
   {/if}
 </div>
 

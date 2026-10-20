@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { continuationText, continuationForID } from '$lib/runtime'
   import { appState, dismissUpdate } from '$lib/store'
   import { listWorkflows, deleteWorkflow, listMissions, listPastItems, listGuardianAlerts, dismissGuardianAlert, dismissAllGuardianAlerts, deleteGuardianAlert, killSwarmWorker, setWorkflowAgentStatus, runGuardianScan, startWorkflow, recordDelegation, listAgents } from '$lib/api'
   import PhaseTimeline from '../components/PhaseTimeline.svelte'
@@ -358,8 +359,8 @@
                   </button>
                 {/if}
                 {#if alert.type === 'stale_workflow' && alert.metadata?.workflow_id}
-                  <button class="alert-action" onclick={() => navigator.clipboard.writeText(`/resume ${alert.metadata.workflow_id}`)} title="Copy resume command">
-                    Copy /resume
+                  <button class="alert-action" onclick={async () => navigator.clipboard.writeText(await continuationForID(String(alert.metadata.workflow_id), appState.dashboard?.workflows ?? []))} title="Copy resume command">
+                    Continue workflow
                   </button>
                 {/if}
                 {#if alert.type === 'stale_worker' && alert.metadata?.worker_id}
@@ -534,12 +535,14 @@
         <div class="resume-row">
           <button
             class="btn-resume skill"
-            onclick={() => copyToClipboard(`/resume ${wf.id}`, `skill-${wf.id}`)}
-            title="Copy /resume command to clipboard"
+            onclick={() => copyToClipboard(continuationText(wf), `skill-${wf.id}`)}
+            title="Copy workflow continuation"
           >
-            {copiedId === `skill-${wf.id}` ? 'Copied!' : `/resume ${wf.id}`}
+            {copiedId === `skill-${wf.id}` ? 'Copied!' : continuationText(wf)}
           </button>
-          {#if wf.session_id}
+          {#if wf.runtime === 'codex'}
+            <span class="phase">Codex</span>
+          {:else if wf.session_id}
             <button
               class="btn-resume session"
               onclick={() => copyToClipboard(`claude --resume ${wf.session_id}`, `sess-${wf.id}`)}

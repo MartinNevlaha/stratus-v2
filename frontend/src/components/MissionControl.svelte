@@ -86,7 +86,7 @@
               <td>{a.phase}</td>
               <td>{a.idle ? 'idle' : a.status}{a.verdict ? ` · ${a.verdict}` : ''}</td>
               <td>{a.tool_calls}</td>
-              <td>{a.tokens_in + a.tokens_out > 0 ? formatTokens(a.tokens_in + a.tokens_out) : '–'}</td>
+              <td>{a.usage_available === false ? 'Unavailable' : a.tokens_in + a.tokens_out > 0 ? formatTokens(a.tokens_in + a.tokens_out) : '–'}</td>
               <td>{(void now, formatDuration(a.started_at, a.status === 'running' ? undefined : a.ended_at))}</td>
             </tr>
           {/each}

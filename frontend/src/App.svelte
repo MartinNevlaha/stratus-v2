@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { isDashboardOnly } from '$lib/runtime'
+  const dashboardOnly = isDashboardOnly(window.location.search)
   import { appState, initStore, startUpdate, dismissUpdate, setActiveTab } from '$lib/store'
   import Overview from './routes/Overview.svelte'
   import Memory from './routes/Memory.svelte'
@@ -11,6 +13,7 @@
   import ToastStack from './components/ToastStack.svelte'
 
   onMount(() => {
+    if (dashboardOnly && appState.activeTab === 'terminal') setActiveTab('overview')
     initStore()
   })
   
@@ -26,7 +29,10 @@
   let guardianAlerts = $derived(appState.guardianAlertCount)
 
   // Resizable split pane
-  let splitRatio = $state(parseFloat(localStorage.getItem('stratus-split-ratio') ?? '0.5'))
+  function savedSplitRatio(): number {
+    try { const n = Number(localStorage.getItem('stratus-split-ratio') ?? '0.5'); return Number.isFinite(n) && n >= 0.2 && n <= 0.8 ? n : 0.5 } catch { return 0.5 }
+  }
+  let splitRatio = $state(savedSplitRatio())
   let isDragging = $state(false)
   let dragStartX = 0
   let dragStartRatio = 0
@@ -112,11 +118,12 @@
         bind:this={splitView}
         style:display={appState.activeTab === 'overview' ? 'flex' : 'none'}
       >
-        <div class="split-pane" style="flex: 0 0 {splitRatio * 100}%; max-width: {splitRatio * 100}%;">
+        <div class="split-pane" style="flex: 0 0 {dashboardOnly ? 100 : splitRatio * 100}%; max-width: {dashboardOnly ? 100 : splitRatio * 100}%;">
           {#if appState.activeTab === 'overview'}
             <Overview />
           {/if}
         </div>
+        {#if !dashboardOnly}
         <div
           class="split-divider"
           class:dragging={isDragging}
@@ -126,6 +133,7 @@
         <div class="split-pane terminal-pane" style="flex: 1; min-width: 0;">
           <Terminal />
         </div>
+        {/if}
       </div>
 
       {#if appState.activeTab === 'memory'}
