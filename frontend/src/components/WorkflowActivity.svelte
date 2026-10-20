@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { appState } from '$lib/store'
   import { getWorkflowAgents, getWorkflowLogs, getWorkflowDenials, setWorkflowAgentStatus, resetTask, skipTask } from '$lib/api'
   import { relativeTime } from '$lib/ui'
@@ -13,6 +13,11 @@
 
   let agents = $state<WorkflowAgent[]>([])
   let review = $state<ReviewState | undefined>()
+  let loadedScope = $state('')
+  let scope = $derived(`${wf.id}|${wf.phase}|${wf.current_task ?? ''}|${wf.review_generation ?? 0}`)
+  let currentReview = $derived<ReviewState | undefined>(wf.runtime === 'codex' && loadedScope !== scope
+    ? {status:'awaiting',reviews:0,loops:0,must_fix:0,should_fix:0,suggestion:0}
+    : review)
   let conflicts = $state<string[]>([])
   let logs = $state<WorkflowLog[]>([])
   let denials = $state<WorkflowDenial[]>([])
@@ -27,11 +32,13 @@
 
   async function load() {
     const seq = ++loadSeq
+    const requestedScope = scope
     try {
       const [a, l, d] = await Promise.all([getWorkflowAgents(wf.id), getWorkflowLogs(wf.id), getWorkflowDenials(wf.id)])
       if (seq !== loadSeq) return
       agents = a.agents
       review = a.review
+      loadedScope = requestedScope
       conflicts = a.conflicts
       logs = l
       denials = d.denials
@@ -70,9 +77,15 @@
   }
 
   onMount(() => {
-    load()
+    if (wf.runtime !== 'codex') load()
     const tick = setInterval(() => { now = Date.now() }, 10_000)
     return () => clearInterval(tick)
+  })
+
+  // Scope changes invalidate the projection immediately, before its replacement arrives.
+  $effect(() => {
+    const requestedScope = scope
+    if (wf.runtime === 'codex' && requestedScope) untrack(() => { void load() })
   })
 
   // Re-fetch on WS activity, coalesced so a burst of tool calls is one request.
@@ -107,7 +120,7 @@
 {/if}
 
 {#if agents.length > 0}
-  <ReviewPanel {agents} {review} />
+  <ReviewPanel {agents} review={currentReview} />
   <div class="section">
     <div class="label">Agents ({running} running / {agents.length})</div>
     <div class="agents">

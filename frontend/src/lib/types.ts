@@ -31,6 +31,7 @@ export interface ChangeSummary {
 }
 
 export interface WorkflowState {
+  review_generation?: number
   runtime?: string
   runtime_session_id?: string
   id: string

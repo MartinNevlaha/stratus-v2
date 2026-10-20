@@ -70,6 +70,12 @@ func gitIdentity(path string) (root, common string, linked bool) {
 			if err != nil {
 				return "", "", false
 			}
+			if linked {
+				registered, err := canonicalPath(gitdir)
+				if err != nil || filepath.Dir(registered) != filepath.Join(common, "worktrees") {
+					return "", "", false
+				}
+			}
 			return p, common, linked
 		}
 		parent := filepath.Dir(p)
@@ -111,6 +117,39 @@ func RepositoryPath(root, path string) (string, bool) {
 	}
 	if _, ok := linkedWorktree(canonicalRoot, canonical); ok {
 		return canonical, true
+	}
+	return "", false
+}
+
+// linkedProjectConfig finds an ignored main-checkout config only after verifying
+// the caller's reverse Git registration. No arbitrary sibling config is adopted.
+func linkedProjectConfig(cwd string) (string, bool) {
+	worktree, common, linked := gitIdentity(cwd)
+	if !linked || filepath.Base(common) != ".git" {
+		return "", false
+	}
+	main := filepath.Dir(common)
+	root, mainCommon, mainLinked := gitIdentity(main)
+	if mainLinked || root != main || mainCommon != common {
+		return "", false
+	}
+	canonical, err := canonicalPath(cwd)
+	if err != nil {
+		return "", false
+	}
+	rel, ok := ProjectPath(worktree, canonical)
+	if !ok {
+		return "", false
+	}
+	dir := filepath.Join(main, filepath.FromSlash(rel))
+	for {
+		if st, err := os.Stat(filepath.Join(dir, ".stratus.json")); err == nil && !st.IsDir() {
+			return dir, true
+		}
+		if dir == main {
+			break
+		}
+		dir = filepath.Dir(dir)
 	}
 	return "", false
 }

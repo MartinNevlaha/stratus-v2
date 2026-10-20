@@ -27,28 +27,20 @@ func (d *DB) ApplyIntegrationActivity(ctx context.Context, in IntegrationActivit
 		return out, err
 	}
 	defer tx.Rollback()
-	if in.EventKey != "" {
-		r, e := tx.ExecContext(ctx, `INSERT OR IGNORE INTO integration_event_receipts(runtime,event_key) VALUES('codex',?)`, in.EventKey)
-		if e != nil {
-			return out, e
-		}
-		n, _ := r.RowsAffected()
-		if n == 0 {
-			out.Duplicate = true
-			return out, tx.Commit()
-		}
-	} else {
-		if _, e := tx.ExecContext(ctx, `UPDATE integration_event_receipts SET event_key=event_key WHERE 0`); e != nil {
-			return out, e
-		}
+	// Acquire the write transaction before validating ownership and deduplication.
+	if _, e := tx.ExecContext(ctx, `UPDATE integration_event_receipts SET event_key=event_key WHERE 0`); e != nil {
+		return out, e
 	}
 	var raw string
 	if err = tx.QueryRowContext(ctx, `SELECT state_json FROM workflows WHERE id=?`, in.WorkflowID).Scan(&raw); err != nil {
 		return out, err
 	}
 	var owner struct {
-		Runtime string `json:"runtime"`
-		Session string `json:"session_id"`
+		Runtime    string `json:"runtime"`
+		Session    string `json:"session_id"`
+		Phase      string `json:"phase"`
+		Task       *int   `json:"current_task"`
+		Generation int64  `json:"review_generation"`
 	}
 	if e := json.Unmarshal([]byte(raw), &owner); e != nil {
 		return out, e
@@ -70,20 +62,35 @@ func (d *DB) ApplyIntegrationActivity(ctx context.Context, in IntegrationActivit
 		}
 	}
 	if in.Event.NativeAgentID != "" {
+		// Native worker ownership spans all turns, even before explicit role binding.
+		var other string
+		e := tx.QueryRowContext(ctx, `SELECT workflow_id FROM codex_agent_roles WHERE session_id=? AND native_agent_id=? AND workflow_id!=?
+            UNION ALL SELECT workflow_id FROM workflow_agents WHERE session_id=? AND native_agent_id=? AND workflow_id!=? LIMIT 1`, in.SessionKey, in.Event.NativeAgentID, in.WorkflowID, in.SessionKey, in.Event.NativeAgentID, in.WorkflowID).Scan(&other)
+		if e != nil && e != sql.ErrNoRows {
+			return out, e
+		}
+		if other != "" {
+			return out, fmt.Errorf("native worker already belongs to another workflow")
+		}
+	}
+	if in.EventKey != "" {
+		r, e := tx.ExecContext(ctx, `INSERT OR IGNORE INTO integration_event_receipts(runtime,event_key) VALUES('codex',?)`, in.EventKey)
+		if e != nil {
+			return out, e
+		}
+		n, _ := r.RowsAffected()
+		if n == 0 {
+			out.Duplicate = true
+			return out, tx.Commit()
+		}
+	}
+	if in.Event.NativeAgentID != "" {
 		var role string
 		e := tx.QueryRowContext(ctx, `SELECT delivery_role FROM codex_agent_roles WHERE workflow_id=? AND session_id=? AND native_agent_id=?`, in.WorkflowID, in.SessionKey, in.Event.NativeAgentID).Scan(&role)
 		if e != nil && e != sql.ErrNoRows {
 			return out, e
 		}
 		if kind == "agent_role" {
-			var other string
-			e := tx.QueryRowContext(ctx, `SELECT workflow_id FROM codex_agent_roles WHERE session_id=? AND native_agent_id=? AND workflow_id!=? LIMIT 1`, in.SessionKey, in.Event.NativeAgentID, in.WorkflowID).Scan(&other)
-			if e != nil && e != sql.ErrNoRows {
-				return out, e
-			}
-			if other != "" {
-				return out, fmt.Errorf("native worker already belongs to another workflow")
-			}
 			if role != "" && role != in.Event.DeliveryRole {
 				return out, fmt.Errorf("conflicting explicit agent role")
 			}
@@ -105,12 +112,12 @@ func (d *DB) ApplyIntegrationActivity(ctx context.Context, in IntegrationActivit
 			status = "done"
 		}
 		if kind == "agent_start" || kind == "agent_stop" || in.Event.MainAgent || kind == "tool" && in.Event.NativeAgentID != "" && in.Event.TurnID != "" && in.EventKey != "" {
-			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO workflow_agents(id,workflow_id,session_id,agent_type,phase,task_index,status,started_at,last_activity,ended_at,verdict,must_fix,should_fix,suggestion,native_agent_id,turn_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, in.WorkflowID, in.SessionKey, in.Event.AgentType, in.Phase, in.TaskIndex, status, ts, ts, func() string {
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO workflow_agents(id,workflow_id,session_id,agent_type,phase,task_index,status,started_at,last_activity,ended_at,verdict,must_fix,should_fix,suggestion,native_agent_id,turn_id,review_generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, in.WorkflowID, in.SessionKey, in.Event.AgentType, owner.Phase, owner.Task, status, ts, ts, func() string {
 				if status == "done" {
 					return ts
 				}
 				return ""
-			}(), in.Verdict.Verdict, in.Verdict.MustFix, in.Verdict.ShouldFix, in.Verdict.Suggestion, in.Event.NativeAgentID, in.Event.TurnID)
+			}(), in.Verdict.Verdict, in.Verdict.MustFix, in.Verdict.ShouldFix, in.Verdict.Suggestion, in.Event.NativeAgentID, in.Event.TurnID, owner.Generation)
 			if err != nil {
 				return out, err
 			}

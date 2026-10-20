@@ -353,7 +353,7 @@ func (s *Server) handleListWorkflowAgents(w http.ResponseWriter, r *http.Request
 	if wf, e := s.coordinator.Get(id); e == nil {
 		body["agents"] = runtimeAgents(agents, wf.Runtime)
 		if wf.Runtime == "codex" {
-			body["review"] = db.CodexReview(agents, string(wf.Phase), wf.CurrentTask)
+			body["review"] = db.CodexReview(agents, string(wf.Phase), wf.CurrentTask, wf.ReviewGeneration)
 		}
 	}
 	json200(w, body)

@@ -112,3 +112,33 @@ func TestCodexAgentRole_AbortedWorkflowRetainsGuardIdentity(t *testing.T) {
 		t.Fatal("guard lost explicit worker identity", role, id, err)
 	}
 }
+
+func TestCodexNativeWorker_OwnershipSpansObservedRunsAndBindings(t *testing.T) {
+	for _, first := range []string{"agent_start", "agent_role"} {
+		t.Run(first, func(t *testing.T) {
+			s := codexTestServer(t)
+			s.coordinator.StartOwned("spec-other", orchestration.WorkflowSpec, orchestration.ComplexitySimple, "Other", orchestration.WorkflowOwner{Runtime: "codex", NativeSessionID: "s1"})
+			w := postCodex(t, s, `{"event":"`+first+`","workflow_id":"spec-codex","session_id":"s1","agent_id":"a1","turn_id":"t1","delivery_role":"delivery-code-reviewer"}`)
+			if w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			for _, next := range []string{"agent_role", "agent_start", "tool"} {
+				w = postCodex(t, s, `{"event":"`+next+`","workflow_id":"spec-other","session_id":"s1","agent_id":"a1","turn_id":"t2","tool_use_id":"u2","tool_name":"Bash","delivery_role":"delivery-code-reviewer"}`)
+				if w.Code != 409 {
+					t.Fatal(first, next, w.Code, w.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestCodexNativeWorker_DuplicateCannotClaimAnotherWorkflow(t *testing.T) {
+	s := codexTestServer(t)
+	s.coordinator.StartOwned("spec-other", orchestration.WorkflowSpec, orchestration.ComplexitySimple, "Other", orchestration.WorkflowOwner{Runtime: "codex", NativeSessionID: "s1"})
+	for i, wf := range []string{"spec-codex", "spec-other"} {
+		w := postCodex(t, s, `{"event":"agent_start","workflow_id":"`+wf+`","session_id":"s1","agent_id":"a1","turn_id":"t1"}`)
+		if i == 0 && w.Code != 200 || i == 1 && w.Code != 409 {
+			t.Fatal(i, w.Code, w.Body.String())
+		}
+	}
+}

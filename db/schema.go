@@ -666,6 +666,7 @@ CREATE TABLE IF NOT EXISTS codex_agent_roles (
 
 -- Workflow agents: subagents observed by hooks inside spec/bug/e2e workflows
 CREATE TABLE IF NOT EXISTS workflow_agents (
+ review_generation INTEGER NOT NULL DEFAULT 0,
     native_agent_id TEXT NOT NULL DEFAULT '',
     turn_id TEXT NOT NULL DEFAULT '',
     id              TEXT PRIMARY KEY,

@@ -13,11 +13,11 @@ type ReviewState struct {
 	Loops      int    `json:"loops"`
 }
 
-func CodexReview(agents []WorkflowAgent, phase string, task *int) ReviewState {
+func CodexReview(agents []WorkflowAgent, phase string, task *int, generation ...int64) ReviewState {
 	out := ReviewState{Status: "awaiting"}
 	var latest *WorkflowAgent
 	relevant := func(a WorkflowAgent) bool {
-		return a.Phase == phase && ((a.TaskIndex == nil && task == nil) || (a.TaskIndex != nil && task != nil && *a.TaskIndex == *task))
+		return (len(generation) == 0 || a.ReviewGeneration == generation[0]) && a.Phase == phase && ((a.TaskIndex == nil && task == nil) || (a.TaskIndex != nil && task != nil && *a.TaskIndex == *task))
 	}
 	isReview := func(a WorkflowAgent) bool { return a.Verdict != "" || strings.Contains(a.AgentType, "reviewer") }
 	for i := range agents {

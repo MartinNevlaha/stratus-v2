@@ -35,6 +35,7 @@ type ChangeSummary struct {
 
 // WorkflowState is the full state of a workflow.
 type WorkflowState struct {
+	ReviewGeneration int64               `json:"review_generation,omitempty"`
 	ID               string              `json:"id"`
 	Runtime          string              `json:"runtime,omitempty"`
 	RuntimeSessionID string              `json:"runtime_session_id,omitempty"`
@@ -951,6 +952,23 @@ func (c *Coordinator) WorkflowHistory(wtype string) (*WorkflowHistorySummary, er
 }
 
 func (c *Coordinator) save(state *WorkflowState) error {
+	// Only Codex uses generation-scoped review evidence. Keep legacy state unchanged.
+	if state.Runtime == "codex" {
+		previous, err := c.Get(state.ID)
+		if errors.Is(err, ErrWorkflowNotFound) {
+			state.ReviewGeneration = 1
+		} else if err != nil {
+			return err
+		} else {
+			before, _ := json.Marshal(previous.Tasks)
+			after, _ := json.Marshal(state.Tasks)
+			sameTask := previous.CurrentTask == nil && state.CurrentTask == nil || previous.CurrentTask != nil && state.CurrentTask != nil && *previous.CurrentTask == *state.CurrentTask
+			state.ReviewGeneration = previous.ReviewGeneration
+			if previous.Phase != state.Phase || !sameTask || string(before) != string(after) {
+				state.ReviewGeneration++
+			}
+		}
+	}
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	data, err := json.Marshal(state)
 	if err != nil {

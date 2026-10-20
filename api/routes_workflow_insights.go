@@ -85,7 +85,7 @@ func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request) {
 		}
 		it.ReviewFailed = lastVerdict == "FAIL"
 		if wf.Runtime == "codex" {
-			it.ReviewFailed = db.CodexReview(agents, string(wf.Phase), wf.CurrentTask).Status == "FAIL"
+			it.ReviewFailed = db.CodexReview(agents, string(wf.Phase), wf.CurrentTask, wf.ReviewGeneration).Status == "FAIL"
 		}
 		if it.StaleAgents > 0 || it.ReviewFailed || len(it.Conflicts) > 0 {
 			items = append(items, it)

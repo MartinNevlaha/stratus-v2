@@ -18,6 +18,7 @@ func ResolveProject(cwd string) (config.Config, error) {
 	if e != nil {
 		return cfg, e
 	}
+	triedLinked := false
 	for {
 		p := filepath.Join(dir, ".stratus.json")
 		b, e := os.ReadFile(p)
@@ -39,6 +40,13 @@ func ResolveProject(cwd string) (config.Config, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if !triedLinked {
+				triedLinked = true
+				if configured, ok := linkedProjectConfig(cwd); ok {
+					dir = configured
+					continue
+				}
+			}
 			return cfg, fmt.Errorf("no .stratus.json found from hook cwd")
 		}
 		dir = parent

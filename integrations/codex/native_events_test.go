@@ -143,3 +143,61 @@ func TestNativeWorker_ExplicitWorkflowCannotHideBinding(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestNativeWorktree_FullHookDiscoversMainConfiguration(t *testing.T) {
+	var received int
+	var files []string
+	root := hookRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			received++
+			var e integrations.Event
+			json.NewDecoder(r.Body).Decode(&e)
+			files = e.Files
+		}
+		w.Write([]byte(`{}`))
+	})
+	wt := filepath.Join(t.TempDir(), "linked checkout")
+	for _, args := range [][]string{
+		{"init", "--quiet", root},
+		{"-C", root, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"},
+		{"-C", root, "worktree", "add", "--quiet", "--detach", wt},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatal(err, string(out))
+		}
+	}
+	cwd := filepath.Join(wt, "nested")
+	if err := os.MkdirAll(cwd, 0755); err != nil {
+		t.Fatal(err)
+	}
+	h := HookEvent{Name: "PostToolUse", Cwd: cwd, SessionID: "s1", AgentID: "a1", TurnID: "t1", ToolUseID: "u1", ToolName: "apply_patch", ToolInput: map[string]any{"command": "*** Begin Patch\n*** Add File: a.go\n+x\n*** End Patch"}, ToolResponse: json.RawMessage(`{"success":true}`)}
+	body, _ := json.Marshal(h)
+	var out, stderr bytes.Buffer
+	Run("activity", bytes.NewReader(body), &out, &stderr, nil)
+	if received != 1 || len(files) != 1 || files[0] != filepath.Join(cwd, "a.go") {
+		t.Fatal("linked worktree activity lost", received, files, stderr.String())
+	}
+}
+
+func TestNativeWorktree_RejectsUnregisteredGitdir(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "init", "--quiet", root).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	foreign, metadata := t.TempDir(), t.TempDir()
+	for path, value := range map[string]string{
+		filepath.Join(foreign, ".git"):       "gitdir: " + metadata,
+		filepath.Join(metadata, "commondir"): filepath.Join(root, ".git"),
+		filepath.Join(metadata, "gitdir"):    filepath.Join(foreign, ".git"),
+	} {
+		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if path, ok := RepositoryPath(root, filepath.Join(foreign, "a.go")); ok {
+		t.Fatal("unregistered foreign checkout accepted", path)
+	}
+	if path, ok := linkedProjectConfig(foreign); ok {
+		t.Fatal("unregistered config discovery accepted", path)
+	}
+}
