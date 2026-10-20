@@ -122,10 +122,10 @@ Commands:
   mcp-serve   Start MCP stdio server
   hook <name> Run a Claude Code hook handler
   init        Initialize stratus in the current project
-              Flags: --force (re-run), --target [claude-code|opencode|both]
+              Flags: --force (re-run), --target [claude-code|opencode|both|codex]
   update      Update stratus binary and refresh project files
   refresh     Refresh agents, skills, and rules from the current binary
-              Flags: --target [claude-code|opencode|both]
+              Flags: --target [claude-code|opencode|both|codex]
   statusline  Emit ANSI status bar (invoked by Claude Code via settings.json)
   version     Print version
   port        Print the configured API port (reads .stratus.json / STRATUS_PORT env)
@@ -634,6 +634,13 @@ func parseInitFlags() (force bool, target string) {
 
 func cmdInit() {
 	force, target := parseInitFlags()
+	if target == "codex" {
+		root, _ := os.Getwd()
+		if err := installCodex(root, false); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if target != "claude-code" && target != "opencode" && target != "both" {
 		fmt.Fprintf(os.Stderr, "warning: unknown --target %q, defaulting to 'claude-code'\n", target)
 		target = "claude-code"
@@ -1064,9 +1071,16 @@ func cmdUpdate() {
 // that the user has customized (disk hash differs from stored hash) are skipped
 // rather than overwritten.
 //
-// Flags: --target [claude-code|opencode|both]
+// Flags: --target [claude-code|opencode|both|codex]
 func cmdRefresh() {
 	_, target := parseInitFlags() // reuse flag parser; force is ignored for refresh
+	if target == "codex" {
+		root, _ := os.Getwd()
+		if err := installCodex(root, true); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if target != "claude-code" && target != "opencode" && target != "both" {
 		fmt.Fprintf(os.Stderr, "warning: unknown --target %q, defaulting to 'claude-code'\n", target)
 		target = "claude-code"

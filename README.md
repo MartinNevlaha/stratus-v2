@@ -677,3 +677,15 @@ GOOS=darwin GOARCH=arm64 go build -o stratus-darwin-arm64 ./cmd/stratus
 | Learning | — | Candidate → proposal pipeline |
 | File locking | — | Atomic reservations (SQLite tx) |
 | Recovery | — | Checkpoint/resume |
+
+## Codex adapter
+
+Use `stratus init --target codex` to add the standalone Codex adapter, including to an existing Stratus project. Update its resources with `stratus refresh --target codex`. Both commands preserve shared configuration and customized Codex instructions, including when init is called with `--force`. Existing default targets and `--target both` still install Claude Code plus OpenCode only.
+
+If OpenCode is already installed, first refresh its Stratus plugin using the current binary with `stratus refresh --target opencode`. An older or customized installed plugin causes a prerequisite conflict rather than being overwritten by the Codex installer. Review customized files through the existing sync process.
+
+Run `stratus serve` in the project and start a fresh trusted Codex session. Review its project MCP and hook definitions through Codex's normal trust flow; file installation does not enable disabled capabilities or change models/permissions. The adapter stores files only under `.codex/` plus its sync metadata in `.stratus.json`. It leaves `.claude/`, `.opencode/`, and root `AGENTS.md` alone.
+
+Open `http://localhost:<configured-port>/?view=dashboard` in Codex's native browser for status without an embedded terminal. Obtain the port with `stratus port`. Native instructions live under `.codex/stratus/`. SessionStart supplies the native session ID for workflow registration; use `bind_workflow_session` to continue a Codex-owned workflow in a new session.
+
+Codex monitoring uses supported lifecycle hooks. Missing per-tool agent attribution, reports, or token counts are shown as unavailable. It does not parse Codex transcripts. To disable the adapter, disable only its `mcp_servers.stratus` entry and remove only `stratus codex-hook ...` handlers from `.codex/hooks.json`; retain user hooks and customized instruction files. Existing Claude Code and OpenCode integrations continue through their own adapters.
