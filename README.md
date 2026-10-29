@@ -433,7 +433,8 @@ WS     /api/terminal/ws        PTY terminal I/O
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "matoog/whisper-large-v3-turbo-sk-ct2"
+    "model": "matoog/whisper-large-v3-turbo-sk-ct2",
+    "language": "sk"
   }
 }
 ```
@@ -470,7 +471,7 @@ The container (`stratus-stt`) starts with `stratus serve` and stops when you exi
 | `matoog/whisper-large-v3-turbo-sk-ct2` | varies | ~4s | Default Slovak-tuned large-v3-turbo model |
 | `Systran/faster-whisper-large-v3` | ~3 GB | ~4s | Maximum accuracy, heavy accents |
 
-Set `stt.model` in `.stratus.json` to switch models. **Docker is only required for STT** — all other Stratus features work without it.
+Set `stt.model` in `.stratus.json` to switch models. `stt.language` (default `"sk"`) is sent to Whisper so it does not guess the language; set it to `""` for auto-detection. When Docker has the NVIDIA runtime, Stratus starts the CUDA image with `--gpus all`, which makes `Systran/faster-whisper-large-v3` practical. An already running `stratus-stt` container is reused, so remove it once to switch images. **Docker is only required for STT** — all other Stratus features work without it.
 
 ---
 

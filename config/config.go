@@ -210,6 +210,8 @@ type VexorConfig struct {
 type STTConfig struct {
 	Endpoint string `json:"endpoint"`
 	Model    string `json:"model"`
+	// Language is the ISO-639-1 code sent to Whisper; empty means auto-detect.
+	Language string `json:"language"`
 }
 
 func Default() Config {
@@ -235,6 +237,7 @@ func Default() Config {
 		STT: STTConfig{
 			Endpoint: "http://localhost:8011",
 			Model:    "matoog/whisper-large-v3-turbo-sk-ct2",
+			Language: "sk",
 		},
 		Guardian: GuardianConfig{
 			Enabled:                true,

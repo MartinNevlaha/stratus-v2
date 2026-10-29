@@ -82,6 +82,10 @@ func (s *Server) handleSTTTranscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = mw.WriteField("model", s.sttModel)
+	// Whisper's auto-detection often confuses Slovak with Czech.
+	if s.cfg != nil && s.cfg.STT.Language != "" {
+		_ = mw.WriteField("language", s.cfg.STT.Language)
+	}
 	mw.Close()
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,

@@ -41,7 +41,8 @@ import (
 
 const (
 	sttContainerName = "stratus-stt"
-	sttImage         = "ghcr.io/speaches-ai/speaches:latest-cpu"
+	sttImageCPU      = "ghcr.io/speaches-ai/speaches:latest-cpu"
+	sttImageCUDA     = "ghcr.io/speaches-ai/speaches:latest-cuda"
 	sttDefaultModel  = "matoog/whisper-large-v3-turbo-sk-ct2"
 	sttLegacySKModel = "NaiveNeuron/whisper-large-v3-turbo-sk"
 	sttHost          = "http://localhost:8011"
@@ -480,25 +481,39 @@ func sttStart(model string) bool {
 		exec.Command("docker", "rm", sttContainerName).Run()
 	}
 
-	args := []string{
-		"run", "-d",
-		"--name", sttContainerName,
-		"-p", "8011:8000",
-		"-e", "WHISPER__MODEL=" + model,
-		"-v", "stratus-whisper-cache:/root/.cache/huggingface",
-		sttImage,
-	}
-	if err := exec.Command("docker", args...).Run(); err != nil {
+	gpu := sttDockerHasNVIDIA()
+	if err := exec.Command("docker", sttRunArgs(model, gpu)...).Run(); err != nil {
 		log.Printf("STT: could not start container: %v", err)
 		return false
 	}
-	log.Printf("STT: container started (model: %s)", model)
+	log.Printf("STT: container started (model: %s, gpu: %t)", model, gpu)
 
 	// Install the model in speaches in the background — speaches tracks
 	// installed models separately from the HuggingFace file cache.
 	// POST /v1/models/{id} triggers download; subsequent calls are no-ops.
 	go sttInstallModel(sttHost, model)
 	return true
+}
+
+// sttRunArgs builds the `docker run` arguments; with gpu it uses the CUDA image.
+func sttRunArgs(model string, gpu bool) []string {
+	args := []string{
+		"run", "-d",
+		"--name", sttContainerName,
+		"-p", "8011:8000",
+		"-e", "WHISPER__MODEL=" + model,
+		"-v", "stratus-whisper-cache:/root/.cache/huggingface",
+	}
+	if gpu {
+		return append(args, "--gpus", "all", sttImageCUDA)
+	}
+	return append(args, sttImageCPU)
+}
+
+// sttDockerHasNVIDIA reports whether Docker has the NVIDIA container runtime.
+func sttDockerHasNVIDIA() bool {
+	out, err := exec.Command("docker", "info", "--format", "{{json .Runtimes}}").Output()
+	return err == nil && strings.Contains(string(out), `"nvidia"`)
 }
 
 func normalizeSTTModel(model string) string {
@@ -560,8 +575,12 @@ func sttPullImage() {
 		fmt.Println("docker not found — skipping STT image pull (install Docker to enable voice input)")
 		return
 	}
-	fmt.Printf("Pulling STT image (%s)… \n", sttImage)
-	cmd := exec.Command("docker", "pull", sttImage)
+	image := sttImageCPU
+	if sttDockerHasNVIDIA() {
+		image = sttImageCUDA
+	}
+	fmt.Printf("Pulling STT image (%s)… \n", image)
+	cmd := exec.Command("docker", "pull", image)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -663,7 +682,8 @@ func cmdInit() {
   },
   "stt": {
     "endpoint": "http://localhost:8011",
-    "model": "matoog/whisper-large-v3-turbo-sk-ct2"
+    "model": "matoog/whisper-large-v3-turbo-sk-ct2",
+    "language": "sk"
   }
 }
 `
