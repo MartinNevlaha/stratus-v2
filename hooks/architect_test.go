@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,5 +112,64 @@ func TestPhaseGuard_ArchitectBashDocsWritesAllowed(t *testing.T) {
 		if decision.Continue != allowed {
 			t.Errorf("%q: allowed=%v, want %v (%s)", cmd, decision.Continue, allowed, decision.Reason)
 		}
+	}
+}
+
+// A coordinator may keep a workflow's branch in a git worktree outside the project
+// directory (a sibling checkout). Its docs/ belongs to the same repository, so the
+// architect may write there; docs/ of an unrelated repository stays denied.
+func TestPhaseGuard_ArchitectWritesDocsInLinkedWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	root := filepath.Join(base, "project")
+	worktree := filepath.Join(base, "project-feature")
+	other := filepath.Join(base, "other")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	for _, dir := range []string{root, other} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		git(dir, "init", "-q")
+		git(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init")
+	}
+	git(root, "worktree", "add", "-q", "-b", "feature", worktree)
+
+	t.Setenv("CLAUDE_PROJECT_DIR", root)
+	setDashboardState(t, dashboardState{})
+
+	cases := []struct {
+		path    string
+		allowed bool
+	}{
+		{filepath.Join(worktree, "docs", "plans", "x-analysis.md"), true},
+		{filepath.Join(worktree, "hooks", "x.go"), false},
+		{filepath.Join(worktree, ".claude", "rules", "docs", "x.md"), false},
+		{filepath.Join(other, "docs", "plans", "x.md"), false},
+	}
+	for _, c := range cases {
+		decision := PhaseGuard(HookEvent{
+			ToolName: "Write", AgentType: "delivery-system-architect", Cwd: root, SessionID: "s1",
+			ToolInput: map[string]any{"file_path": c.path},
+		})
+		if decision.Continue != c.allowed {
+			t.Errorf("Write %s: allowed=%v, want %v (%s)", c.path, decision.Continue, c.allowed, decision.Reason)
+		}
+	}
+
+	cmd := "cat > " + filepath.Join(worktree, "docs", "plans", "y.md") + " <<'EOF'\nx\nEOF"
+	decision := PhaseGuard(HookEvent{
+		ToolName: "Bash", AgentType: "delivery-system-architect", Cwd: root,
+		ToolInput: map[string]any{"command": cmd},
+	})
+	if !decision.Continue {
+		t.Errorf("heredoc into the worktree's docs/ denied: %s", decision.Reason)
 	}
 }

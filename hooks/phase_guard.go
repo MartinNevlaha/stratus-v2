@@ -106,8 +106,9 @@ var docsOnlyAgents = map[string]bool{
 }
 
 // architectWriteDenial returns why an architect may not write, or "" when it may: Write
-// and Edit to a Markdown file under the docs/ directory of the project or of a swarm
-// worktree (.stratus/worktrees/<name>/docs/). Bash may read but not write.
+// and Edit to a Markdown file under the docs/ directory of the project, of a swarm
+// worktree (.stratus/worktrees/<name>/docs/), or of another git worktree of the same
+// repository. Bash may read but not write.
 func architectWriteDenial(event HookEvent) string {
 	if !docsOnlyAgents[event.AgentType] {
 		return ""
@@ -195,9 +196,18 @@ func isProjectDoc(path, root string) bool {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, path)
 	}
-	rel, err := filepath.Rel(root, filepath.Clean(path))
+	path = filepath.Clean(path)
+	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return false
+		// Outside the project directory: allowed only in another worktree of the same
+		// repository (a workflow branch checked out next to the project).
+		top := sameRepoWorktree(path, root)
+		if top == "" {
+			return false
+		}
+		if rel, err = filepath.Rel(top, path); err != nil {
+			return false
+		}
 	}
 	// docs/ at the top of the project or of a swarm worktree, never one nested elsewhere
 	// (.claude/rules/docs/ would be read as instructions, node_modules/*/docs/ is not ours).
@@ -206,6 +216,65 @@ func isProjectDoc(path, root string) bool {
 		dirs = dirs[3:]
 	}
 	return len(dirs) > 0 && strings.EqualFold(dirs[0], "docs")
+}
+
+// sameRepoWorktree returns the top of the git worktree holding path when that worktree
+// belongs to the same repository as root, or "" when it does not (or is not a worktree).
+func sameRepoWorktree(path, root string) string {
+	top, common := gitWorktreeOf(filepath.Dir(path))
+	if top == "" {
+		return ""
+	}
+	if _, rootCommon := gitWorktreeOf(root); rootCommon != common {
+		return ""
+	}
+	return top
+}
+
+// gitWorktreeOf walks up from dir to the nearest .git and returns that worktree's top and
+// the repository's common git directory. A linked worktree's .git is a file pointing at
+// <common>/worktrees/<name>, whose commondir file leads back to <common>. A submodule's
+// .git points at a gitdir without commondir, so it never matches its superproject.
+func gitWorktreeOf(dir string) (top, common string) {
+	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
+		dotGit := filepath.Join(d, ".git")
+		if info, err := os.Stat(dotGit); err == nil {
+			if info.IsDir() {
+				return d, canonicalPath(dotGit)
+			}
+			data, err := os.ReadFile(dotGit)
+			if err != nil {
+				return "", ""
+			}
+			gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+			if !ok {
+				return "", ""
+			}
+			gitdir = resolveFrom(d, strings.TrimSpace(gitdir))
+			common = gitdir
+			if c, err := os.ReadFile(filepath.Join(gitdir, "commondir")); err == nil {
+				common = resolveFrom(gitdir, strings.TrimSpace(string(c)))
+			}
+			return d, canonicalPath(common)
+		}
+		if filepath.Dir(d) == d {
+			return "", ""
+		}
+	}
+}
+
+func resolveFrom(base, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(base, p)
+}
+
+func canonicalPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return filepath.Clean(p)
 }
 
 // isBlockingPhase reports whether a workflow is in a phase where delivery agents must
