@@ -7,6 +7,7 @@
   import Memory from './routes/Memory.svelte'
   import Retrieval from './routes/Retrieval.svelte'
   import Agents from './routes/Agents.svelte'
+  import Comms from './routes/Comms.svelte'
   import Settings from './routes/Settings.svelte'
   import Wiki from './routes/Wiki.svelte'
   import Terminal from './components/Terminal.svelte'
@@ -20,6 +21,7 @@
   const tabs = [
     { id: 'overview' as const, label: 'Overview' },
     { id: 'agents' as const, label: 'Agents' },
+    { id: 'comms' as const, label: 'Comms' },
     { id: 'wiki' as const, label: 'Wiki' },
     { id: 'memory' as const, label: 'Memory' },
     { id: 'retrieval' as const, label: 'Retrieve' },
@@ -140,6 +142,8 @@
         <Memory />
       {:else if appState.activeTab === 'agents'}
         <Agents />
+      {:else if appState.activeTab === 'comms'}
+        <Comms />
       {:else if appState.activeTab === 'wiki'}
         <Wiki />
       {:else if appState.activeTab === 'retrieval'}

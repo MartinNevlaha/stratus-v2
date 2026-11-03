@@ -10,9 +10,13 @@
     "Notification": [
       {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
     ],
+    "UserPromptSubmit": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook inbox"}]}
+    ],
     "PostToolUse": [
       {"matcher": "Write|Edit|NotebookEdit", "hooks": [{"type": "command", "command": "stratus hook watcher"}]},
-      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]},
+      {"matcher": "*", "hooks": [{"type": "command", "command": "stratus hook inbox"}]}
     ],
     "SubagentStart": [
       {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook agent_activity"}]}
@@ -22,6 +26,9 @@
     ],
     "SessionStart": [
       {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook session_start"}]}
+    ],
+    "SessionEnd": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook session_end"}]}
     ],
     "Stop": [
       {"matcher": "", "hooks": [{"type": "command", "command": "stratus hook workflow_stop_guard"}]}

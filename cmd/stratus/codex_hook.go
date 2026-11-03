@@ -8,7 +8,7 @@ import (
 
 func cmdCodexHook() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: stratus codex-hook context|activity|guard")
+		fmt.Fprintln(os.Stderr, "usage: stratus codex-hook context|activity|guard|inbox")
 		os.Exit(1)
 	}
 	os.Exit(codex.Run(os.Args[2], os.Stdin, os.Stdout, os.Stderr, nil))

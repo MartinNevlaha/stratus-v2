@@ -268,6 +268,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
 	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 
+	// Comms: cross-runtime agent messaging + shared task board
+	mux.HandleFunc("POST /api/peers", s.handleRegisterPeer)
+	mux.HandleFunc("GET /api/peers", s.handleListPeers)
+	mux.HandleFunc("PATCH /api/peers/{key}", s.handleRenamePeer)
+	mux.HandleFunc("POST /api/peers/{key}/end", s.handleEndPeer)
+	mux.HandleFunc("POST /api/peers/{key}/inbox/claim", s.handleClaimInbox)
+	mux.HandleFunc("POST /api/peers/{key}/inbox/wait", s.handleWaitInbox)
+	mux.HandleFunc("POST /api/messages", s.handleSendMessage)
+	mux.HandleFunc("GET /api/messages", s.handleListMessages)
+	mux.HandleFunc("POST /api/shared-tasks", s.handleCreateSharedTask)
+	mux.HandleFunc("GET /api/shared-tasks", s.handleListSharedTasks)
+	mux.HandleFunc("PATCH /api/shared-tasks/{id}", s.handleUpdateSharedTask)
+
 	// Retrieval
 	mux.HandleFunc("GET /api/retrieve", s.handleRetrieve)
 	mux.HandleFunc("GET /api/retrieve/status", s.handleRetrieveStatus)

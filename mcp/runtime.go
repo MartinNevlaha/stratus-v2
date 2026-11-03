@@ -15,13 +15,15 @@ type RuntimeOptions struct{ Runtime string }
 func RegisterToolsForRuntime(s *Server, base string, h *http.Client, opts RuntimeOptions) {
 	RegisterTools(s, base, h)
 	if opts.Runtime != "codex" {
+		registerCommsTools(s, base, h, identitySession)
 		return
 	}
+	registerCommsTools(s, base, h, codexSession)
 	if h == nil {
 		h = http.DefaultClient
 	}
 	c := &apiClient{base: base, http: h}
-	s.instructions = "Stratus tracks this project's workflows, memory and wiki. Use the native Codex session ID from SessionStart when registering or binding a workflow. Follow the project Codex instructions and Superpowers. Change phases only with transition_phase; do not complete a workflow merely because a turn ends."
+	s.instructions = "Stratus tracks this project's workflows, memory and wiki. Use the native Codex session ID from SessionStart when registering or binding a workflow. Follow the project Codex instructions and Superpowers. Change phases only with transition_phase; do not complete a workflow merely because a turn ends.\n" + commsInstructions
 	for name, tool := range s.tools {
 		if tool.ReadOnly || !workflowMutation(name) {
 			continue

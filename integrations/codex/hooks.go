@@ -171,12 +171,26 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 		} else {
 			notice += "\nStratus API unavailable; workflow status is not verified."
 		}
+		if comms := commsSessionNotice(newComms(base), h.SessionID, cfg.ProjectRoot); comms != "" {
+			notice += "\n" + comms
+		}
 		if normalized, e := normalizeForProject(h, cfg.ProjectRoot); e == nil {
 			if e = post(normalized); e != nil {
 				fmt.Fprintln(stderr, "Stratus Codex telemetry:", e)
 			}
 		}
 		emit(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "SessionStart", "additionalContext": notice}})
+	case "inbox":
+		// Subagents share the parent's session id but must not consume the parent's inbox.
+		if h.SessionID == "" || h.AgentID != "" {
+			emit(map[string]any{})
+			return 0
+		}
+		if msgs := commsInbox(newComms(base), h.SessionID); msgs != "" {
+			emit(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "UserPromptSubmit", "additionalContext": msgs}})
+		} else {
+			emit(map[string]any{})
+		}
 	case "activity":
 		normalized, e := normalizeForProject(h, cfg.ProjectRoot)
 		if e == nil {
@@ -191,9 +205,22 @@ func Run(kind string, input io.Reader, stdout, stderr io.Writer, client *http.Cl
 		if h.Name == "SubagentStart" && h.AgentID != "" {
 			notice := fmt.Sprintf("Native parent Codex session ID: %s\nNative worker ID: %s\nNative turn ID: %s\nRead Workflow ID and Delivery role from your brief. If both are explicit, call bind_agent_role with workflow_id from the brief, session_id set to this exact parent ID, agent_id set to this exact worker ID, and delivery_role from the brief. Do not guess a missing role or identity. Reviewers must end with Verdict: PASS or Verdict: FAIL and label findings [must_fix], [should_fix], or [suggestion].", h.SessionID, h.AgentID, h.TurnID)
 			emit(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "SubagentStart", "additionalContext": notice}})
-		} else {
-			emit(map[string]any{})
+			return 0
 		}
+		if h.SessionID == "" || h.AgentID != "" {
+			emit(map[string]any{})
+			return 0
+		}
+		switch h.Name {
+		case "SessionEnd":
+			commsEnd(newComms(base), h.SessionID)
+		case "PostToolUse":
+			if msgs := commsInbox(newComms(base), h.SessionID); msgs != "" {
+				emit(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "PostToolUse", "additionalContext": msgs}})
+				return 0
+			}
+		}
+		emit(map[string]any{})
 	default:
 		fmt.Fprintln(stderr, "Stratus Codex: unsupported handler", kind)
 		return 1

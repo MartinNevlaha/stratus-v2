@@ -16,7 +16,41 @@ import (
 // the work stands. Fail-open: an unreachable API adds nothing and blocks nothing.
 func SessionStart(event HookEvent) Decision {
 	registerSession(event)
+	d := workflowContext(event)
+	if comms := commsContext(event); comms != "" {
+		if d.Context != "" {
+			d.Context += "\n\n"
+		}
+		d.Context += comms
+	}
+	return d
+}
 
+// commsContext registers the session as a comms peer and returns its identity, the other
+// active sessions and any message already waiting. "" when the API is unreachable.
+func commsContext(event HookEvent) string {
+	if event.SessionID == "" {
+		return ""
+	}
+	project := ""
+	if event.Cwd != "" {
+		project = filepath.Base(event.Cwd)
+	}
+	client := defaultCommsClient()
+	self, err := client.RegisterPeer(event.SessionID, "claude-code", project)
+	if err != nil || self.Handle == "" {
+		return ""
+	}
+	peers, _ := client.ActivePeers()
+	parts := []string{CommsIntro(self, peers, event.SessionID)}
+	if msgs, err := client.ClaimInbox(event.SessionID); err == nil && len(msgs) > 0 {
+		parts = append(parts, FormatInbox(msgs))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// workflowContext lists the active workflows and the MCP-disabled notice.
+func workflowContext(event HookEvent) Decision {
 	// Independent of the API: a disabled MCP server removes every mcp__stratus__* tool.
 	notice := mcpDisabledNotice(candidateProjectDirs(event))
 

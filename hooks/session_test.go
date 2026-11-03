@@ -122,9 +122,12 @@ func TestSessionStart_TellsActiveWorkflowsAndRegistersSession(t *testing.T) {
 			t.Errorf("context lists the inactive workflow %s: %q", gone, decision.Context)
 		}
 	}
-	want := `/api/sessions {"content_session_id":"s9","project":"shop"}`
-	if got := api.posted(); len(got) != 1 || got[0] != want {
-		t.Fatalf("posts = %v, want [%s]", got, want)
+	want := []string{
+		`/api/sessions {"content_session_id":"s9","project":"shop"}`,
+		`/api/peers {"project":"shop","runtime":"claude-code","session_key":"s9"}`,
+	}
+	if got := api.posted(); len(got) < len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("posts = %v, want them to start with %v", got, want)
 	}
 }
 

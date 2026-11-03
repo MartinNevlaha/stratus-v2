@@ -110,3 +110,24 @@ func TestCodexInstall_SymlinkRejects(t *testing.T) {
 		t.Fatal(entries)
 	}
 }
+
+func TestCodexHooksJSON_RegistersInboxHandlerForUserPromptSubmit(t *testing.T) {
+	var cfg struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command                string `json:"command"`
+				AdditionalContextLimit int    `json:"additionalContextLimit"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(codexHooksJSON(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	ups := cfg.Hooks["UserPromptSubmit"]
+	if len(ups) != 1 || len(ups[0].Hooks) != 1 || ups[0].Hooks[0].Command != "stratus codex-hook inbox" {
+		t.Fatalf("UserPromptSubmit hook: %+v", ups)
+	}
+	if cfg.Hooks["SessionStart"][0].Hooks[0].AdditionalContextLimit < 4000 {
+		t.Fatal("SessionStart additionalContextLimit too small for comms notice")
+	}
+}

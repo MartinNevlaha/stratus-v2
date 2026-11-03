@@ -541,3 +541,58 @@ export interface OnboardingResult {
 
 // Language
 export type Language = 'sk' | 'en'
+
+// Comms: cross-runtime agent messaging
+export type CommsRuntime = 'claude-code' | 'opencode' | 'codex'
+export type MessageKind = 'text' | 'done' | 'question' | 'task_assigned' | 'task_update' | 'task_done'
+export type SharedTaskStatus = 'open' | 'claimed' | 'done' | 'cancelled'
+
+export interface Peer {
+  session_key: string
+  runtime: CommsRuntime
+  handle: string
+  project: string
+  started_at: string
+  last_seen_at: string
+  ended_at?: string
+  active: boolean
+}
+
+export interface CommsMessage {
+  id: number
+  from_key: string
+  from_handle: string
+  from_runtime: string
+  to: string
+  kind: MessageKind
+  body: string
+  task_id?: number
+  created_at: string
+  recipients?: string[]
+}
+
+export interface SendMessageResult {
+  message: CommsMessage
+  recipients: number
+}
+
+export interface SharedTask {
+  id: number
+  title: string
+  description: string
+  status: SharedTaskStatus
+  created_by: string
+  created_by_handle: string
+  assignee?: string
+  assignee_handle?: string
+  result: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SharedTaskPatch {
+  actor: string
+  status?: SharedTaskStatus
+  result?: string
+  assignee?: string
+}

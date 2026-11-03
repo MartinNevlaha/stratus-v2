@@ -41,6 +41,11 @@ import type {
   VaultStatus,
   WikiConfig,
   OnboardingProgress,
+  Peer,
+  CommsMessage,
+  SendMessageResult,
+  SharedTask,
+  SharedTaskPatch,
 } from './types'
 
 const BASE = '/api'
@@ -342,3 +347,50 @@ export async function getOnboardingStatus(): Promise<OnboardingProgress> {
 export const getLanguage = () => get<{ language: string }>('/config/language')
 export const setLanguage = (lang: 'sk' | 'en') =>
   put<{ language: string }>('/config/language', { language: lang })
+
+// Comms (agent messaging + shared task board)
+export class CommsApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string,
+  ) {
+    super(message)
+    this.name = 'CommsApiError'
+  }
+}
+
+async function commsRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(BASE + path, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+  if (res.ok) return res.json()
+  const data: { error?: string; code?: string } = await res.json().catch(() => ({}))
+  throw new CommsApiError(data.error ?? `request failed (${res.status})`, res.status, data.code)
+}
+
+export const listPeers = async (): Promise<Peer[]> =>
+  (await commsRequest<{ peers: Peer[] }>('GET', '/peers')).peers
+
+export const renamePeer = (key: string, handle: string) =>
+  commsRequest<Peer>('PATCH', `/peers/${encodeURIComponent(key)}`, { handle })
+
+export const listCommsMessages = async (peer?: string, limit = 200): Promise<CommsMessage[]> => {
+  const q = new URLSearchParams({ limit: String(limit) })
+  if (peer) q.set('peer', peer)
+  return (await commsRequest<{ messages: CommsMessage[] }>('GET', `/messages?${q}`)).messages
+}
+
+export const sendCommsMessage = (to: string, kind: string, body: string) =>
+  commsRequest<SendMessageResult>('POST', '/messages', { from: 'user', to, kind, body })
+
+export const listSharedTasks = async (): Promise<SharedTask[]> =>
+  (await commsRequest<{ tasks: SharedTask[] }>('GET', '/shared-tasks')).tasks
+
+export const createSharedTask = (title: string, description: string, assignee?: string) =>
+  commsRequest<SharedTask>('POST', '/shared-tasks', { created_by: 'user', title, description, assignee: assignee || undefined })
+
+export const updateSharedTask = (id: number, patch: Omit<SharedTaskPatch, 'actor'>) =>
+  commsRequest<SharedTask>('PATCH', `/shared-tasks/${id}`, { actor: 'user', ...patch })

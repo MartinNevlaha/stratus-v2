@@ -707,4 +707,45 @@ CREATE TABLE IF NOT EXISTS workflow_logs (
 
 CREATE INDEX IF NOT EXISTS idx_workflow_logs_workflow ON workflow_logs(workflow_id, id);
 CREATE INDEX IF NOT EXISTS idx_workflow_logs_session ON workflow_logs(session_id, id);
+-- Comms: cross-runtime agent messaging (Claude Code, OpenCode, Codex)
+CREATE TABLE IF NOT EXISTS peers (
+    session_key  TEXT PRIMARY KEY,
+    runtime      TEXT NOT NULL,
+    handle       TEXT NOT NULL UNIQUE,
+    project      TEXT NOT NULL DEFAULT '',
+    started_at   TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    ended_at     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_key   TEXT NOT NULL,
+    to_spec    TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'text',
+    body       TEXT NOT NULL,
+    task_id    INTEGER,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS message_recipients (
+    message_id   INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    session_key  TEXT NOT NULL,
+    delivered_at TEXT,
+    PRIMARY KEY (message_id, session_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_recipients_inbox ON message_recipients(session_key, delivered_at);
+
+CREATE TABLE IF NOT EXISTS shared_tasks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'open',
+    created_by  TEXT NOT NULL,
+    assignee    TEXT,
+    result      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 `

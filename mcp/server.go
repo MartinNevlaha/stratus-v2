@@ -23,7 +23,8 @@ const instructions = `Stratus tracks this project's spec/bug/e2e workflows, memo
 - Register a workflow with register_workflow before delegating to any delivery-* agent, and pass its workflow_id with every delegation.
 - Move between phases only with transition_phase; the server rejects transitions the workflow's state machine does not allow.
 - Before planning, implementing or reviewing, use retrieve for code, governance and wiki context; search, timeline and get_observations recall past decisions.
-- swarm_* tools are for swarm workers following the worker_instructions they were given.`
+- swarm_* tools are for swarm workers following the worker_instructions they were given.
+` + commsInstructions
 
 // Server handles MCP JSON-RPC communication over stdio.
 type Server struct {

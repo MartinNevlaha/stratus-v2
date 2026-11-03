@@ -17,7 +17,7 @@ var codexAssetsFS embed.FS
 
 func codexHooksJSON() []byte {
 	events := map[string]any{}
-	for _, event := range []string{"SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "PermissionRequest", "Stop", "Interrupt", "SessionEnd"} {
+	for _, event := range []string{"SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "PermissionRequest", "Stop", "Interrupt", "SessionEnd", "UserPromptSubmit"} {
 		handler := "activity"
 		if event == "SessionStart" {
 			handler = "context"
@@ -25,9 +25,12 @@ func codexHooksJSON() []byte {
 		if event == "PreToolUse" {
 			handler = "guard"
 		}
+		if event == "UserPromptSubmit" {
+			handler = "inbox"
+		}
 		h := map[string]any{"type": "command", "command": "stratus codex-hook " + handler, "timeout": 3}
 		if handler == "context" {
-			h["additionalContextLimit"] = 2500
+			h["additionalContextLimit"] = 4000
 		}
 		events[event] = []any{map[string]any{"hooks": []any{h}}}
 	}
