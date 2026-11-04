@@ -156,7 +156,7 @@ func TestReview_DispatchDoesNotUseDashboardLimit(t *testing.T) {
 	}
 }
 
-func TestReview_RegistrationSchemaRequiresNativeIdentity(t *testing.T) {
+func TestReview_UnjoinedRegistrationRequiresNativeIdentity(t *testing.T) {
 	s := runtimeServer(t, func(w http.ResponseWriter, r *http.Request) { t.Fatal("unexpected HTTP request") })
 	b, err := json.Marshal(s.tools["register_workflow"].InputSchema)
 	if err != nil {
@@ -170,8 +170,11 @@ func TestReview_RegistrationSchemaRequiresNativeIdentity(t *testing.T) {
 	for _, name := range schema.Required {
 		required = required || name == "session_id"
 	}
-	if !required || strings.Contains(string(b), "CLAUDE_SESSION_ID") || strings.Contains(string(b), "Claude") {
+	if required || strings.Contains(string(b), "CLAUDE_SESSION_ID") || strings.Contains(string(b), "Claude") {
 		t.Fatalf("Codex registration advertises the wrong contract: %s", b)
+	}
+	if _, err := s.tools["register_workflow"].Handler(map[string]any{"id": "spec-no-identity", "type": "spec", "title": "No identity"}); err == nil {
+		t.Fatal("unjoined workflow registration accepted without native identity")
 	}
 }
 

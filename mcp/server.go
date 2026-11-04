@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +33,7 @@ type Server struct {
 	tools        map[string]Tool
 	reader       *bufio.Reader
 	writer       io.Writer
+	attachments  *attachmentManager
 }
 
 // Tool represents a callable MCP tool.
@@ -40,8 +42,9 @@ type Tool struct {
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
 	// ReadOnly marks a tool that only reads Stratus state (annotated readOnlyHint).
-	ReadOnly bool
-	Handler  func(args map[string]any) (any, error)
+	ReadOnly       bool
+	Handler        func(args map[string]any) (any, error)
+	ContextHandler func(context.Context, InvocationContext, map[string]any) (any, error)
 }
 
 // New creates a new MCP server reading from stdin and writing to stdout.
@@ -60,6 +63,7 @@ func (s *Server) Register(t Tool) {
 
 // Serve runs the MCP request/response loop until EOF.
 func (s *Server) Serve() error {
+	defer s.Close()
 	for {
 		line, err := s.reader.ReadString('\n')
 		if err == io.EOF {
@@ -156,8 +160,9 @@ func (s *Server) handle(req jsonRPCRequest) {
 
 	case "tools/call":
 		var params struct {
-			Name      string         `json:"name"`
-			Arguments map[string]any `json:"arguments"`
+			Name      string          `json:"name"`
+			Arguments map[string]any  `json:"arguments"`
+			Meta      json.RawMessage `json:"_meta"`
 		}
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			s.sendError(req.ID, -32602, "invalid params")
@@ -168,7 +173,15 @@ func (s *Server) handle(req jsonRPCRequest) {
 			s.sendError(req.ID, -32601, fmt.Sprintf("tool %q not found", params.Name))
 			return
 		}
-		result, err := tool.Handler(params.Arguments)
+		invocation, err := parseInvocationContext(params.Meta)
+		var result any
+		if err == nil {
+			if tool.ContextHandler != nil {
+				result, err = tool.ContextHandler(context.Background(), invocation, params.Arguments)
+			} else {
+				result, err = tool.Handler(params.Arguments)
+			}
+		}
 		if err != nil {
 			s.send(req.ID, map[string]any{
 				"content": []map[string]any{{"type": "text", "text": "error: " + err.Error()}},

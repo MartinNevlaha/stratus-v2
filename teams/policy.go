@@ -9,6 +9,8 @@ import (
 func CanonicalRole(role string) string {
 	r := strings.ToLower(strings.TrimSpace(role))
 	switch {
+	case r == "member":
+		return "member"
 	case r == "" || r == "lead" || r == "coordinator":
 		return "lead"
 	case strings.Contains(r, "review") || strings.Contains(r, "governance"):

@@ -13,11 +13,18 @@ import (
 type RuntimeOptions struct{ Runtime string }
 
 func RegisterToolsForRuntime(s *Server, base string, h *http.Client, opts RuntimeOptions) {
+	registerToolsForRuntime(s, base, h, opts, true)
+}
+
+func registerToolsForRuntime(s *Server, base string, h *http.Client, opts RuntimeOptions, attach bool) {
 	RegisterTools(s, base, h)
 	if h == nil {
 		h = http.DefaultClient
 	}
 	defer configureManagedTools(s, &apiClient{base: base, http: h})
+	if attach && opts.Runtime == "codex" {
+		defer configureAttachmentTools(s, base, h, opts)
+	}
 	if opts.Runtime != "codex" {
 		registerCommsTools(s, base, h, identitySession)
 		return

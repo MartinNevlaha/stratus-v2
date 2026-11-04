@@ -32,6 +32,47 @@ sa automaticky neopakuje: najprv skontroluj výsledok, pri členovi zvoľ **Obno
 zadaj nový pokyn. Ak je celý tím pozastavený, použi aj **Pokračovať**.
 Natívne požiadavky na oprávnenia sa zobrazia pri členovi na tvoje rozhodnutie.
 
+## Pripojenie existujúceho Codex chatu
+
+V pôvodnom Codex desktop chate povedz **„Pripoj tento chat k tímu Stratus.“**
+Ak projekt ešte nemá tím, vytvorí sa s týmto chatom ako vedúcim. Ak už tím
+existuje, chat sa pridá ako člen. Pri viacerých tímoch si vyberieš konkrétny.
+Vedúceho možno zmeniť v dashboarde cez **Viesť tím z tohto chatu**, keď tomu
+nebráni rozpracovaná práca alebo vlastníctvo workflow.
+
+Ďalej zadávaš prácu v tom istom chate. Člen, ktorý nie je vedúcim, odovzdá
+tímové zadanie vedúcemu a konečný výsledok dostane späť. Keď vedúci čaká na
+pracovníkov, priebežný stav čakania zadávateľa neprebúdza. Nadväznosť sa zachová
+aj pri viacerých pracovníkoch a ďalšom delegovaní. Pripojený chat si zachová
+históriu, model aj úroveň uvažovania. Ak host model neoznámi, dashboard ho
+označí ako neznámy; vhodný profil pre delegovanú prácu zabezpečia pracovníci.
+
+Pripojenie vyžaduje túto verziu Stratusu, projektové MCP a pôvodný konektor
+aplikácie Codex. Po aktualizácii binárky obnov projektové nastavenie pomocou
+`stratus refresh --target codex` a nechaj Codex znovu načítať MCP nastavenie.
+Ak Codex ešte nie je v projekte nastavený, použi `stratus init --target codex`.
+Projekt musí byť dôveryhodný a jeho Stratus MCP povolené. Pripojenie overí
+skutočnú identitu chatu a cestu projektu; chýbajúce údaje oznámi ako chybu.
+Ručne zadané ID chatu ich nenahrádza. Samotný Codex CLI bez desktop konektora
+tento spôsob pripojenia neposkytuje.
+
+Správa kolegu môže pri súbehu prísť do práve začatej používateľskej odpovede.
+Agent potvrdí konkrétnu úlohu a odovzdá jej výsledok; samotné skončenie
+odpovede sa za splnenie úlohy nepovažuje. Oprávnenia naďalej schvaľuješ
+v pôvodnej aplikácii. Čakanie na tvoje rozhodnutie automatika nenahrádza.
+
+**Odpojiť od tímu** alebo „odpoj tento chat od tímu“ zastaví ďalšie tímové
+vstupy a ponechá pôvodný chat otvorený. Pri výpadku alebo reštarte povedz
+v pôvodnom chate znovu „pripoj tento chat k tímu“. Nejasne doručené zadanie
+sa automaticky neopakuje; najprv skontroluj jeho výsledok. Ak je tím
+pozastavený, následne použi **Pokračovať**. Bežná ručná práca v chate môže
+pokračovať aj pri pozastavenom alebo odpojenom tíme.
+
+Pripojenie už existujúcich chatov Claude Code a OpenCode zatiaľ nie je
+dostupné: pri Claude zostáva obmedzenie životnosti čakajúceho spojenia,
+pri OpenCode test fronty nepotvrdil vykonanie a výsledok druhého vstupu.
+Nové relácie oboch nástrojov spúšťané Stratusom fungujú samostatne.
+
 ## Spotreba
 
 Stratus nevolá ďalší model na smerovanie správ ani na čakanie. Prázdna fronta,
@@ -39,9 +80,10 @@ prítomnosť kolegu a jednoduché potvrdenia nespúšťajú model. Súvisiace pr
 správy sa zlúčia do jedného prebudenia; odovzdávajú sa stručné výsledky a odkazy
 na uložené podklady. Plné zadanie ostáva dostupné cez `team_status(task_id)`.
 
-Platí limit súbehu, počet spustení a automatických kôl bez pokroku. Ak nástroj
+Platí limit súbehu, počet tímových vstupov a automatických kôl bez pokroku. Ak nástroj
 vracia spotrebu, zobrazuje sa aj počet tokenov a možno nastaviť jeho limit.
-Pri neznámej spotrebe platí počet spustení; údaj **neznáma** neznamená nulu.
+Pri neznámej spotrebe platí počet tímových vstupov; údaj **neznáma** neznamená nulu.
+Ručné vstupy do pripojeného chatu sa do tímového limitu nezapočítavajú.
 Kontrola limitu pred novým spustením nemôže zastaviť tokeny už rozbehnutého
 natívneho výpočtu presne na hranici. Cenu služby ani presné percento úspory
 Stratus neodhaduje z neúplných dát. Natívne nástroje stále načítavajú vlastné
@@ -49,7 +91,8 @@ projektové pokyny a históriu.
 
 ## Rozsah a overenie
 
-Tím vlastní nové natívne relácie. Nepreberá ľubovoľné existujúce okná aplikácií.
+Tím vlastní nové natívne relácie. Existujúci Codex desktop chat sa pripája
+osobitne a jeho aplikáciu ani používateľský výpočet tím nevlastní.
 Projektová identita vychádza z kanonickej cesty; overené Git worktrees patria
 k rovnakému projektu, nezávislé klony ani rovnaké názvy priečinkov nie.
 Aktuálna binárka Stratus sa členom odovzdá ako dočasné nastavenie MCP, aby
@@ -62,3 +105,10 @@ obnova fronty, opakované požiadavky a súbeh sú overené protokolovými a
 integračnými testami. Živé testy používali len šesť krátkych vstupov v nových
 prázdnych projektoch; existujúce relácie neboli použité. Tieto testy nedokazujú
 percentuálnu úsporu na reálnych vývojových úlohách.
+
+Pripojenie Codex desktop chatu má samostatný živý test: po skončení pôvodnej
+odpovede jedna povolená automatická správa prebudila ten istý chat, ktorý
+správne vybavil značku z predchádzajúceho kontextu. Tento test overuje natívne
+doručenie; celé prepojenie API, MCP, potvrdení a výsledkov overujú integračné
+testy. Podrobnosti a hranice podpory sú v
+[zázname overenia pripojení](../testing/existing-chat-attachments.md).

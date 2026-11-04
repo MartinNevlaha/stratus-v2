@@ -46,7 +46,7 @@ func registerTeamTools(s *Server, apiBase string, client *http.Client, mapSessio
 			endpoint = "/api/team-message"
 			desc = "Send a relevant question or answer to a teammate by member ID. Delivery wakes an idle teammate. Do not send acknowledgements or periodic status chatter; never poll for a response."
 		}
-		s.Register(Tool{Name: name, Description: desc, InputSchema: obj(opt("session_id", "string", "Your native session ID; optional when managed"), req("text", "string", "Concise goal/question, scope, decisions, files, acceptance criteria and evidence references"), opt("role", "string", "lead, implementation, design, review, diagnosis, mechanical, or delivery role"), opt("to", "string", "Member ID; omit for role-based routing"), opt("workflow_id", "string", "Existing workflow owned by your team lead"), opt("revision", "string", "Current code revision for implementation/review evidence"), opt("request_id", "string", "Stable request identifier; reuse only for an identical retry")), Handler: func(args map[string]any) (any, error) {
+		s.Register(Tool{Name: name, Description: desc, InputSchema: obj(opt("session_id", "string", "Your native session ID; optional when managed"), req("text", "string", "Concise goal/question, scope, decisions, files, acceptance criteria and evidence references"), opt("role", "string", "lead, implementation, design, review, diagnosis, mechanical, or delivery role"), opt("to", "string", "Member ID; omit for role-based routing"), opt("workflow_id", "string", "Existing workflow owned by your team lead"), opt("revision", "string", "Current code revision for implementation/review evidence"), opt("request_id", "string", "Stable request identifier; reuse only for an identical retry"), opt("parent_task_id", "string", "For an attached chat, the explicitly acknowledged team task authorizing this delegation; omit for the current human request")), Handler: func(args map[string]any) (any, error) {
 			key, err := identity(args)
 			if err != nil {
 				return nil, err
@@ -55,6 +55,11 @@ func registerTeamTools(s *Server, apiBase string, client *http.Client, mapSessio
 			for _, k := range []string{"text", "role", "to", "workflow_id", "revision"} {
 				if v, ok := args[k].(string); ok {
 					body[k] = v
+				}
+			}
+			if _, attached := client.Transport.(attachmentTransport); attached {
+				if parent, ok := args["parent_task_id"].(string); ok && parent != "" {
+					body["parent_task_id"] = parent
 				}
 			}
 			if v, ok := args["request_id"].(string); ok {

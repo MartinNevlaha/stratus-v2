@@ -60,3 +60,13 @@ func TestManagedWorkflowToolsUseNativeIdentityWithoutModelGuessing(t *testing.T)
 		t.Fatalf("native ID = %s", native)
 	}
 }
+
+func TestUnattachedTeamToolsDoNotForwardAttachmentTaskAuthority(t *testing.T) {
+	t.Setenv("STRATUS_TEAM_TOKEN", "")
+	var calls []recordedCall
+	s := commsServer(t, "codex", `{}`, &calls)
+	callTool(t, s, "team_delegate", map[string]any{"session_id": "native-id", "role": "review", "text": "Review", "parent_task_id": "not-an-attachment"})
+	if _, exists := calls[0].Body["parent_task_id"]; exists {
+		t.Fatal("unattached caller supplied attachment task authority")
+	}
+}

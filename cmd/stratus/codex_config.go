@@ -42,6 +42,13 @@ func containsCodexHook(v any) bool {
 	return false
 }
 func mergeCodexTOML(src []byte) ([]byte, error) {
+	configured, err := mergeCodexRuntimeTOML(src)
+	if err != nil {
+		return nil, err
+	}
+	return mergeCodexAttachmentEnvironment(configured)
+}
+func mergeCodexRuntimeTOML(src []byte) ([]byte, error) {
 	root := map[string]any{}
 	if e := toml.Unmarshal(src, &root); e != nil {
 		return nil, fmt.Errorf(".codex/config.toml: %w", e)

@@ -1,4 +1,4 @@
-// Package teams manages durable, event-driven work in owned native AI sessions.
+// Package teams manages durable, event-driven work in owned and attached native AI sessions.
 package teams
 
 import (
@@ -88,6 +88,7 @@ type CreateRequest struct {
 	Limits      Limits         `json:"limits"`
 }
 type TaskRequest struct {
+	attachedRequest    bool
 	WorkflowPhase      string   `json:"workflow_phase,omitempty"`
 	WorkflowGeneration int64    `json:"workflow_generation,omitempty"`
 	WorkflowTaskIndex  *int     `json:"workflow_task_index,omitempty"`
@@ -107,27 +108,31 @@ type TaskRequest struct {
 	ReturnTo           string   `json:"return_to,omitempty"`
 }
 type Member struct {
-	ComplexProfile     *Profile `json:"complex_profile,omitempty"`
-	Token              string   `json:"token,omitempty"`
-	ID                 string   `json:"id"`
-	Role               string   `json:"role"`
-	Profile            Profile  `json:"profile"`
-	NativeID           string   `json:"native_id,omitempty"`
-	State              string   `json:"state"`
-	ObservedModel      string   `json:"observed_model,omitempty"`
-	ObservedEffort     string   `json:"observed_effort,omitempty"`
-	Error              string   `json:"error,omitempty"`
-	Approval           *Event   `json:"approval,omitempty"`
-	PendingApprovals   []Event  `json:"pending_approvals,omitempty"`
-	ApprovalResponseID string   `json:"approval_response_id,omitempty"`
-	ActiveTaskID       string   `json:"active_task_id,omitempty"`
-	WorkflowID         string   `json:"workflow_id,omitempty"`
-	Revision           string   `json:"revision,omitempty"`
-	Configured         bool     `json:"configured"`
-	ProfileExplicit    bool     `json:"profile_explicit"`
-	LastOutput         string   `json:"last_output,omitempty"`
+	Attachment         *AttachmentBinding `json:"attachment,omitempty"`
+	NativeTurn         *NativeTurn        `json:"native_turn,omitempty"`
+	ComplexProfile     *Profile           `json:"complex_profile,omitempty"`
+	Token              string             `json:"token,omitempty"`
+	ID                 string             `json:"id"`
+	Role               string             `json:"role"`
+	Profile            Profile            `json:"profile"`
+	NativeID           string             `json:"native_id,omitempty"`
+	State              string             `json:"state"`
+	ObservedModel      string             `json:"observed_model,omitempty"`
+	ObservedEffort     string             `json:"observed_effort,omitempty"`
+	Error              string             `json:"error,omitempty"`
+	Approval           *Event             `json:"approval,omitempty"`
+	PendingApprovals   []Event            `json:"pending_approvals,omitempty"`
+	ApprovalResponseID string             `json:"approval_response_id,omitempty"`
+	ActiveTaskID       string             `json:"active_task_id,omitempty"`
+	WorkflowID         string             `json:"workflow_id,omitempty"`
+	Revision           string             `json:"revision,omitempty"`
+	Configured         bool               `json:"configured"`
+	ProfileExplicit    bool               `json:"profile_explicit"`
+	LastOutput         string             `json:"last_output,omitempty"`
 }
 type Task struct {
+	Origin             string     `json:"origin,omitempty"`
+	NativeTurnID       string     `json:"native_turn_id,omitempty"`
 	BatchedInto        string     `json:"batched_into,omitempty"`
 	WorkflowPhase      string     `json:"workflow_phase,omitempty"`
 	WorkflowGeneration int64      `json:"workflow_generation,omitempty"`
@@ -149,6 +154,7 @@ type Task struct {
 	Kind               string     `json:"kind"`
 	ParentTaskID       string     `json:"parent_task_id,omitempty"`
 	ReturnTo           string     `json:"return_to,omitempty"`
+	RequestTaskID      string     `json:"request_task_id,omitempty"`
 	AutoRound          int        `json:"auto_round"`
 	InputTokens        *int64     `json:"input_tokens,omitempty"`
 	OutputTokens       *int64     `json:"output_tokens,omitempty"`

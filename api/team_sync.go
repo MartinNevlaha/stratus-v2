@@ -27,7 +27,7 @@ func (s *Server) syncManagedTeamState() error {
 					return e
 				}
 			}
-			if team.State == "stopped" {
+			if team.State == "stopped" && member.Attachment == nil {
 				if err := s.db.EndPeer(key); err != nil {
 					return err
 				}

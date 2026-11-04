@@ -14,8 +14,9 @@
  let pendingRequest:{id:string;text:string;to:string}|null=null
  const roles:Record<string,string>={lead:'Vedenie postupu',implementation:'Implementácia',design:'Návrh a plán',review:'Nezávislá kontrola',diagnosis:'Diagnostika',mechanical:'Jednoduché úpravy'}
  const runtimes:Record<string,string>={codex:'Codex','claude-code':'Claude Code',opencode:'OpenCode'}
- const states:Record<string,string>={running:'Pracuje',working:'Pracuje',active:'Aktívny',ready:'Pripravený',idle:'Pripravený',queued:'Vo fronte',waiting:'Čaká na kolegu',waiting_colleague:'Čaká na kolegu',needs_user:'Potrebuje teba',paused:'Pozastavený',stopped:'Zastavený',done:'Hotovo',completed:'Hotovo',complete:'Hotovo',error:'Chyba',failed:'Chyba',cancelled:'Zrušené',stale:'Zmenený podklad'}
+ const states:Record<string,string>={running:'Pracuje',working:'Pracuje',active:'Aktívny',ready:'Pripravený',idle:'Pripravený',queued:'Vo fronte',waiting:'Čaká na kolegu',waiting_colleague:'Čaká na kolegu',needs_user:'Potrebuje teba',paused:'Pozastavený',stopped:'Zastavený',done:'Hotovo',completed:'Hotovo',complete:'Hotovo',error:'Chyba',failed:'Chyba',cancelled:'Zrušené',stale:'Zmenený podklad',connected:'Pripojený',disconnected:'Spojenie prerušené',detached:'Odpojený',expired:'Spojenie vypršalo',unknown:'Spojenie sa overuje'}
  let team=$derived(teams.find(t=>t.id===selected)??null)
+ let visibleTasks=$derived(team?.tasks.filter(task=>task.origin!=='external')??[])
  const status=(value:string)=>states[value]??value
  function chooseRuntime(index:number,runtime:string) {
   const role=choices[index].role,profile=preflight?.profiles[runtime]?.[role]
@@ -42,6 +43,7 @@
  async function action(value:string) {if(team)await perform(async()=>{await teamRequest(`teams/${team!.id}/actions`,{action:value})})}
  async function send() {if(!team||!text.trim())return;const value=text;if(!pendingRequest||pendingRequest.text!==value||pendingRequest.to!==recipient)pendingRequest={id:crypto.randomUUID(),text:value,to:recipient};const id=pendingRequest.id;await perform(async()=>{await teamRequest(`teams/${team!.id}/tasks`,{id,text:value,to:recipient||undefined});text='';pendingRequest=null})}
  async function recover(member:string) {if(team)await perform(async()=>{await teamRequest(`teams/${team!.id}/recover`,{member_id:member})})}
+ async function attachmentAction(member:string,action:'detach'|'lead') {if(team)await perform(async()=>{await teamRequest(`teams/${team!.id}/attachments`,{member_id:member,action})})}
  async function approval(member:string,id:string,allow:boolean) {if(team)await perform(async()=>{await teamRequest(`teams/${team!.id}/approvals`,{member_id:member,approval_id:id,allow})})}
  onMount(()=>{
   refresh().finally(()=>{loading=false;if(!teams.length){showSetup=true;readiness()}})
@@ -52,6 +54,7 @@
 
 <div class="team-page">
  <div class="page-heading"><div><h1>Tím</h1><p>Jedno zadanie. Agenti si rozdelia prácu a výsledky doručia automaticky.</p></div><button onclick={()=>{showSetup=!showSetup;if(showSetup&&!preflight)readiness()}}>{showSetup?'Zavrieť nastavenie':'Nový tím'}</button></div>
+ <section class="setup"><h2>Pripojiť existujúci chat</h2><p>V Codexe povedz: <strong>„Pripoj tento chat k tímu Stratus.“</strong> Zadania aj výsledky potom môžeš riešiť v tom istom chate. Ak tím ešte nemáš, vytvorí sa s týmto chatom ako vedúcim.</p><p class="muted">Chat potrebuje aktuálne pripojenie Stratus a prístup ku konektoru aplikácie Codex. Pripojenie už otvorených chatov Claude a OpenCode sa ešte overuje; ich spúšťanie cez tím je dostupné.</p></section>
  {#if error}<div class="error" role="alert">{error}</div>{/if}
  {#if loading}<p>Načítavam tím…</p>{/if}
  {#if showSetup}
@@ -65,19 +68,44 @@
    <div class="table-scroll"><table><thead><tr><th>Rola</th><th>Nástroj</th><th>Model</th><th>Uvažovanie</th><th>Zložitá úloha / spec-complex</th></tr></thead><tbody>
     {#each choices as row,i}<tr><td>{roles[row.role]}</td><td><select aria-label={`Nástroj: ${roles[row.role]}`} value={row.runtime} onchange={e=>chooseRuntime(i,e.currentTarget.value)}>{#each preflight.runtimes as rt}<option value={rt.runtime} disabled={!rt.available}>{runtimes[rt.runtime]}</option>{/each}</select></td><td><input aria-label={`Model: ${roles[row.role]}`} bind:value={row.model} list={`models-${i}`} /><datalist id={`models-${i}`}>{#each preflight.runtimes.find(rt=>rt.runtime===row.runtime)?.models??[] as model}<option value={model.id}></option>{/each}</datalist></td><td><input aria-label={`Uvažovanie: ${roles[row.role]}`} bind:value={row.effort} /></td><td><input aria-label={`Zložitá úloha: ${roles[row.role]}`} bind:value={row.complexEffort}/></td></tr>{/each}
    </tbody></table></div>
-   <div class="limits"><label>Súbežní agenti<input type="number" min="1" max="8" bind:value={limits.max_concurrent}/></label><label>Automatické kolá<input type="number" min="1" max="20" bind:value={limits.max_auto_rounds}/></label><label>Najviac spustení<input type="number" min="1" max="1000" bind:value={limits.max_turns}/></label><label>Limit známych tokenov (0 = bez limitu)<input type="number" min="0" step="1000" bind:value={limits.max_tokens}/></label></div>
-   <p class="muted">Čakanie nevolá model. Keď nástroj neoznamuje spotrebu tokenov, platí limit spustení. Súčasné fázy a povinné kontroly workflow zostávajú zachované.</p>
+   <div class="limits"><label>Súbežní agenti<input type="number" min="1" max="8" bind:value={limits.max_concurrent}/></label><label>Automatické kolá<input type="number" min="1" max="20" bind:value={limits.max_auto_rounds}/></label><label>Najviac tímových vstupov<input type="number" min="1" max="1000" bind:value={limits.max_turns}/></label><label>Limit známych tokenov (0 = bez limitu)<input type="number" min="0" step="1000" bind:value={limits.max_tokens}/></label></div>
+   <p class="muted">Čakanie nevolá model. Keď nástroj neoznamuje spotrebu tokenov, platí limit tímových vstupov. Súčasné fázy a povinné kontroly workflow zostávajú zachované.</p>
    <button class="primary" onclick={start} disabled={busy||!preflight.runtimes.some(rt=>rt.available)}>Spustiť tím</button>
   {/if}
  </section>
  {/if}
  {#if teams.length}<div class="team-picker"><label>Tím <select bind:value={selected}>{#each teams as item}<option value={item.id}>{item.id.slice(0,8)} · {status(item.state)}</option>{/each}</select></label></div>{/if}
  {#if team}
- <div class="team-toolbar"><strong>{team.state==='running'?'Aktívny':status(team.state)}</strong><span>{team.turns} / {team.limits.max_turns} spustení · {usageLabel(team.usage_known,team.input_tokens,team.output_tokens)}</span><div class="actions"><button onclick={()=>action('pause')} disabled={busy||team.state==='paused'||team.state==='stopped'}>Pozastaviť</button><button onclick={()=>action('resume')} disabled={busy||team.state==='stopped'}>Pokračovať</button><button class="danger" onclick={()=>action('stop')} disabled={busy||team.state==='stopped'}>Zastaviť</button></div></div>
+ <div class="team-toolbar"><strong>{team.state==='running'?'Aktívny':status(team.state)}</strong><span>{team.turns} / {team.limits.max_turns} tímových vstupov · {usageLabel(team.usage_known,team.input_tokens,team.output_tokens)}</span><div class="actions"><button onclick={()=>action('pause')} disabled={busy||team.state==='paused'||team.state==='stopped'}>Pozastaviť</button><button onclick={()=>action('resume')} disabled={busy||team.state==='stopped'}>Pokračovať</button><button class="danger" onclick={()=>action('stop')} disabled={busy||team.state==='stopped'}>Zastaviť</button></div></div>
  {#if team.reason}<p class="warning">{team.reason}</p>{/if}
- <div class="members">{#each team.members as member}<article class="member"><div class="section-heading"><h3>{roles[member.role]??member.role}</h3><span class="state" class:attention={member.state==='needs_user'||member.state==='error'}>{status(member.state)}</span></div><p>{runtimes[member.profile.runtime]??member.profile.runtime} · {member.profile.model} / {member.profile.effort}</p><small>Potvrdený model: {member.observed_model||'zatiaľ neoznámený'}{member.observed_effort?` / ${member.observed_effort}`:''}</small>{#if member.error}<p class="error">{member.error}</p>{/if}{#if member.state==='needs_user'&&(!member.approval||!!member.approval_response_id)}<p class="muted">Skontroluj predchádzajúci výsledok. Obnovenie dovolí nové zadanie; neistá úloha sa nezopakuje.</p><button disabled={busy} onclick={()=>recover(member.id)}>Obnoviť po kontrole</button>{/if}{#if member.approval}<div class="approval"><strong>Nástroj potrebuje tvoje rozhodnutie</strong><pre>{member.approval.text}</pre><button disabled={busy||!!member.approval_response_id} onclick={()=>approval(member.id,member.approval!.id,true)}>Povoliť raz</button><button disabled={busy||!!member.approval_response_id} onclick={()=>approval(member.id,member.approval!.id,false)}>Zamietnuť</button></div>{/if}{#if member.last_output}<details><summary>Posledný výstup</summary><pre>{member.last_output}</pre></details>{/if}</article>{/each}</div>
+ <div class="members">
+  {#each team.members as member}
+   <article class="member">
+    <div class="section-heading"><h3>{member.role==='member'?'Člen tímu':roles[member.role]??member.role}</h3><span class="state" class:attention={member.state==='needs_user'||member.state==='error'}>{status(member.state)}</span></div>
+    <small>{member.attachment?'Pripojený pôvodný chat':'Relácia spúšťaná Stratusom'}</small>
+    <p>{runtimes[member.profile.runtime]??member.profile.runtime} · {member.profile.model||'Model určuje pôvodný chat'}{member.profile.effort?` / ${member.profile.effort}`:''}</p>
+    <small>Potvrdený model: {member.observed_model||'nástroj ho neoznámil'}{member.observed_effort?` / ${member.observed_effort}`:''}</small>
+    {#if member.attachment}
+     <p>Pripojenie: {status(member.attachment.state)}</p>
+     {#if member.attachment.state==='connected'&&team.state!=='stopped'}
+      {#if member.state==='needs_user'}<p class="muted">Ak chat čaká na tvoje rozhodnutie, odpovedz v pôvodnej aplikácii. Pri neistom doručení skontroluj výsledok a potom sa znovu pripoj v pôvodnom chate. Úloha sa automaticky nezopakuje.</p>{/if}
+      <div class="actions">
+       {#if member.role!=='lead'}<button disabled={busy} onclick={()=>attachmentAction(member.id,'lead')}>Viesť tím z tohto chatu</button>{/if}
+       <button disabled={busy} onclick={()=>attachmentAction(member.id,'detach')}>Odpojiť od tímu</button>
+      </div>
+     {:else}
+      <p class="muted">Na obnovenie povedz v pôvodnom chate „Pripoj tento chat k tímu Stratus“. Nejasne doručená úloha sa automaticky nezopakuje.</p>
+     {/if}
+    {/if}
+    {#if member.error}<p class="error">{member.error}</p>{/if}
+    {#if !member.attachment&&member.state==='needs_user'&&(!member.approval||!!member.approval_response_id)}<p class="muted">Skontroluj predchádzajúci výsledok. Obnovenie dovolí nové zadanie; neistá úloha sa nezopakuje.</p><button disabled={busy} onclick={()=>recover(member.id)}>Obnoviť po kontrole</button>{/if}
+    {#if member.approval}<div class="approval"><strong>Nástroj potrebuje tvoje rozhodnutie</strong><pre>{member.approval.text}</pre><button disabled={busy||!!member.approval_response_id} onclick={()=>approval(member.id,member.approval!.id,true)}>Povoliť raz</button><button disabled={busy||!!member.approval_response_id} onclick={()=>approval(member.id,member.approval!.id,false)}>Zamietnuť</button></div>{/if}
+    {#if member.last_output}<details><summary>Posledný výstup</summary><pre>{member.last_output}</pre></details>{/if}
+   </article>
+  {/each}
+ </div>
  <form class="compose" onsubmit={e=>{e.preventDefault();send()}}><label for="team-input">Zadanie alebo doplnenie</label><textarea id="team-input" bind:value={text} placeholder="Napríklad: Priprav návrh funkcie, implementuj ju a nechaj nezávisle skontrolovať." rows="3" disabled={team.state==='stopped'}></textarea><div class="compose-actions"><select aria-label="Príjemca zadania" bind:value={recipient}><option value="">Vedúci tímu</option>{#each team.members as member}<option value={member.id}>{roles[member.role]??member.role} · {runtimes[member.profile.runtime]}</option>{/each}</select><button class="primary" type="submit" disabled={busy||!text.trim()||team.state==='stopped'}>Odoslať</button></div></form>
- <section class="task-list"><h2>Práca a odovzdané výsledky</h2>{#if !team.tasks.length}<p class="muted">Tím čaká na tvoje zadanie. Čakanie nespotrebúva modelové tokeny.</p>{/if}{#each [...team.tasks].reverse() as task}<article><div class="section-heading"><strong>{roles[task.role]??task.role} · {status(task.state)}</strong><small>{new Date(task.created_at).toLocaleString('sk')}</small></div><pre>{task.text}</pre>{#if task.workflow_id}<small>Workflow: {task.workflow_id}</small>{/if}{#if task.result}<details open={task.from==='user'}><summary>Výsledok</summary><pre>{task.result}</pre></details>{/if}{#if task.error}<p class="error">{task.error}</p>{/if}</article>{/each}</section>
+ <section class="task-list"><h2>Práca a odovzdané výsledky</h2>{#if !visibleTasks.length}<p class="muted">Tím čaká na tvoje zadanie. Čakanie nespotrebúva modelové tokeny.</p>{/if}{#each [...visibleTasks].reverse() as task}<article><div class="section-heading"><strong>{roles[task.role]??task.role} · {status(task.state)}</strong><small>{new Date(task.created_at).toLocaleString('sk')}</small></div><pre>{task.text}</pre>{#if task.workflow_id}<small>Workflow: {task.workflow_id}</small>{/if}{#if task.result}<details open={task.from==='user'}><summary>Výsledok</summary><pre>{task.result}</pre></details>{/if}{#if task.error}<p class="error">{task.error}</p>{/if}</article>{/each}</section>
  {/if}
 </div>
 <style>

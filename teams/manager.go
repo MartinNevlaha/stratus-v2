@@ -23,11 +23,13 @@ type record struct {
 	version int64
 }
 type runtimeSlot struct {
-	session Session
-	ctx     context.Context
-	cancel  context.CancelFunc
-	busy    bool
-	taskID  string
+	attached   bool
+	generation uint64
+	session    Session
+	ctx        context.Context
+	cancel     context.CancelFunc
+	busy       bool
+	taskID     string
 }
 type Manager struct {
 	mu                sync.Mutex
@@ -95,11 +97,22 @@ func NewManager(db *sql.DB, adapters map[string]Adapter, notify func()) (*Manage
 			if t.State == "running" || t.State == "starting" {
 				t.State = "needs_user"
 				t.Error = "Submission outcome is uncertain after restart; it will not be replayed automatically."
+				if t.Origin == "external" {
+					t.Error = "Native user-turn observation ended after restart; the original chat remains independent."
+				}
 			}
 		}
 		for i := range r.team.Members {
 			v := &r.team.Members[i]
 			v.ActiveTaskID = ""
+			if v.Attachment != nil {
+				v.Attachment.Generation++
+				v.Attachment.State = "disconnected"
+				v.NativeTurn = nil
+				v.Token = uuid.NewString()
+				v.State = "needs_user"
+				v.Error = "Native attachment disconnected after restart; reconnect before resuming team inputs."
+			}
 			if v.Approval != nil {
 				v.Error = "Approval was interrupted by restart; inspect native session before retrying."
 				v.Approval = nil
@@ -137,6 +150,10 @@ func (m *Manager) SetRuntimeConfig(binary, apiBase string) {
 }
 
 func (m *Manager) Create(ctx context.Context, r CreateRequest) (*Team, error) {
+	return m.create(ctx, r, "", nil, nil)
+}
+
+func (m *Manager) create(ctx context.Context, r CreateRequest, attachedMemberID string, binding *AttachmentBinding, session Session) (*Team, error) {
 	if strings.TrimSpace(r.ProjectID) == "" || !filepath.IsAbs(r.ProjectRoot) {
 		return nil, errors.New("verified project identity and absolute project root are required")
 	}
@@ -150,6 +167,7 @@ func (m *Manager) Create(ctx context.Context, r CreateRequest) (*Team, error) {
 	tm := &Team{ID: uuid.NewString(), ProjectID: r.ProjectID, ProjectRoot: filepath.Clean(r.ProjectRoot), State: "running", Members: []Member{}, Tasks: []Task{}, Limits: limits, UsageKnown: true, CreatedAt: time.Now().UTC()}
 	ids := make(map[string]bool)
 	availability := make(map[string]Availability)
+	leads := 0
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for _, cfg := range r.Members {
@@ -163,6 +181,22 @@ func (m *Manager) Create(ctx context.Context, r CreateRequest) (*Team, error) {
 		role := cfg.Role
 		if role == "" {
 			role = "lead"
+		}
+		if CanonicalRole(role) == "lead" {
+			leads++
+			if leads > 1 {
+				return nil, fmt.Errorf("%w: a team has one canonical lead", ErrConflict)
+			}
+		}
+		if binding != nil && cfg.ID == attachedMemberID {
+			copy := *binding
+			if copy.Generation == 0 {
+				copy.Generation = 1
+			}
+			copy.State = "connected"
+			p := copy.Identity.Profile
+			tm.Members = append(tm.Members, Member{ID: cfg.ID, Token: uuid.NewString(), Role: role, Profile: p, NativeID: copy.Identity.NativeID, Attachment: &copy, NativeTurn: &NativeTurn{State: "unknown"}, ObservedModel: p.Model, ObservedEffort: p.Effort, State: "waiting", Configured: true, ProfileExplicit: true})
+			continue
 		}
 		p := cfg.Profile
 		explicit := p.Model != "" || p.Effort != ""
@@ -201,12 +235,23 @@ func (m *Manager) Create(ctx context.Context, r CreateRequest) (*Team, error) {
 		}
 		tm.Members = append(tm.Members, Member{ID: cfg.ID, Token: uuid.NewString(), Role: role, Profile: p, ComplexProfile: complexProfile, State: "ready", Configured: true, ProfileExplicit: explicit})
 	}
+	if binding != nil && !ids[attachedMemberID] {
+		return nil, ErrNotFound
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
 		return nil, ErrClosed
 	}
 	for _, existing := range m.teams {
+		if binding != nil && existing.team.State != "stopped" {
+			for _, member := range existing.team.Members {
+				a := member.Attachment
+				if a != nil && a.State != "detached" && a.Identity.Runtime == binding.Identity.Runtime && a.Identity.HostID == binding.Identity.HostID && a.Identity.NativeID == binding.Identity.NativeID {
+					return nil, ErrConflict
+				}
+			}
+		}
 		if existing.team.ProjectID == tm.ProjectID && existing.team.State != "stopped" {
 			return nil, fmt.Errorf("%w: this project already has an active team", ErrConflict)
 		}
@@ -216,6 +261,11 @@ func (m *Manager) Create(ctx context.Context, r CreateRequest) (*Team, error) {
 		return nil, err
 	}
 	m.teams[tm.ID] = rec
+	if binding != nil {
+		member := findMember(tm, attachedMemberID)
+		slotCtx, cancel := context.WithCancel(m.ctx)
+		m.slots[slotKey(tm.ID, member.ID)] = &runtimeSlot{ctx: slotCtx, cancel: cancel, attached: true, generation: member.Attachment.Generation, session: session}
+	}
 	m.signalLocked()
 	return cloneTeam(tm), nil
 }
@@ -223,6 +273,12 @@ func (m *Manager) Create(ctx context.Context, r CreateRequest) (*Team, error) {
 // BindWorkflow connects a lead's initially unbound user task to a workflow
 // created during that turn. The API must verify native workflow ownership first.
 func (m *Manager) BindWorkflow(teamID, memberID, workflowID, workflowType, complexity string) error {
+	return m.BindWorkflowTask(teamID, memberID, "", workflowID, workflowType, complexity)
+}
+
+// BindWorkflowTask scopes workflow binding to an acknowledged attached input.
+// An empty taskID uses the member's currently observed human/assigned turn.
+func (m *Manager) BindWorkflowTask(teamID, memberID, taskID, workflowID, workflowType, complexity string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -236,7 +292,7 @@ func (m *Manager) BindWorkflow(teamID, memberID, workflowID, workflowType, compl
 	if member == nil || CanonicalRole(member.Role) != "lead" || workflowID == "" {
 		return ErrForbidden
 	}
-	task := findTask(rec.team, member.ActiveTaskID)
+	task := m.assignmentForRequestLocked(rec.team, member, taskID)
 	if task == nil || task.State != "running" || (task.WorkflowID != "" && task.WorkflowID != workflowID) {
 		return ErrForbidden
 	}
@@ -247,7 +303,9 @@ func (m *Manager) BindWorkflow(teamID, memberID, workflowID, workflowType, compl
 	task.WorkflowID = workflowID
 	task.WorkflowType = workflowType
 	task.Complexity = complexity
-	member.WorkflowID = workflowID
+	if task.ID == member.ActiveTaskID {
+		member.WorkflowID = workflowID
+	}
 	if err := m.saveLocked(rec); err != nil {
 		rec.team = before
 		return err
@@ -315,13 +373,19 @@ func (m *Manager) Action(ctx context.Context, id, action string) (*Team, error) 
 		r.team.Reason = "Stopped by user."
 		for i := range r.team.Tasks {
 			t := &r.team.Tasks[i]
-			if t.State == "queued" || t.State == "starting" || t.State == "running" {
+			if t.Origin == "external" && t.State == "running" {
+				t.State = "needs_user"
+				t.Error = "Native observation ended when the team stopped."
+			} else if t.State == "queued" || t.State == "starting" || t.State == "running" || t.State == "waiting" {
 				t.State = "cancelled"
 				t.Error = "Team stopped."
 			}
 		}
 		for i := range r.team.Members {
 			v := &r.team.Members[i]
+			if v.Attachment != nil {
+				m.revokeAttachmentLocked(r.team, v, "detached", "Team stopped; native chat remains open.")
+			}
 			v.State = "stopped"
 			v.Approval = nil
 			v.PendingApprovals = nil
@@ -363,7 +427,7 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 	if r.ID == "" {
 		r.ID = uuid.NewString()
 	}
-	if len(r.ID) > 256 || strings.HasPrefix(r.ID, "result:") {
+	if len(r.ID) > 256 || (strings.HasPrefix(r.ID, "result:") || strings.HasPrefix(r.ID, "external:")) {
 		return nil, errors.New("request ID is too long or uses a reserved result namespace")
 	}
 	if r.From == "" {
@@ -403,12 +467,13 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 	}
 	before := cloneTeam(tm)
 	autoRound := 0
+	requestTaskID := ""
 	if r.From != "user" {
 		sender := findMember(tm, r.From)
 		if sender == nil {
 			return nil, ErrForbidden
 		}
-		parent := findTask(tm, sender.ActiveTaskID)
+		parent := m.assignmentForRequestLocked(tm, sender, r.ParentTaskID)
 		if parent == nil || parent.State != "running" {
 			return nil, fmt.Errorf("%w: sender has no active assignment", ErrForbidden)
 		}
@@ -445,6 +510,10 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 		}
 		r.ReturnTo = r.From
 		autoRound = parent.AutoRound + 1
+		requestTaskID = parent.RequestTaskID
+		if r.attachedRequest {
+			requestTaskID = r.ID
+		}
 	} else if r.ReturnTo != "" || r.ParentTaskID != "" {
 		return nil, errors.New("user tasks cannot forge automatic return metadata")
 	}
@@ -453,13 +522,14 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 		rec.team = before
 		return nil, err
 	}
-	if r.WorkflowID != "" {
+	if r.WorkflowID != "" && member.Attachment == nil {
 		member.WorkflowID = r.WorkflowID
 	}
-	if CanonicalRole(member.Role) == "review" {
+	if CanonicalRole(member.Role) == "review" && member.Attachment == nil {
 		member.Revision = r.Revision
 	}
 	task := Task{WorkflowPhase: r.WorkflowPhase, WorkflowGeneration: r.WorkflowGeneration, WorkflowTaskIndex: r.WorkflowTaskIndex, WorkflowSessionID: r.WorkflowSessionID, ID: r.ID, From: r.From, To: member.ID, Role: r.Role, Text: r.Text, WorkflowID: r.WorkflowID, WorkflowType: r.WorkflowType, Complexity: r.Complexity, Revision: r.Revision, State: "queued", Profile: profile, Kind: r.Kind, ParentTaskID: r.ParentTaskID, ReturnTo: r.ReturnTo, AutoRound: autoRound, CreatedAt: time.Now().UTC(), RequestHash: hash}
+	task.RequestTaskID = requestTaskID
 	if task.Role == "" {
 		task.Role = member.Role
 	}
@@ -521,7 +591,7 @@ func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, erro
 	if configured != nil && configured.ComplexProfile != nil && isComplex(r.WorkflowType, r.Complexity) {
 		profile = *configured.ComplexProfile
 	}
-	if r.From == "user" && r.To == target.ID && (r.Role == "" || CanonicalRole(r.Role) == CanonicalRole(target.Role)) {
+	if r.From == "user" && (r.To == target.ID || (r.To == "" && r.Role == "")) && (r.Role == "" || CanonicalRole(r.Role) == CanonicalRole(target.Role)) {
 		profile = target.Profile
 	}
 	if r.Profile != nil {
@@ -547,11 +617,11 @@ func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, erro
 	if !selected {
 		return nil, Profile{}, fmt.Errorf("runtime %q was not selected for this team", profile.Runtime)
 	}
-	if profile.Model == "" {
+	if profile.Model == "" && !(target.Attachment != nil && profile == target.Profile && CanonicalRole(target.Role) == CanonicalRole(role)) {
 		return nil, Profile{}, errors.New("an explicit runtime model is required")
 	}
 	compatible := func(v *Member) bool {
-		conversationInput := r.From == "user" && r.To == v.ID && r.WorkflowID == ""
+		conversationInput := (r.From == "user" || r.attachedRequest) && (r.To == v.ID || (r.To == "" && r.Role == "" && v.ID == target.ID)) && r.WorkflowID == ""
 		return v.Profile == profile && CanonicalRole(v.Role) == CanonicalRole(role) && (conversationInput || v.WorkflowID == "" || v.WorkflowID == r.WorkflowID) && (conversationInput || CanonicalRole(role) != "review" || v.Revision == "" || v.Revision == r.Revision)
 	}
 	if compatible(target) {
@@ -562,6 +632,9 @@ func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, erro
 		if compatible(v) && v.ID != r.From {
 			return v, profile, nil
 		}
+	}
+	if CanonicalRole(role) == "lead" {
+		return nil, Profile{}, fmt.Errorf("%w: canonical lead is incompatible with this request; choose a worker role or update the lead explicitly", ErrConflict)
 	}
 	if len(tm.Members) >= 128 {
 		return nil, Profile{}, errors.New("team worker capacity reached")
@@ -635,10 +708,14 @@ func (m *Manager) Approve(ctx context.Context, teamID, memberID, approvalID stri
 
 func (m *Manager) dispatchLoop() {
 	defer m.wg.Done()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
+		case <-ticker.C:
+			m.expireAttachments()
 		case <-m.wake:
 			for m.dispatchOne() {
 			}
@@ -700,6 +777,9 @@ func (m *Manager) dispatchOne() bool {
 				if s != nil && s.busy {
 					continue
 				}
+				if member.Attachment != nil && (!attachmentIdle(member) || s == nil || !s.attached || s.generation != member.Attachment.Generation || s.session == nil) {
+					continue
+				}
 				if member.Approval != nil || member.State == "needs_user" || member.State == "recovering" {
 					continue
 				}
@@ -717,6 +797,9 @@ func (m *Manager) dispatchOne() bool {
 			m.signalLocked()
 			continue
 		}
+		if tm.Turns+pendingTurns(tm, "") >= tm.Limits.MaxTurns {
+			continue
+		}
 		member := findMember(tm, task.To)
 		key := slotKey(id, member.ID)
 		slot := m.slots[key]
@@ -732,7 +815,7 @@ func (m *Manager) dispatchOne() bool {
 			bytes, count := len(task.Text), 1
 			for i := range tm.Tasks {
 				other := &tm.Tasks[i]
-				if other.ID == task.ID || other.State != "queued" || other.From == "user" || (other.Kind != "result" && other.Kind != "message") || other.To != task.To || other.WorkflowID != task.WorkflowID || other.WorkflowPhase != task.WorkflowPhase || other.WorkflowGeneration != task.WorkflowGeneration || other.WorkflowSessionID != task.WorkflowSessionID || !sameTaskIndex(other.WorkflowTaskIndex, task.WorkflowTaskIndex) || other.Revision != task.Revision || other.Profile != task.Profile || count >= 8 || bytes+len(other.Text) > 32000 {
+				if other.ID == task.ID || other.State != "queued" || other.From == "user" || (other.Kind != "result" && other.Kind != "message") || other.To != task.To || other.WorkflowID != task.WorkflowID || other.WorkflowPhase != task.WorkflowPhase || other.WorkflowGeneration != task.WorkflowGeneration || other.WorkflowSessionID != task.WorkflowSessionID || !sameTaskIndex(other.WorkflowTaskIndex, task.WorkflowTaskIndex) || other.Revision != task.Revision || other.Profile != task.Profile || !sameRequestContinuation(tm, task, other) || count >= 8 || bytes+len(other.Text) > 32000 {
 					continue
 				}
 				other.BatchedInto = task.ID
@@ -745,9 +828,11 @@ func (m *Manager) dispatchOne() bool {
 			}
 		}
 		member.State = "working"
-		member.ActiveTaskID = task.ID
-		member.WorkflowID = task.WorkflowID
-		member.Revision = task.Revision
+		if member.Attachment == nil {
+			member.ActiveTaskID = task.ID
+			member.WorkflowID = task.WorkflowID
+			member.Revision = task.Revision
+		}
 		if err := m.saveLocked(rec); err != nil {
 			slot.busy = false
 			setBatchState(tm, task.ID, "queued")
@@ -785,7 +870,11 @@ func (m *Manager) run(teamID, memberID, taskID string, slot *runtimeSlot) {
 	}
 	m.mu.Unlock()
 	var err error
-	if adapter == nil {
+	if slot.attached {
+		if session == nil {
+			err = errors.New("native attachment disconnected")
+		}
+	} else if adapter == nil {
 		err = errors.New("runtime adapter is no longer available")
 	} else {
 		checkCtx, cancel := context.WithTimeout(slot.ctx, 30*time.Second)
@@ -796,7 +885,7 @@ func (m *Manager) run(teamID, memberID, taskID string, slot *runtimeSlot) {
 		m.finish(teamID, memberID, taskID, slot, Result{}, err, false, false)
 		return
 	}
-	if session == nil {
+	if session == nil && !slot.attached {
 		session, err = adapter.Open(slot.ctx, spec, func(e Event) { m.onEvent(teamID, memberID, e) })
 		if err != nil {
 			m.finish(teamID, memberID, taskID, slot, Result{}, err, false, false)
@@ -816,6 +905,14 @@ func (m *Manager) run(teamID, memberID, taskID string, slot *runtimeSlot) {
 	tm = rec.team
 	task = findTask(tm, taskID)
 	member = findMember(tm, memberID)
+	if slot.attached && (!attachmentLive(member) || member.Attachment.Generation != slot.generation || m.slots[slotKey(teamID, memberID)] != slot) {
+		slot.busy = false
+		slot.taskID = ""
+		m.active--
+		m.signalLocked()
+		m.mu.Unlock()
+		return
+	}
 	if m.closed || tm.State != "running" || task.State != "starting" {
 		if task.State == "starting" {
 			setBatchState(tm, task.ID, "queued")
@@ -823,10 +920,12 @@ func (m *Manager) run(teamID, memberID, taskID string, slot *runtimeSlot) {
 		slot.busy = false
 		slot.taskID = ""
 		m.active--
-		if member.State == "working" {
-			member.State = "ready"
+		if !slot.attached || !nativeTurnActive(member.NativeTurn) {
+			if member.State == "working" {
+				member.State = "ready"
+			}
+			member.ActiveTaskID = ""
 		}
-		member.ActiveTaskID = ""
 		m.saveOrPauseLocked(rec)
 		m.signalLocked()
 		m.mu.Unlock()
@@ -838,8 +937,10 @@ func (m *Manager) run(teamID, memberID, taskID string, slot *runtimeSlot) {
 		setBatchState(tm, task.ID, "queued")
 		slot.busy = false
 		slot.taskID = ""
-		member.State = "ready"
-		member.ActiveTaskID = ""
+		if !slot.attached || !nativeTurnActive(member.NativeTurn) {
+			member.State = "ready"
+			member.ActiveTaskID = ""
+		}
 		m.active--
 		m.saveOrPauseLocked(rec)
 		m.signalLocked()
@@ -847,28 +948,34 @@ func (m *Manager) run(teamID, memberID, taskID string, slot *runtimeSlot) {
 		return
 	}
 	now := time.Now().UTC()
-	task.State = "running"
-	task.StartedAt = &now
-	for i := range tm.Tasks {
-		if tm.Tasks[i].BatchedInto == task.ID {
-			tm.Tasks[i].State = "running"
-			tm.Tasks[i].StartedAt = &now
+	if !slot.attached {
+		task.State = "running"
+		task.StartedAt = &now
+		for i := range tm.Tasks {
+			if tm.Tasks[i].BatchedInto == task.ID {
+				tm.Tasks[i].State = "running"
+				tm.Tasks[i].StartedAt = &now
+			}
+		}
+		tm.Turns++
+		if task.From != "user" {
+			tm.AutoWakeups++
 		}
 	}
-	tm.Turns++
-	if task.From != "user" {
-		tm.AutoWakeups++
-	}
 	if err = m.saveLocked(rec); err != nil {
-		tm.Turns--
-		if task.From != "user" {
-			tm.AutoWakeups--
+		if !slot.attached {
+			tm.Turns--
+			if task.From != "user" {
+				tm.AutoWakeups--
+			}
 		}
 		setBatchState(tm, task.ID, "queued")
 		slot.busy = false
 		slot.taskID = ""
-		member.State = "needs_user"
-		member.ActiveTaskID = ""
+		if !slot.attached || !nativeTurnActive(member.NativeTurn) {
+			member.State = "needs_user"
+			member.ActiveTaskID = ""
+		}
 		m.active--
 		tm.State = "paused"
 		tm.Reason = "Cannot persist submission: " + err.Error()
@@ -902,12 +1009,26 @@ func (m *Manager) finish(teamID, memberID, taskID string, slot *runtimeSlot, res
 	slot.busy = false
 	slot.taskID = ""
 	m.active--
-	member.ActiveTaskID = ""
+	if slot.attached && (!attachmentLive(member) || member.Attachment.Generation != slot.generation || m.slots[slotKey(teamID, memberID)] != slot) {
+		m.signalLocked()
+		return
+	}
+	if slot.attached && task.NativeTurnID == "" && submitErr == nil {
+		submitErr = errors.New("native result arrived without correlated input acknowledgement")
+	}
+	preserveExternal := slot.attached && member.NativeTurn != nil && member.NativeTurn.Origin == "user" && nativeTurnActive(member.NativeTurn)
+	if !preserveExternal {
+		member.ActiveTaskID = ""
+	}
 	pendingApproval := member.Approval != nil
 	member.Approval = nil
 	member.PendingApprovals = nil
 	if result.NativeID != "" {
-		member.NativeID = result.NativeID
+		if slot.attached && result.NativeID != member.NativeID {
+			submitErr = errors.New("native result identity differs from the attached chat")
+		} else {
+			member.NativeID = result.NativeID
+		}
 	}
 	if result.Model != "" {
 		member.ObservedModel = result.Model
@@ -969,7 +1090,7 @@ func (m *Manager) finish(teamID, memberID, taskID string, slot *runtimeSlot, res
 		task.Error = "Review is stale: source changed since the requested revision."
 		member.State = "ready"
 		returnText = task.Error + " Previous verdict is not usable."
-	case !resultMatchesProfile(result, task.Profile):
+	case !slot.attached && !resultMatchesProfile(result, task.Profile):
 		task.State = "needs_user"
 		task.Error = "Native runtime reported a different model or effort than requested."
 		member.State = "needs_user"
@@ -979,6 +1100,16 @@ func (m *Manager) finish(teamID, memberID, taskID string, slot *runtimeSlot, res
 		task.State = "complete"
 		member.State = "ready"
 		member.Error = ""
+	}
+	if slot.attached {
+		if preserveExternal && (member.State != "needs_user" || member.Error == "") {
+			member.State = member.NativeTurn.State
+			if member.State == "running" {
+				member.State = "working"
+			}
+		} else if nativeTurnActive(member.NativeTurn) && task.State == "complete" {
+			member.State = "waiting"
+		}
 	}
 	completed := []Task{*task}
 	for i := range tm.Tasks {
@@ -992,7 +1123,9 @@ func (m *Manager) finish(teamID, memberID, taskID string, slot *runtimeSlot, res
 		}
 	}
 	for i := range completed {
-		if completed[i].ReturnTo != "" && completed[i].Kind != "result" {
+		if completed[i].RequestTaskID != "" {
+			m.finishRequestTaskLocked(tm, completed[i].ID, returnText)
+		} else if completed[i].ReturnTo != "" && completed[i].Kind != "result" {
 			m.queueReturnLocked(tm, &completed[i], returnText)
 		}
 	}
@@ -1014,6 +1147,7 @@ func (m *Manager) queueReturnLocked(tm *Team, source *Task, text string) {
 		return
 	}
 	t := Task{WorkflowPhase: source.WorkflowPhase, WorkflowGeneration: source.WorkflowGeneration, WorkflowTaskIndex: source.WorkflowTaskIndex, WorkflowSessionID: source.WorkflowSessionID, ID: id, From: source.To, To: target.ID, Role: target.Role, Text: compact(text, 12000), WorkflowID: source.WorkflowID, WorkflowType: source.WorkflowType, Complexity: source.Complexity, Revision: source.Revision, State: "queued", Profile: target.Profile, Kind: "result", ParentTaskID: source.ID, AutoRound: source.AutoRound + 1, CreatedAt: time.Now().UTC()}
+	t.RequestTaskID = source.RequestTaskID
 	// Only completion of assigned work with a substantive result counts as
 	// progress. Acknowledgements and ordinary message/result turns do not reset
 	// the exchange counter; MaxTurns remains a hard ceiling for every turn.
@@ -1104,6 +1238,15 @@ func (m *Manager) Close() error {
 			if t.State == "running" || t.State == "starting" {
 				t.State = "needs_user"
 				t.Error = "Submission interrupted by shutdown; inspect native history before retrying."
+				if t.Origin == "external" {
+					t.Error = "Native user-turn observation ended during shutdown; the original chat remains independent."
+				}
+			}
+		}
+		for i := range r.team.Members {
+			member := &r.team.Members[i]
+			if member.Attachment != nil && member.Attachment.State == "connected" {
+				m.revokeAttachmentLocked(r.team, member, "disconnected", "Server stopped; reconnect native chat to resume team inputs.")
 			}
 		}
 		if err := m.saveLocked(r); err != nil && first == nil {
@@ -1132,7 +1275,9 @@ func (m *Manager) closeSlot(ctx context.Context, s *runtimeSlot) {
 	s.session = nil
 	m.mu.Unlock()
 	if session != nil {
-		session.Interrupt(ctx)
+		if !s.attached {
+			session.Interrupt(ctx)
+		}
 		session.Close()
 	}
 }

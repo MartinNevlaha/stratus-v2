@@ -1,7 +1,8 @@
 # Pripojenie existujúceho chatu k tímu Stratus
 
-Dátum: 2026-11-04. Stav: návrh rozšírenia na kontrolu používateľom;
-nie implementovaná funkcia. Nadväzuje na
+Dátum: 2026-11-04. Stav: používateľ schválil návrh aj preferované natívne
+posielanie medzi Codex chatmi; Codex konektor je implementovaný a overený; pripojenie existujúcich chatov
+Claude/OpenCode zostáva otvorené. Nadväzuje na
 [spravované tímy](2026-11-04-automatic-project-team-design.md).
 
 ## Požiadavka a zvolený spôsob
@@ -45,10 +46,9 @@ Zvažované spôsoby:
 1. Používateľ v existujúcom chate požiada o pripojenie. Spojenie dodá
    natívnu identitu, hosta, projekt a dostupné schopnosti. Stratus overí
    projekt a dostupnosť spojenia; nežiada ručné prepisovanie interných ID.
-2. Ak projekt ešte nemá tím, ponúkne jeho vytvorenie s týmto chatom ako
-   vedúcim a s existujúcou projektovou šablónou pracovníkov. Noví pracovníci
-   sa spustia až pri práci. To je návrhové rozhodnutie, nie ďalšia voľba,
-   ktorú už používateľ výslovne odsúhlasil.
+2. Ak projekt ešte nemá tím, pripojenie ho predvolene vytvorí s týmto chatom
+   ako vedúcim a s existujúcou projektovou šablónou pracovníkov. Noví
+   pracovníci sa spustia až pri práci. Nástroj umožní vytvorenie vypnúť.
 3. Ak tím existuje, chat sa pripojí ako člen. Vedenie sa nepreberie potichu:
    používateľ môže zvoliť „Viesť tím z tohto chatu“, keď tomu nebráni
    rozpracované delegovanie alebo vlastníctvo workflow. Tím má jedného
@@ -56,10 +56,12 @@ Zvažované spôsoby:
 4. Používateľ ďalej zadáva úlohy v pôvodnej aplikácii. Vedúci plánuje,
    deleguje a prijíma výsledky; Stratus spravuje frontu, spojenia, limity
    a modelové profily. Preposielanie nepotrebuje ďalší koordinačný model.
-5. Výsledok kolegu sa po dokončení aktuálneho turnu doručí do toho istého
-   chatu. Pri schvaľovaní alebo otázke pre používateľa sa automatická práca
-   nevloží namiesto jeho odpovede. Dashboard aj pôvodný chat ukazujú ten istý
-   tím a rovnaké identifikované úlohy, nie dve oddelené vedenia práce.
+5. Výsledok kolegu sa doručí do toho istého chatu. Konektor čaká na voľný
+   chat; ak medzitým začne nový používateľský turn, natívne Codex rozhranie
+   môže správu pripojiť k nemu bez prerušenia. Stratus rozlišuje pôvodnú
+   používateľskú prácu od explicitne potvrdenej tímovej úlohy. Pri schvaľovaní
+   alebo otázke pre používateľa sa automatická práca nevloží namiesto jeho
+   odpovede. Dashboard aj pôvodný chat ukazujú ten istý tím a rovnaké úlohy.
 6. „Odpojiť od tímu“ zastaví ďalšie tímové vstupy a zachová aplikáciu,
    konverzáciu, model a jej históriu. Opätovné pripojenie musí overiť hosta;
    nespustí naslepo staré nejasne doručené úlohy.
@@ -68,7 +70,10 @@ Návrhové rozhodnutie pre chat, ktorý nie je vedúcim: nové tímové zadanie
 odovzdá súčasnému vedúcemu a výsledok sa vráti pôvodnému zadávateľovi do
 tohto chatu. Používateľ nemusí prepínať okná ani preberať vedenie kvôli
 jednému zadaniu. Správa uchová overeného pôvodcu a korelačné ID cez celý
-tok zadávateľ → vedúci → pracovníci → vedúci → zadávateľ. Stavové oznámenia
+tok zadávateľ → vedúci → pracovníci → vedúci → zadávateľ. Logické zadanie
+zostáva čakajúce, kým vedúci nespracuje výsledky delegovanej práce. Stručné
+odovzdanie čakania nespustí predčasnú odpoveď zadávateľovi; konečná syntéza
+sa vráti raz aj pri ďalšom vnorenom delegovaní. Stavové oznámenia
 nevytvárajú ďalšie modelové kolá; zúčastnení sa prebúdzajú iba pri potrebnej
 práci alebo pripravenom výsledku. Bežná otázka nesúvisiaca s tímovou prácou
 sa automaticky nerozpošle tímu.
@@ -127,7 +132,8 @@ Samostatný transport pre pripojenie poskytne:
 
 - overenie identity, projektu a aktuálneho profilu pôvodným hostom;
 - udalosti aj o používateľských turnoch, čakaní na schválenie a odpojení;
-- bezpečné zaradenie vstupu na hranici turnov s korelačným ID;
+- bezpečné natívne zaradenie vstupu vrátane prípustného zlúčenia do
+  súbežného používateľského turnu; explicitné potvrdenie korelačného ID;
 - rozlíšenie prijatia, začatia, dokončenia a neurčitého výsledku odoslania;
 - ohraničené zosúladenie konkrétneho vstupu po výpadku a odpojenie väzby.
 
@@ -156,52 +162,51 @@ turn, ak to host podporuje. Už odoslaná práca môže pri odpojení dobehnúť
 jej výsledok nespustí ďalšie kolo. Pôvodná registrácia chatu v Comms ostáva
 živá, pokiaľ je živý host. Po reštarte Stratusu ostáva automatika pozastavená.
 
-## Adaptéry a neoverené schopnosti
+## Overené adaptéry a zostávajúce obmedzenia
 
-Nasledujúce zistenia sú podklady návrhu, nie výsledky živého acceptance testu:
+Presné verzie, postup a hranice dôkazov sú v
+[zázname overenia](../../testing/existing-chat-attachments.md).
 
-- **Claude Code:** dokumentované skill hooks sa aktivujú pri vyvolaní
-  skillu a `asyncRewake` umožňuje zobudiť rovnakú nečinnú session. Kandidátom
-  je jednorazový join skill a session-bound čakajúci hook. Treba overiť
-  životnosť a obnovenie čakania, vypršanie hooku, koreláciu výsledku,
-  používateľský vstup a schvaľovanie. Cross-session messaging má natívnu
-  podporu, ale úplný externý socket protokol sa v preskúmanej dokumentácii
-  nepotvrdil. Návrh preto nestojí na jeho odhadovaní.
-- **OpenCode:** plugin dostáva klienta existujúceho hosta a môže odosielať
-  vstupy do konkrétnej session. Použije tento klient, nie nový `serve` proces.
-  Overí sa API konkrétnej bežiacej verzie, bezpečné radenie pri ručnom
-  vstupe, udalosti a korelácia s natívnym message ID. Už otvorená aplikácia
-  bez pluginu môže potrebovať podporované znovunačítanie; hot reload sa
-  nesľubuje bez overenia.
-- **Codex:** pripojenie musí viesť k hostu pôvodného chatu cez podporované
-  rozhranie. Preferovaný kontrakt vychádza z existujúcich app tools:
-  `send_message_to_thread` pre vstup do vybraného chatu, `wait_threads`
-  s kurzorom pre kompaktný stav/dokončenie a cielené `read_thread` pri
-  potrebnom zosúladení. Pri odoslaní sa vynechajú modelové overrides, aby
-  zostalo aktuálne nastavenie chatu. Jednorazové pripojenie musí obsahovať
-  oprávnenie používateľa na tímové správy do konkrétneho chatu; správa
-  kolegu sama osebe nevytvára nové oprávnenie na ďalšie adresáty.
+- **Codex desktop:** živý test po výslovnom súhlase používateľa preukázal
+  prebudenie rovnakého chatu po skončení pôvodného turnu a zachovanie jeho
+  kontextu. Konektor používa dodanú štandardnú MCP fasádu `codex-app-tools`,
+  skutočnú identitu aktuálneho chatu z metadát volania a nové identifikátory
+  nástrojových volaní. Nepreberá identitu z voľného argumentu ani globálnej
+  premennej zdieľaného MCP procesu. Súhlas s pripojením povoľuje tímové vstupy
+  len do tohto chatu. Modelové overrides sa neposielajú.
 
-  Lokálny bundled konektor poskytuje štandardné MCP rozhranie, ale jeho
-  volanie vyžaduje identitu volajúceho chatu od executora. Nepotvrdilo sa,
-  že jednorazové načítanie tejto identity povoľuje nezávislému serveru
-  neskoršie volania na pozadí. Treba overiť podporovaný spôsob udelenia
-  trvalého, odvolateľného spojenia alebo hostiteľský bridge. Natívne
-  kontroly oprávnení sa zachovajú. Stratus nebude periodicky prebúdzať
-  pomocný model len preto, aby zavolal nástroj na preposlanie.
+  Samostatné `wait_threads` v teste vrátilo chybu hosta. Konektor preto mimo
+  modelu pravidelne číta ohraničený stav cez `read_thread`; uchová iba
+  metadáta aktuálneho turnu a najviac dvoch predchádzajúcich ukončení.
+  História ani text predchádzajúcich odpovedí sa neposielajú ďalšiemu modelu.
+  Chýbajúci dôkaz ukončenia predchádzajúceho turnu pozastaví spojenie.
 
-  Alternatívou je app-server rozhranie skutočného pôvodného hosta.
-  Existencia API však nepreukazuje prístup k aktuálnemu desktop hostu.
-  V kontrolovanom prostredí predvolený daemon nebol dostupný;
-  `codex queue` môže skončiť úspešne aj bez úspešného prebudenia.
-  Podpora ľubovoľného desktop chatu zostáva otvorenou integračnou
-  podmienkou. Nepoužije sa súkromné IPC, fingovaná identita volajúceho
-  ani druhý proces s `resume`.
+  Natívny send vracia len ID chatu. Nemá idempotentný kľúč vstupu ani
+  potvrdenie výsledku, preto sa odoslanie skúša raz. Agent následne volá
+  `team_ack` a `team_result` pre konkrétnu úlohu; všeobecná idle udalosť
+  ani text poslednej odpovede nie sú dôkazom jej splnenia. Pri čakaní na
+  delegovanú prácu agent pred skončením turnu odovzdá stručný stav čakania,
+  aby ho výsledok kolegu mohol neskôr prebudiť. Súbežný ručný vstup si
+  zachová vlastný rozsah oprávnení. Natívne schvaľovanie ostáva pôvodné.
 
-Otvorené technické body sa overia najprv izolovaným experimentom a
-kontraktovými testami. Ak konkrétny host nedokáže požadovaný tok, zostane
-označený ako nepodporovaný s dôvodom. Taký výsledok sa nevyhlási za hotové
-pripojenie všetkých troch aplikácií.
+  Projektové nastavenie odovzdáva názvy premenných potrebných na pripojenie
+  k pôvodnému konektoru aplikácie. Samotné Codex CLI bez tohto konektora
+  neposkytuje desktop pripojenie. Netvorí sa druhý daemon, súkromné IPC ani
+  ďalší proces zapisujúci cez `resume` do pôvodnej histórie.
+- **Claude Code:** `asyncRewake` podporuje budenie, ale čakajúci hook má
+  konečný timeout. Neoveril sa spôsob trvalého čakania ani obnovenia po jeho
+  vypršaní bez ďalšieho modelového turnu. Persistent Channels vyžaduje
+  povolenie pri štarte; doplnenie do ľubovoľného otvoreného chatu nie je
+  overené. Existujúce chaty preto zatiaľ tento konektor nemajú.
+- **OpenCode:** V1 a V2 pracujú s rovnakým natívnym ID. Izolovaný test V2
+  fronty prijal a povýšil druhý vstup, ale po dokončení prvého vstupu sa
+  neobjavil zodpovedajúci druhý výsledok. V2 čakanie navyše vrátilo 503.
+  Natívne vykonanie fronty nie je preukázané; pripojenie existujúceho chatu
+  zostáva nedostupné. Legacy `prompt_async` nie je overenou náhradou.
+
+Nové relácie všetkých troch nástrojov spravované Stratusom zostávajú
+samostatne podporované. Implementovaný Codex konektor sa nesmie označiť za
+hotové pripojenie všetkých troch aplikácií.
 
 ## Zásah do existujúcej implementácie
 

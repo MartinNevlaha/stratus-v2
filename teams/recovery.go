@@ -25,6 +25,10 @@ func (m *Manager) RecoverMember(ctx context.Context, teamID, memberID string) er
 		m.mu.Unlock()
 		return ErrNotFound
 	}
+	if member.Attachment != nil {
+		m.mu.Unlock()
+		return m.Detach(ctx, teamID, memberID)
+	}
 	slot := m.slots[slotKey(teamID, memberID)]
 	uncertainApproval := member.ApprovalResponseID != ""
 	if member.State != "needs_user" || (member.Approval != nil && !uncertainApproval) || rec.team.State == "stopped" || (slot != nil && slot.busy && !uncertainApproval) {

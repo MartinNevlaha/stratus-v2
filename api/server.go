@@ -32,7 +32,10 @@ import (
 const emitEventTimeout = 5 * time.Second
 
 type Server struct {
-	teamEvidenceMu sync.Mutex
+	teamEvidenceMu       sync.Mutex
+	teamAttachmentJoinMu sync.Mutex
+	teamAttachmentsMu    sync.Mutex
+	teamAttachments      map[string]*teamAttachmentBroker
 
 	teams        *teams.Manager
 	teamAdapters map[string]teams.Adapter
