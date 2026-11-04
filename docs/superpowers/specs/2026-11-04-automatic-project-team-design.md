@@ -2,6 +2,9 @@
 
 Dátum: 2026-11-04. Stav: schválené a implementované na vetve `codex/automatic-project-team`; záverečné overenie je v implementačnom pláne.
 
+Následné rozšírenie: [pripojenie existujúceho chatu](2026-11-04-existing-chat-attachment-design.md).
+Je vedené ako samostatný návrh; nemení stav už implementovaných spravovaných tímov.
+
 ## Zámer a rozhodnutia používateľa
 
 Používateľ nechce ručne premenovávať agentov, vyhľadávať príjemcov, zadávať
