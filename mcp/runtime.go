@@ -14,6 +14,10 @@ type RuntimeOptions struct{ Runtime string }
 
 func RegisterToolsForRuntime(s *Server, base string, h *http.Client, opts RuntimeOptions) {
 	RegisterTools(s, base, h)
+	if h == nil {
+		h = http.DefaultClient
+	}
+	defer configureManagedTools(s, &apiClient{base: base, http: h})
 	if opts.Runtime != "codex" {
 		registerCommsTools(s, base, h, identitySession)
 		return
@@ -139,6 +143,7 @@ func (c *apiClient) patch(path string, body any) (any, error) {
 		return nil, e
 	}
 	r.Header.Set("Content-Type", "application/json")
+	managedHeaders(r)
 	res, e := c.http.Do(r)
 	if e != nil {
 		return nil, e

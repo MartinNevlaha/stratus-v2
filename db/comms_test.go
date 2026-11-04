@@ -26,7 +26,11 @@ func openCommsDB(t *testing.T) *DB {
 
 func mustPeer(t *testing.T, d *DB, key, runtime string) *Peer {
 	t.Helper()
-	p, err := d.UpsertPeer(key, runtime, "proj")
+	var file string
+	if err := d.sql.QueryRow(`SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&file); err != nil {
+		t.Fatal(err)
+	}
+	p, err := d.UpsertPeerInProject(key, runtime, "proj", filepath.Dir(file))
 	if err != nil {
 		t.Fatalf("upsert peer %s: %v", key, err)
 	}

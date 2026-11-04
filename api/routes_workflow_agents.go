@@ -303,7 +303,7 @@ func (s *Server) handleListAllAgents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		for _, a := range runtimeAgents(agents, wf.Runtime) {
+		for _, a := range s.enrichTeamEvidenceAgents(runtimeAgents(agents, wf.Runtime)) {
 			idle := false
 			if a.Status == "running" {
 				if t, err := time.Parse("2006-01-02T15:04:05.000Z", a.LastActivity); err == nil && time.Since(t) > staleAgentAfter {
@@ -351,7 +351,7 @@ func (s *Server) handleListWorkflowAgents(w http.ResponseWriter, r *http.Request
 	}
 	body := map[string]any{"agents": agents, "conflicts": fileConflicts(agents)}
 	if wf, e := s.coordinator.Get(id); e == nil {
-		body["agents"] = runtimeAgents(agents, wf.Runtime)
+		body["agents"] = s.enrichTeamEvidenceAgents(runtimeAgents(agents, wf.Runtime))
 		if wf.Runtime == "codex" {
 			body["review"] = db.CodexReview(agents, string(wf.Phase), wf.CurrentTask, wf.ReviewGeneration)
 		}

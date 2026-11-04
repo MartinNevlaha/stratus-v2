@@ -348,13 +348,13 @@ async function claimInbox(sessionID: string): Promise<CommsMessage[]> {
   return Array.isArray(data?.messages) ? data.messages : []
 }
 
-async function registerPeer(sessionID: string): Promise<string> {
+async function registerPeer(sessionID: string, projectRoot: string): Promise<string> {
   const key = peerKey(sessionID)
-  const res = await commsPost("/api/peers", { session_key: key, runtime: "opencode", project: process.cwd().split(/[\\/]/).pop() ?? "" })
+  const res = await commsPost("/api/peers", { session_key: key, runtime: "opencode", project: projectRoot.split(/[\\/]/).pop() ?? "", project_root: projectRoot })
   const self: CommsPeer = await res.json()
   let others: CommsPeer[] = []
   try {
-    const list = await (await commsFetch("/api/peers?active=1")).json()
+    const list = await (await commsFetch(`/api/peers?active=1&session_id=${encodeURIComponent(key)}`)).json()
     others = (list?.peers ?? []).filter((p: CommsPeer) => p.session_key !== key)
   } catch {}
   return commsIntro(self, others, key)
@@ -362,17 +362,17 @@ async function registerPeer(sessionID: string): Promise<string> {
 
 // Registers (or heartbeats) a root session and refreshes its prompt context: identity plus
 // any waiting messages. Child sessions (Task subagents) never become peers.
-async function refreshPeerContext(sessionID: string): Promise<void> {
+async function refreshPeerContext(sessionID: string, projectRoot: string): Promise<void> {
   if (childSessions.has(sessionID)) return
   try {
-    const intro = await registerPeer(sessionID)
+    const intro = await registerPeer(sessionID, projectRoot)
     const inbox = formatInbox(await claimInbox(sessionID).catch(() => []))
     peers.add(sessionID)
     turnContext.set(sessionID, inbox ? `${intro}\n${inbox}` : intro)
   } catch {}
 }
 
-async function onSessionEvent(event: { type: string; properties?: any }): Promise<void> {
+async function onSessionEvent(event: { type: string; properties?: any }, projectRoot: string): Promise<void> {
   const info = event.properties?.info
   const sessionID: string | undefined = info?.id
   if (!sessionID) return
@@ -381,7 +381,7 @@ async function onSessionEvent(event: { type: string; properties?: any }): Promis
       childSessions.add(sessionID)
       return
     }
-    await refreshPeerContext(sessionID)
+    await refreshPeerContext(sessionID, projectRoot)
   } else if (event.type === "session.deleted") {
     const wasPeer = peers.delete(sessionID)
     turnContext.delete(sessionID)
@@ -397,16 +397,17 @@ async function appendInboxToToolOutput(sessionID: string | undefined, output: { 
   if (inbox) output.output += `\n\n${inbox}`
 }
 
-export const Stratus: Plugin = async () => {
+export const Stratus: Plugin = async (input) => {
+  const projectRoot = input?.directory ?? process.cwd()
   return {
     event: async ({ event }: { event: { type: string; properties?: any } }) => {
       try {
-        await onSessionEvent(event)
+        await onSessionEvent(event, projectRoot)
       } catch {}
     },
 
     "chat.message": async (input: { sessionID: string }) => {
-      await refreshPeerContext(input.sessionID)
+      await refreshPeerContext(input.sessionID, projectRoot)
     },
 
     "experimental.chat.system.transform": async (input: { sessionID?: string }, output: { system: string[] }) => {

@@ -74,7 +74,7 @@ func registerCommsTools(s *Server, apiBase string, httpClient *http.Client, mapS
 		Description: "List the active agent sessions (peers) in this project with their handles and runtimes; \"you\" is your own entry. Use it to find who you can message.",
 		InputSchema: obj(sessionField),
 		Handler: withSession(func(key string, _ map[string]any) (any, error) {
-			res, err := c.get("/api/peers", neturl.Values{"active": {"1"}})
+			res, err := c.get("/api/peers", neturl.Values{"active": {"1"}, "session_id": {key}})
 			if err != nil {
 				return nil, err
 			}
@@ -199,14 +199,14 @@ func registerCommsTools(s *Server, apiBase string, httpClient *http.Client, mapS
 		Name:        "shared_task_list",
 		ReadOnly:    true,
 		Description: "List the shared task board, optionally filtered by status (open, claimed, done, cancelled).",
-		InputSchema: obj(opt("status", "string", "open | claimed | done | cancelled")),
-		Handler: func(args map[string]any) (any, error) {
-			params := neturl.Values{}
+		InputSchema: obj(sessionField, opt("status", "string", "open | claimed | done | cancelled")),
+		Handler: withSession(func(key string, args map[string]any) (any, error) {
+			params := neturl.Values{"session_id": {key}}
 			if st, _ := args["status"].(string); st != "" {
 				params.Set("status", st)
 			}
 			return c.get("/api/shared-tasks", params)
-		},
+		}),
 	})
 
 	s.Register(Tool{
@@ -228,6 +228,7 @@ func registerCommsTools(s *Server, apiBase string, httpClient *http.Client, mapS
 			return c.patch(fmt.Sprintf("/api/shared-tasks/%d", id), payload)
 		}),
 	})
+	registerTeamTools(s, apiBase, httpClient, mapSession)
 }
 
 // inboxQuery builds the "?from=&kind=" suffix for inbox calls, plus any extra params.

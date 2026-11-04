@@ -618,7 +618,12 @@ func (c *apiClient) get(path string, params neturl.Values) (any, error) {
 	if len(params) > 0 {
 		u += "?" + params.Encode()
 	}
-	resp, err := c.http.Get(u)
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	managedHeaders(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
@@ -631,7 +636,13 @@ func (c *apiClient) post(path string, body any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Post(c.base+path, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequest(http.MethodPost, c.base+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	managedHeaders(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", path, err)
 	}
@@ -649,6 +660,7 @@ func (c *apiClient) put(path string, body any) (any, error) {
 		return nil, fmt.Errorf("PUT %s: %w", path, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	managedHeaders(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("PUT %s: %w", path, err)

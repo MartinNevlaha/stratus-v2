@@ -77,9 +77,13 @@ func (c *CommsClient) post(path string, body any, out any) error {
 }
 
 // RegisterPeer registers or refreshes the session and returns its handle.
-func (c *CommsClient) RegisterPeer(key, runtime, project string) (*PeerInfo, error) {
+func (c *CommsClient) RegisterPeer(key, runtime, project string, root ...string) (*PeerInfo, error) {
 	var p PeerInfo
-	if err := c.post("/api/peers", map[string]string{"session_key": key, "runtime": runtime, "project": project}, &p); err != nil {
+	body := map[string]string{"session_key": key, "runtime": runtime, "project": project}
+	if len(root) > 0 {
+		body["project_root"] = root[0]
+	}
+	if err := c.post("/api/peers", body, &p); err != nil {
 		return nil, err
 	}
 	return &p, nil
@@ -103,8 +107,12 @@ func (c *CommsClient) ClaimInbox(key string) ([]InboxMessage, error) {
 }
 
 // ActivePeers lists the active sessions.
-func (c *CommsClient) ActivePeers() ([]PeerInfo, error) {
-	resp, err := c.HTTP.Get(c.Base + "/api/peers?active=1")
+func (c *CommsClient) ActivePeers(key ...string) ([]PeerInfo, error) {
+	query := url.Values{"active": {"1"}}
+	if len(key) > 0 {
+		query.Set("session_id", key[0])
+	}
+	resp, err := c.HTTP.Get(c.Base + "/api/peers?" + query.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("list peers: %w", err)
 	}

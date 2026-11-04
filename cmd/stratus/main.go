@@ -401,6 +401,9 @@ func cmdServe() {
 	go func() {
 		<-sigCh
 		log.Println("stratus shutting down…")
+		if err := srv.CloseTeams(); err != nil {
+			log.Printf("team shutdown: %v", err)
+		}
 		guardianCancel()
 		if insightEngine != nil {
 			insightEngine.Stop()
@@ -598,6 +601,9 @@ func cmdPort() {
 func cmdMCPServe() {
 	cfg := config.Load()
 	apiBase := fmt.Sprintf("http://localhost:%d", cfg.Port)
+	if os.Getenv("STRATUS_TEAM_TOKEN") != "" && os.Getenv("STRATUS_TEAM_API_BASE") != "" {
+		apiBase = os.Getenv("STRATUS_TEAM_API_BASE")
+	}
 
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	srv := mcp.New()

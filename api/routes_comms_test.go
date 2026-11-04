@@ -20,7 +20,7 @@ func commsTestServer(t *testing.T) *Server {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-	return &Server{db: database, hub: NewHub()}
+	return &Server{db: database, hub: NewHub(), projectRoot: t.TempDir()}
 }
 
 func commsDo(t *testing.T, h http.HandlerFunc, method, target, body string, pathVals map[string]string) *httptest.ResponseRecorder {
@@ -36,7 +36,8 @@ func commsDo(t *testing.T, h http.HandlerFunc, method, target, body string, path
 
 func registerTestPeer(t *testing.T, s *Server, key, runtime string) db.Peer {
 	t.Helper()
-	w := commsDo(t, s.handleRegisterPeer, "POST", "/api/peers", `{"session_key":"`+key+`","runtime":"`+runtime+`","project":"p"}`, nil)
+	body, _ := json.Marshal(map[string]string{"session_key": key, "runtime": runtime, "project": "p", "project_root": s.projectRoot})
+	w := commsDo(t, s.handleRegisterPeer, "POST", "/api/peers", string(body), nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("register %s: %d %s", key, w.Code, w.Body)
 	}

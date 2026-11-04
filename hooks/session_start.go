@@ -37,11 +37,11 @@ func commsContext(event HookEvent) string {
 		project = filepath.Base(event.Cwd)
 	}
 	client := defaultCommsClient()
-	self, err := client.RegisterPeer(event.SessionID, "claude-code", project)
+	self, err := client.RegisterPeer(event.SessionID, "claude-code", project, event.Cwd)
 	if err != nil || self.Handle == "" {
 		return ""
 	}
-	peers, _ := client.ActivePeers()
+	peers, _ := client.ActivePeers(event.SessionID)
 	parts := []string{CommsIntro(self, peers, event.SessionID)}
 	if msgs, err := client.ClaimInbox(event.SessionID); err == nil && len(msgs) > 0 {
 		parts = append(parts, FormatInbox(msgs))

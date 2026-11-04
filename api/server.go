@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ import (
 	wiki_engine "github.com/MartinNevlaha/stratus-v2/internal/insight/wiki_engine"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
+	"github.com/MartinNevlaha/stratus-v2/teamruntime"
+	"github.com/MartinNevlaha/stratus-v2/teams"
 	"github.com/MartinNevlaha/stratus-v2/terminal"
 	"github.com/MartinNevlaha/stratus-v2/vexor"
 )
@@ -29,6 +32,12 @@ import (
 const emitEventTimeout = 5 * time.Second
 
 type Server struct {
+	teamEvidenceMu sync.Mutex
+
+	teams        *teams.Manager
+	teamAdapters map[string]teams.Adapter
+	teamsErr     error
+
 	// idleThrottle limits idle_prompt "waiting" broadcasts so a finished turn per prompt
 	// does not toast every time; its zero value is ready to use.
 	idleThrottle waitingThrottle
@@ -104,6 +113,24 @@ func NewServer(
 		vaultSync:     newVaultSyncForConfig(cfg, database),
 		dirtyFiles:    make(map[string]struct{}),
 		dirtyCh:       make(chan struct{}, 1),
+	}
+	s.teamAdapters = teamruntime.Adapters()
+	s.teams, s.teamsErr = teams.NewManager(database.SQL(), s.teamAdapters, func() {
+		if err := s.syncManagedTeamState(); err != nil {
+			log.Printf("team evidence: %v", err)
+		}
+		if s.hub != nil {
+			s.hub.BroadcastJSON("team_updated", map[string]any{})
+		}
+	})
+	if s.teams != nil {
+		s.teams.SetRevisionValidator(func(root, revision string) bool {
+			current, err := teamCodeRevision(root)
+			return err == nil && current == revision
+		})
+	}
+	if s.teamsErr != nil {
+		log.Printf("teams unavailable: %v", s.teamsErr)
 	}
 	go s.indexWorker()
 	return s
@@ -252,6 +279,8 @@ func (s *Server) indexWorker() {
 // Handler builds and returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	s.registerTeamRoutes(mux)
 
 	// Health
 	mux.HandleFunc("GET /api/health", s.handleHealth)
@@ -488,17 +517,29 @@ func (s *Server) Handler() http.Handler {
 	// Static files (embedded Svelte SPA) with SPA fallback to index.html
 	mux.Handle("/", s.spaHandler())
 
-	return corsMiddleware(mux)
+	return corsMiddleware(s.managedTeamGuard(mux))
 }
 
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe(port int) error {
 	addr := fmt.Sprintf(":%d", port)
-	return http.ListenAndServe(addr, s.Handler())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
 }
 
 // Serve starts the HTTP server on an existing listener.
 func (s *Server) Serve(ln net.Listener) error {
+	if s.teams != nil {
+		if exe, err := os.Executable(); err == nil {
+			_, port, err := net.SplitHostPort(ln.Addr().String())
+			if err == nil {
+				s.teams.SetRuntimeConfig(exe, "http://127.0.0.1:"+port)
+			}
+		}
+	}
 	return http.Serve(ln, s.Handler())
 }
 

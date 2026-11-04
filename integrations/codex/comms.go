@@ -21,12 +21,12 @@ func newComms(base string) *hooks.CommsClient { return hooks.NewCommsClient(base
 // commsSessionNotice registers the session as a peer and returns its identity intro plus
 // any waiting messages; "" when the API is unreachable.
 func commsSessionNotice(c *hooks.CommsClient, sessionID, project string) string {
-	self, err := c.RegisterPeer(commsPeerKey(sessionID), "codex", projectName(project))
+	self, err := c.RegisterPeer(commsPeerKey(sessionID), "codex", projectName(project), project)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Stratus Codex comms:", err)
 		return ""
 	}
-	peers, err := c.ActivePeers()
+	peers, err := c.ActivePeers(commsPeerKey(sessionID))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Stratus Codex comms:", err)
 	}

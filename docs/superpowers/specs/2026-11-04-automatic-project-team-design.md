@@ -1,6 +1,6 @@
 # Automatická spolupráca tímu spúšťaného cez Stratus
 
-Dátum: 2026-11-04. Stav: návrh na schválenie, zatiaľ bez implementácie.
+Dátum: 2026-11-04. Stav: schválené a implementované na vetve `codex/automatic-project-team`; záverečné overenie je v implementačnom pláne.
 
 ## Zámer a rozhodnutia používateľa
 
@@ -15,7 +15,7 @@ príkazy na čakanie ani prenášať správy medzi oknami. Výslovne vybral:
 5. Výslovné využitie GPT Astra aj v Codexe, najmä pri návrhoch a reviews.
    Hlasový prepis „GPT Aster“ sa tu interpretuje ako GPT-6 Astra, ktorý je
    uvedený v lokálnom katalógu Codexu. Konkrétne predvolené úrovne nižšie sú
-   návrh, nie už schválené alebo aplikované nastavenie.
+   schválená tímová šablóna; nejde o zmenu globálnych nastavení.
 6. Nízka tokenová réžia celej spolupráce; automatizácia nemá znamenať
    neustále rozhovory agentov ani najdrahší model pri každom kroku.
 

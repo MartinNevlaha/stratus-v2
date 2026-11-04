@@ -22,11 +22,18 @@ const (
 
 // commsError maps comms sentinel errors to HTTP statuses. Recipient errors list the
 // active handles so the calling agent can correct its address.
-func (s *Server) commsError(w http.ResponseWriter, op string, err error) {
+func (s *Server) commsError(w http.ResponseWriter, op string, err error, caller ...string) {
 	switch {
 	case errors.Is(err, db.ErrUnknownRecipient), errors.Is(err, db.ErrNoRecipients):
 		handles := []string{}
-		if peers, perr := s.db.ListPeers(true); perr == nil {
+		var peers []db.Peer
+		var perr error
+		if len(caller) > 0 && caller[0] != db.UserKey {
+			peers, perr = s.db.ListPeersForSession(caller[0], true)
+		} else if len(caller) > 0 {
+			peers, perr = s.db.ListPeers(true)
+		}
+		if perr == nil {
 			for _, p := range peers {
 				handles = append(handles, p.Handle+" ("+p.Runtime+")")
 			}
@@ -42,10 +49,12 @@ func (s *Server) commsError(w http.ResponseWriter, op string, err error) {
 		})
 	case errors.Is(err, db.ErrPeerNotFound), errors.Is(err, db.ErrTaskNotFound):
 		jsonErr(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, db.ErrProjectScope):
+		jsonErr(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, db.ErrHandleTaken), errors.Is(err, db.ErrTaskTaken):
 		jsonErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, db.ErrInvalidHandle), errors.Is(err, db.ErrInvalidKind), errors.Is(err, db.ErrEmptyBody),
-		errors.Is(err, db.ErrInvalidTaskStatus), errors.Is(err, db.ErrEmptyTitle), errors.Is(err, db.ErrTooLong):
+		errors.Is(err, db.ErrInvalidTaskStatus), errors.Is(err, db.ErrEmptyTitle), errors.Is(err, db.ErrTooLong), errors.Is(err, db.ErrInvalidProjectRoot):
 		jsonErr(w, http.StatusBadRequest, err.Error())
 	default:
 		log.Printf("comms %s: %v", op, err)
@@ -55,9 +64,10 @@ func (s *Server) commsError(w http.ResponseWriter, op string, err error) {
 
 func (s *Server) handleRegisterPeer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		SessionKey string `json:"session_key"`
-		Runtime    string `json:"runtime"`
-		Project    string `json:"project"`
+		SessionKey  string `json:"session_key"`
+		Runtime     string `json:"runtime"`
+		Project     string `json:"project"`
+		ProjectRoot string `json:"project_root"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -71,7 +81,13 @@ func (s *Server) handleRegisterPeer(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "runtime must be claude-code, opencode or codex")
 		return
 	}
-	p, err := s.db.UpsertPeer(body.SessionKey, body.Runtime, body.Project)
+	var p *db.Peer
+	var err error
+	if body.ProjectRoot != "" {
+		p, err = s.db.UpsertPeerInProject(body.SessionKey, body.Runtime, body.Project, body.ProjectRoot)
+	} else {
+		p, err = s.db.UpsertPeer(body.SessionKey, body.Runtime, body.Project)
+	}
 	if err != nil {
 		s.commsError(w, "register peer", err)
 		return
@@ -81,7 +97,13 @@ func (s *Server) handleRegisterPeer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) {
-	peers, err := s.db.ListPeers(r.URL.Query().Get("active") == "1")
+	var peers []db.Peer
+	var err error
+	if key := r.URL.Query().Get("session_id"); key != "" {
+		peers, err = s.db.ListPeersForSession(key, r.URL.Query().Get("active") == "1")
+	} else {
+		peers, err = s.db.ListPeers(r.URL.Query().Get("active") == "1")
+	}
 	if err != nil {
 		s.commsError(w, "list peers", err)
 		return
@@ -136,7 +158,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	m, recipients, err := s.db.SendMessage(body.From, body.To, body.Kind, body.Body, body.TaskID)
 	if err != nil {
-		s.commsError(w, "send message", err)
+		s.commsError(w, "send message", err, body.From)
 		return
 	}
 	s.hub.BroadcastJSON("message_sent", m)
@@ -150,7 +172,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
-	msgs, err := s.db.ListMessages(r.URL.Query().Get("peer"), queryInt(r, "limit", 200))
+	var msgs []db.Message
+	var err error
+	if key := r.URL.Query().Get("session_id"); key != "" {
+		msgs, err = s.db.ListMessagesForSession(key, queryInt(r, "limit", 200))
+	} else {
+		msgs, err = s.db.ListMessages(r.URL.Query().Get("peer"), queryInt(r, "limit", 200))
+	}
 	if err != nil {
 		s.commsError(w, "list messages", err)
 		return
@@ -245,9 +273,15 @@ func (s *Server) handleCreateSharedTask(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusBadRequest, "created_by is required")
 		return
 	}
-	t, err := s.db.CreateSharedTask(body.CreatedBy, body.Title, body.Description, body.Assignee)
+	var t *db.SharedTask
+	var err error
+	if body.CreatedBy == db.UserKey && s.projectRoot != "" {
+		t, err = s.db.CreateSharedTaskInProject(body.CreatedBy, body.Title, body.Description, body.Assignee, s.projectRoot)
+	} else {
+		t, err = s.db.CreateSharedTask(body.CreatedBy, body.Title, body.Description, body.Assignee)
+	}
 	if err != nil {
-		s.commsError(w, "create shared task", err)
+		s.commsError(w, "create shared task", err, body.CreatedBy)
 		return
 	}
 	s.hub.BroadcastJSON("shared_task_updated", t)
@@ -263,7 +297,13 @@ func (s *Server) handleListSharedTasks(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "status must be one of "+strings.Join(db.SharedTaskStatuses, ", "))
 		return
 	}
-	tasks, err := s.db.ListSharedTasks(status)
+	var tasks []db.SharedTask
+	var err error
+	if key := r.URL.Query().Get("session_id"); key != "" {
+		tasks, err = s.db.ListSharedTasksForSession(key, status)
+	} else {
+		tasks, err = s.db.ListSharedTasks(status)
+	}
 	if err != nil {
 		s.commsError(w, "list shared tasks", err)
 		return
@@ -293,7 +333,7 @@ func (s *Server) handleUpdateSharedTask(w http.ResponseWriter, r *http.Request) 
 	}
 	t, err := s.db.UpdateSharedTask(id, body.Actor, db.SharedTaskUpdate{Status: body.Status, Result: body.Result, Assignee: body.Assignee})
 	if err != nil {
-		s.commsError(w, "update shared task", err)
+		s.commsError(w, "update shared task", err, body.Actor)
 		return
 	}
 	s.hub.BroadcastJSON("shared_task_updated", t)

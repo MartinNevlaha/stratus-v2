@@ -36,18 +36,20 @@ const (
 const heartbeatInterval = time.Minute
 
 var (
-	ErrPeerNotFound      = errors.New("peer not found")
-	ErrInvalidHandle     = errors.New("invalid handle")
-	ErrHandleTaken       = errors.New("handle already taken")
-	ErrUnknownRecipient  = errors.New("unknown recipient")
-	ErrNoRecipients      = errors.New("no active recipients")
-	ErrInvalidKind       = errors.New("invalid message kind")
-	ErrEmptyBody         = errors.New("message body is empty")
-	ErrTaskNotFound      = errors.New("shared task not found")
-	ErrInvalidTaskStatus = errors.New("invalid shared task status")
-	ErrEmptyTitle        = errors.New("shared task title is empty")
-	ErrTooLong           = errors.New("text too long")
-	ErrTaskTaken         = errors.New("shared task is already assigned to another session")
+	ErrPeerNotFound       = errors.New("peer not found")
+	ErrInvalidHandle      = errors.New("invalid handle")
+	ErrHandleTaken        = errors.New("handle already taken")
+	ErrUnknownRecipient   = errors.New("unknown recipient")
+	ErrNoRecipients       = errors.New("no active recipients")
+	ErrInvalidKind        = errors.New("invalid message kind")
+	ErrEmptyBody          = errors.New("message body is empty")
+	ErrTaskNotFound       = errors.New("shared task not found")
+	ErrInvalidTaskStatus  = errors.New("invalid shared task status")
+	ErrEmptyTitle         = errors.New("shared task title is empty")
+	ErrTooLong            = errors.New("text too long")
+	ErrTaskTaken          = errors.New("shared task is already assigned to another session")
+	ErrProjectScope       = errors.New("session and target must belong to the same verified project")
+	ErrInvalidProjectRoot = errors.New("invalid project root")
 )
 
 // MessageKinds lists the accepted message kinds.
@@ -66,17 +68,20 @@ var handlePrefix = map[string]string{"claude-code": "claude", "opencode": "openc
 var handleRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,31}$`)
 
 type Peer struct {
-	SessionKey string  `json:"session_key"`
-	Runtime    string  `json:"runtime"`
-	Handle     string  `json:"handle"`
-	Project    string  `json:"project"`
-	StartedAt  string  `json:"started_at"`
-	LastSeenAt string  `json:"last_seen_at"`
-	EndedAt    *string `json:"ended_at,omitempty"`
-	Active     bool    `json:"active"`
+	SessionKey  string  `json:"session_key"`
+	Runtime     string  `json:"runtime"`
+	Handle      string  `json:"handle"`
+	Project     string  `json:"project"`
+	ProjectID   string  `json:"project_id"`
+	ProjectRoot string  `json:"project_root"`
+	StartedAt   string  `json:"started_at"`
+	LastSeenAt  string  `json:"last_seen_at"`
+	EndedAt     *string `json:"ended_at,omitempty"`
+	Active      bool    `json:"active"`
 }
 
 type Message struct {
+	ProjectID   string   `json:"project_id"`
 	ID          int64    `json:"id"`
 	FromKey     string   `json:"from_key"`
 	FromHandle  string   `json:"from_handle"`
@@ -90,6 +95,7 @@ type Message struct {
 }
 
 type SharedTask struct {
+	ProjectID       string `json:"project_id"`
 	ID              int64  `json:"id"`
 	Title           string `json:"title"`
 	Description     string `json:"description"`
@@ -147,12 +153,12 @@ func randomHandle(runtime string) string {
 	return handlePrefix[runtime] + "-" + hex.EncodeToString(b)
 }
 
-const peerCols = `session_key, runtime, handle, project, started_at, last_seen_at, ended_at`
+const peerCols = `session_key, runtime, handle, project, started_at, last_seen_at, ended_at, project_id, project_root`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var p Peer
 	var ended sql.NullString
-	if err := row.Scan(&p.SessionKey, &p.Runtime, &p.Handle, &p.Project, &p.StartedAt, &p.LastSeenAt, &ended); err != nil {
+	if err := row.Scan(&p.SessionKey, &p.Runtime, &p.Handle, &p.Project, &p.StartedAt, &p.LastSeenAt, &ended, &p.ProjectID, &p.ProjectRoot); err != nil {
 		return nil, err
 	}
 	if ended.Valid {
@@ -187,7 +193,11 @@ func findPeerByKey(q querier, key string) (*Peer, error) {
 	return p, nil
 }
 
-func upsertPeer(q querier, key, runtime, project string) (*Peer, error) {
+func upsertPeer(q querier, key, runtime, project string, scope ...string) (*Peer, error) {
+	projectID, projectRoot := "", ""
+	if len(scope) == 2 {
+		projectID, projectRoot = scope[0], scope[1]
+	}
 	key = strings.TrimSpace(key)
 	if key == "" || key == UserKey {
 		return nil, fmt.Errorf("upsert peer: %w", ErrInvalidHandle)
@@ -206,10 +216,19 @@ func upsertPeer(q querier, key, runtime, project string) (*Peer, error) {
 	now := commsNow()
 	var err error
 	for range 8 { // retry only on a random handle collision
-		_, err = q.Exec(`INSERT INTO peers (`+peerCols+`) VALUES (?, ?, ?, ?, ?, ?, NULL)
+		var result sql.Result
+		result, err = q.Exec(`INSERT INTO peers (`+peerCols+`) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
 			ON CONFLICT(session_key) DO UPDATE SET last_seen_at = excluded.last_seen_at, ended_at = NULL,
-				project = CASE WHEN excluded.project = '' THEN peers.project ELSE excluded.project END`,
-			key, runtime, randomHandle(runtime), project, now, now)
+				project = CASE WHEN excluded.project = '' THEN peers.project ELSE excluded.project END,
+				project_id = CASE WHEN excluded.project_id = '' THEN peers.project_id ELSE excluded.project_id END,
+				project_root = CASE WHEN excluded.project_root = '' THEN peers.project_root ELSE excluded.project_root END
+			WHERE excluded.project_id = '' OR peers.project_id = '' OR peers.project_id = excluded.project_id`,
+			key, runtime, randomHandle(runtime), project, now, now, projectID, projectRoot)
+		if err == nil {
+			if n, _ := result.RowsAffected(); n == 0 {
+				return nil, ErrProjectScope
+			}
+		}
 		if err == nil || !strings.Contains(err.Error(), "peers.handle") {
 			break
 		}
@@ -307,9 +326,17 @@ func resolveRecipients(q querier, fromKey, to string) ([]string, error) {
 	if to == UserKey {
 		return nil, nil
 	}
+	projectID, err := senderProject(q, fromKey)
+	if err != nil {
+		return nil, err
+	}
 	if to == "*" || NormalizeRuntime(to) != "" {
 		query := `SELECT session_key FROM peers WHERE ended_at IS NULL AND last_seen_at >= ? AND session_key != ?`
 		args := []any{activeCutoff(), fromKey}
+		if fromKey != UserKey {
+			query += ` AND project_id = ?`
+			args = append(args, projectID)
+		}
 		if to != "*" {
 			query += ` AND runtime = ?`
 			args = append(args, NormalizeRuntime(to))
@@ -342,6 +369,9 @@ func resolveRecipients(q querier, fromKey, to string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if fromKey != UserKey && p.ProjectID != projectID {
+		return nil, ErrProjectScope
+	}
 	return []string{p.SessionKey}, nil
 }
 
@@ -361,13 +391,32 @@ func sendMessage(q querier, fromKey, to, kind, body string, taskID *int64) (*Mes
 	if err := requireSender(q, fromKey); err != nil {
 		return nil, nil, err
 	}
+	if taskID != nil {
+		if err := checkTaskProject(q, fromKey, *taskID); err != nil {
+			return nil, nil, err
+		}
+	}
 	recipients, err := resolveRecipients(q, fromKey, to)
 	if err != nil {
 		return nil, nil, err
 	}
 	now := commsNow()
-	res, err := q.Exec(`INSERT INTO messages (from_key, to_spec, kind, body, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		fromKey, strings.TrimSpace(to), kind, body, taskID, now)
+	projectID := ""
+	if fromKey != UserKey {
+		p, e := findPeerByKey(q, fromKey)
+		if e != nil {
+			return nil, nil, e
+		}
+		projectID = p.ProjectID
+	} else if len(recipients) == 1 {
+		p, e := findPeerByKey(q, recipients[0])
+		if e != nil {
+			return nil, nil, e
+		}
+		projectID = p.ProjectID
+	}
+	res, err := q.Exec(`INSERT INTO messages (from_key, to_spec, kind, body, task_id, created_at, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		fromKey, strings.TrimSpace(to), kind, body, taskID, now, projectID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("insert message: %w", err)
 	}
@@ -403,7 +452,7 @@ func (d *DB) SendMessage(fromKey, to, kind, body string, taskID *int64) (*Messag
 }
 
 const messageSelect = `SELECT m.id, m.from_key, COALESCE(p.handle, m.from_key), COALESCE(p.runtime, ''), COALESCE((SELECT handle FROM peers WHERE session_key = m.to_spec), m.to_spec), m.kind, m.body, m.task_id, m.created_at,
-	(SELECT group_concat(COALESCE(rp.handle, r.session_key), ',') FROM message_recipients r LEFT JOIN peers rp ON rp.session_key = r.session_key WHERE r.message_id = m.id)
+	(SELECT group_concat(COALESCE(rp.handle, r.session_key), ',') FROM message_recipients r LEFT JOIN peers rp ON rp.session_key = r.session_key WHERE r.message_id = m.id), m.project_id
 	FROM messages m LEFT JOIN peers p ON p.session_key = m.from_key `
 
 func queryMessages(q querier, where string, args []any, limit int) ([]Message, error) {
@@ -417,7 +466,7 @@ func queryMessages(q querier, where string, args []any, limit int) ([]Message, e
 		var m Message
 		var task sql.NullInt64
 		var recips sql.NullString
-		if err := rows.Scan(&m.ID, &m.FromKey, &m.FromHandle, &m.FromRuntime, &m.ToSpec, &m.Kind, &m.Body, &task, &m.CreatedAt, &recips); err != nil {
+		if err := rows.Scan(&m.ID, &m.FromKey, &m.FromHandle, &m.FromRuntime, &m.ToSpec, &m.Kind, &m.Body, &task, &m.CreatedAt, &recips, &m.ProjectID); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		if task.Valid {
@@ -539,12 +588,12 @@ func (d *DB) ListMessages(peer string, limit int) ([]Message, error) {
 	return queryMessages(d.sql, `WHERE m.from_key = ? OR m.id IN (SELECT message_id FROM message_recipients WHERE session_key = ?)`, []any{key, key}, limit)
 }
 
-const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.created_by, COALESCE(c.handle, t.created_by), COALESCE(t.assignee, ''), COALESCE(a.handle, t.assignee, ''), t.result, t.created_at, t.updated_at
+const taskSelect = `SELECT t.id, t.title, t.description, t.status, t.created_by, COALESCE(c.handle, t.created_by), COALESCE(t.assignee, ''), COALESCE(a.handle, t.assignee, ''), t.result, t.created_at, t.updated_at, t.project_id
 	FROM shared_tasks t LEFT JOIN peers c ON c.session_key = t.created_by LEFT JOIN peers a ON a.session_key = t.assignee `
 
 func scanTask(row interface{ Scan(...any) error }) (*SharedTask, error) {
 	var t SharedTask
-	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.CreatedBy, &t.CreatedByHandle, &t.Assignee, &t.AssigneeHandle, &t.Result, &t.CreatedAt, &t.UpdatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.CreatedBy, &t.CreatedByHandle, &t.Assignee, &t.AssigneeHandle, &t.Result, &t.CreatedAt, &t.UpdatedAt, &t.ProjectID); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -579,6 +628,10 @@ func resolveAssignee(q querier, ref string) (string, error) {
 
 // CreateSharedTask adds a task to the shared board; an assignee gets a task_assigned message.
 func (d *DB) CreateSharedTask(createdBy, title, description, assignee string) (*SharedTask, error) {
+	return d.createSharedTask(createdBy, title, description, assignee, "")
+}
+
+func (d *DB) createSharedTask(createdBy, title, description, assignee, requiredProject string) (*SharedTask, error) {
 	if strings.TrimSpace(title) == "" {
 		return nil, ErrEmptyTitle
 	}
@@ -597,9 +650,31 @@ func (d *DB) CreateSharedTask(createdBy, title, description, assignee string) (*
 	if err != nil {
 		return nil, err
 	}
+	projectID, err := senderProject(tx, createdBy)
+	if err != nil {
+		return nil, err
+	}
+	if requiredProject != "" {
+		if createdBy != UserKey && requiredProject != projectID {
+			return nil, ErrProjectScope
+		}
+		projectID = requiredProject
+	}
+	if assigneeKey != "" {
+		p, e := findPeerByKey(tx, assigneeKey)
+		if e != nil {
+			return nil, e
+		}
+		if createdBy == UserKey && projectID == "" {
+			projectID = p.ProjectID
+		}
+		if projectID == "" || p.ProjectID != projectID {
+			return nil, ErrProjectScope
+		}
+	}
 	now := commsNow()
-	res, err := tx.Exec(`INSERT INTO shared_tasks (title, description, status, created_by, assignee, created_at, updated_at) VALUES (?, ?, 'open', ?, NULLIF(?, ''), ?, ?)`,
-		strings.TrimSpace(title), description, createdBy, assigneeKey, now, now)
+	res, err := tx.Exec(`INSERT INTO shared_tasks (title, description, status, created_by, assignee, created_at, updated_at, project_id) VALUES (?, ?, 'open', ?, NULLIF(?, ''), ?, ?, ?)`,
+		strings.TrimSpace(title), description, createdBy, assigneeKey, now, now, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("insert shared task: %w", err)
 	}
@@ -657,11 +732,19 @@ func (d *DB) UpdateSharedTask(id int64, actor string, u SharedTaskUpdate) (*Shar
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
+	// Acquire the SQLite writer before reading ownership so simultaneous claims
+	// serialize instead of both observing an unassigned task.
+	if _, err := tx.Exec(`UPDATE shared_tasks SET updated_at = updated_at WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("lock shared task: %w", err)
+	}
 	t, err := getTask(tx, id)
 	if err != nil {
 		return nil, err
 	}
 	if err := requireSender(tx, actor); err != nil {
+		return nil, err
+	}
+	if err := checkTaskProject(tx, actor, id); err != nil {
 		return nil, err
 	}
 	if u.Result != nil && len(*u.Result) > MaxTaskDescription {
@@ -672,11 +755,26 @@ func (d *DB) UpdateSharedTask(id int64, actor string, u SharedTaskUpdate) (*Shar
 		if assignee, err = resolveAssignee(tx, *u.Assignee); err != nil {
 			return nil, err
 		}
+		if assignee != "" {
+			p, e := findPeerByKey(tx, assignee)
+			if e != nil {
+				return nil, e
+			}
+			if p.ProjectID == "" || p.ProjectID != t.ProjectID {
+				return nil, ErrProjectScope
+			}
+		}
 	} else if u.Status != nil && *u.Status == "claimed" && actor != UserKey {
 		if assignee != "" && assignee != actor {
 			return nil, fmt.Errorf("%w (task #%d belongs to %s)", ErrTaskTaken, id, t.AssigneeHandle)
 		}
 		assignee = actor
+	}
+	if actor != UserKey && actor != t.CreatedBy && actor != t.Assignee {
+		claimingOpen := t.Status == "open" && t.Assignee == "" && u.Status != nil && *u.Status == "claimed" && assignee == actor
+		if !claimingOpen {
+			return nil, ErrTaskTaken
+		}
 	}
 	status, result := t.Status, t.Result
 	if u.Status != nil {

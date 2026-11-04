@@ -185,6 +185,11 @@ func (d *DB) migrateWikiPagesWorkflowColumns() error {
 // migrations contains ALTER TABLE statements for columns added after the initial schema.
 // Each runs on every startup; duplicate-column errors are silently ignored.
 var migrations = []string{
+	`ALTER TABLE peers ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE peers ADD COLUMN project_root TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE shared_tasks ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE messages ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`,
+	`CREATE INDEX IF NOT EXISTS idx_peers_project ON peers(project_id)`,
 	`ALTER TABLE workflow_agents ADD COLUMN native_agent_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE workflow_agents ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE workflow_agents ADD COLUMN review_generation INTEGER NOT NULL DEFAULT 0`,

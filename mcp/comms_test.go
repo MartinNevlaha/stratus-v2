@@ -246,12 +246,12 @@ func TestSharedTaskCreate_PostsCreatedBy(t *testing.T) {
 func TestSharedTaskList_FiltersByStatus(t *testing.T) {
 	var calls []recordedCall
 	s := commsServer(t, "", `{"tasks":[]}`, &calls)
-	callTool(t, s, "shared_task_list", map[string]any{"status": "open"})
-	if c := calls[0]; c.Method != "GET" || c.Path != "/api/shared-tasks" || c.Query["status"] != "open" {
+	callTool(t, s, "shared_task_list", map[string]any{"session_id": "me", "status": "open"})
+	if c := calls[0]; c.Method != "GET" || c.Path != "/api/shared-tasks" || c.Query["status"] != "open" || c.Query["session_id"] != "me" {
 		t.Fatalf("call: %+v", c)
 	}
-	callTool(t, s, "shared_task_list", map[string]any{})
-	if len(calls[1].Query) != 0 {
+	callTool(t, s, "shared_task_list", map[string]any{"session_id": "me"})
+	if len(calls[1].Query) != 1 || calls[1].Query["session_id"] != "me" {
 		t.Fatalf("unexpected query: %v", calls[1].Query)
 	}
 }
@@ -284,6 +284,7 @@ func TestCommsTools_CodexRewritesSessionID(t *testing.T) {
 		"message_inbox":      {},
 		"message_wait":       {"timeout_s": float64(1)},
 		"shared_task_create": {"title": "T"},
+		"shared_task_list":   {},
 		"shared_task_update": {"task_id": float64(3), "status": "done"},
 	} {
 		calls = nil
@@ -303,7 +304,14 @@ func TestCommsTools_CodexRewritesSessionID(t *testing.T) {
 			if c.Body["actor"] != "codex:nat1" {
 				t.Errorf("%s: actor = %v", name, c.Body["actor"])
 			}
+		case "shared_task_list":
+			if c.Query["session_id"] != "codex:nat1" {
+				t.Errorf("unscoped task list: %+v", c)
+			}
 		case "peers_list":
+			if c.Query["session_id"] != "codex:nat1" {
+				t.Errorf("unscoped peer list: %+v", c)
+			}
 			if you, _ := out.(map[string]any)["you"].(map[string]any); you["handle"] != "codex-x" {
 				t.Errorf("%s: you = %v", name, out)
 			}

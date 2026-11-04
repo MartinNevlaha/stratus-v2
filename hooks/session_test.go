@@ -124,7 +124,7 @@ func TestSessionStart_TellsActiveWorkflowsAndRegistersSession(t *testing.T) {
 	}
 	want := []string{
 		`/api/sessions {"content_session_id":"s9","project":"shop"}`,
-		`/api/peers {"project":"shop","runtime":"claude-code","session_key":"s9"}`,
+		`/api/peers {"project":"shop","project_root":"/home/u/projects/shop","runtime":"claude-code","session_key":"s9"}`,
 	}
 	if got := api.posted(); len(got) < len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("posts = %v, want them to start with %v", got, want)
