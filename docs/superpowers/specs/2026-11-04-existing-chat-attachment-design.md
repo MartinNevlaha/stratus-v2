@@ -9,6 +9,9 @@ nie implementovaná funkcia. Nadväzuje na
 Používateľ chce pripojiť aj existujúci chat a viesť z neho prácu tímu.
 Výslovne vybral jednorazové pripojenie: v pôvodnom chate povie
 „pripoj tento chat k tímu“, potom už spolupráca pokračuje automaticky.
+Následne upresnil, že Codex má využiť podobný spôsob ako existujúce
+posielanie správ medzi jeho chatmi. Táto cesta má prednosť pred budovaním
+vlastného odlišného spôsobu doručovania.
 Zostávajú požiadavky na nízku spotrebu, prebúdzenie nečinného príjemcu,
 prideľovanie modelov podľa rolí a zachovanie spec, spec-complex, bug a e2e.
 
@@ -171,13 +174,29 @@ Nasledujúce zistenia sú podklady návrhu, nie výsledky živého acceptance te
   bez pluginu môže potrebovať podporované znovunačítanie; hot reload sa
   nesľubuje bez overenia.
 - **Codex:** pripojenie musí viesť k hostu pôvodného chatu cez podporované
-  rozhranie. Existencia app-server API nepreukazuje prístup k aktuálnemu
-  desktop hostu. V kontrolovanom prostredí predvolený daemon nebol
-  dostupný. `codex queue` môže skončiť úspešne aj bez úspešného prebudenia.
-  Nástroje dostupné asistentovi v aplikácii nie sú automaticky verejným
-  rozhraním pre trvalý Stratus server. Podpora ľubovoľného desktop chatu
-  zostáva otvorenou integračnou podmienkou; nepoužije sa súkromné IPC,
-  fingovaná identita volajúceho ani druhý proces s `resume`.
+  rozhranie. Preferovaný kontrakt vychádza z existujúcich app tools:
+  `send_message_to_thread` pre vstup do vybraného chatu, `wait_threads`
+  s kurzorom pre kompaktný stav/dokončenie a cielené `read_thread` pri
+  potrebnom zosúladení. Pri odoslaní sa vynechajú modelové overrides, aby
+  zostalo aktuálne nastavenie chatu. Jednorazové pripojenie musí obsahovať
+  oprávnenie používateľa na tímové správy do konkrétneho chatu; správa
+  kolegu sama osebe nevytvára nové oprávnenie na ďalšie adresáty.
+
+  Lokálny bundled konektor poskytuje štandardné MCP rozhranie, ale jeho
+  volanie vyžaduje identitu volajúceho chatu od executora. Nepotvrdilo sa,
+  že jednorazové načítanie tejto identity povoľuje nezávislému serveru
+  neskoršie volania na pozadí. Treba overiť podporovaný spôsob udelenia
+  trvalého, odvolateľného spojenia alebo hostiteľský bridge. Natívne
+  kontroly oprávnení sa zachovajú. Stratus nebude periodicky prebúdzať
+  pomocný model len preto, aby zavolal nástroj na preposlanie.
+
+  Alternatívou je app-server rozhranie skutočného pôvodného hosta.
+  Existencia API však nepreukazuje prístup k aktuálnemu desktop hostu.
+  V kontrolovanom prostredí predvolený daemon nebol dostupný;
+  `codex queue` môže skončiť úspešne aj bez úspešného prebudenia.
+  Podpora ľubovoľného desktop chatu zostáva otvorenou integračnou
+  podmienkou. Nepoužije sa súkromné IPC, fingovaná identita volajúceho
+  ani druhý proces s `resume`.
 
 Otvorené technické body sa overia najprv izolovaným experimentom a
 kontraktovými testami. Ak konkrétny host nedokáže požadovaný tok, zostane
