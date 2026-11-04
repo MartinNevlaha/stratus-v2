@@ -5,7 +5,7 @@
 <h1 align="center">stratus v2</h1>
 
 <p align="center">
-  <strong>A production-grade AI development framework for Claude Code and OpenCode.</strong><br/>
+  <strong>A production-grade AI development framework for Codex, Claude Code, and OpenCode.</strong><br/>
   Persistent memory · semantic retrieval · spec-driven orchestration · multi-agent swarms · Playwright E2E testing · voice input · live dashboard.
 </p>
 
@@ -17,7 +17,7 @@
 
 ## What it is
 
-Stratus gives your AI coding assistant a persistent brain, a structured workflow engine, and the ability to coordinate multiple agents working in parallel — all visible from a live dashboard. It runs as a local server alongside Claude Code or OpenCode and exposes 35 MCP tools that agents use to remember, retrieve, and coordinate.
+Stratus gives your AI coding assistant a persistent brain, a structured workflow engine, and the ability to coordinate multiple agents working in parallel — all visible from a live dashboard. It runs as a local server and exposes MCP tools for memory, retrieval, and coordination. [Managed project teams](#managed-project-teams) can run Codex, Claude Code, and OpenCode sessions and attach an existing Codex desktop chat.
 
 ### Why it matters
 
@@ -194,7 +194,7 @@ Real-time metrics visualization for workflow performance:
 
 ## Install
 
-**Requirements:** Go 1.21+
+**Requirements:** Go 1.25 or newer
 
 ```bash
 go install github.com/MartinNevlaha/stratus-v2/cmd/stratus@latest
@@ -228,12 +228,11 @@ make install     # builds frontend + Go binary → GOPATH/bin
 
 ```bash
 # 1. Initialize in your project
-#    Writes .stratus.json, .mcp.json, .claude/{skills,agents,rules,settings.json} and three
-#    Claude Code plugins in .claude/skills: stratus (the hooks), mdview and stratus-hud
 cd your-project
-stratus init                    # Claude Code (default)
-stratus init --target opencode  # OpenCode
-stratus init --target both      # Both simultaneously
+stratus init                       # Claude Code and OpenCode (default)
+stratus init --target claude-code  # Claude Code only
+stratus init --target opencode     # OpenCode only
+stratus init --target codex        # Codex adapter
 
 # 2. Start the server (dashboard + API on :41777)
 stratus serve
@@ -252,6 +251,27 @@ open http://localhost:41777
 ```
 
 Hooks ship in the `stratus` plugin and register automatically — no manual `.claude/settings.json` edits needed.
+
+---
+
+## Managed project teams
+
+1. Start `stratus serve` from the project root. Open the dashboard at the address it prints, or find the port with `stratus port`.
+2. Open **Tím** (Team), then **Nový tím** (New team). Stratus checks which installed runtimes are ready. Choose the runtime, model, and reasoning effort for each role, set the team's limits, and click **Spustiť tím** (Start team).
+3. Enter a task and click **Odoslať** (Send). For example, ask the lead to implement a change and have a separate agent review it. The lead receives the task by default. Follow assignments and results in **Tím**.
+
+Stratus starts workers when they have work. It routes messages and waits without calling a model, so an idle team uses no model tokens. The team has limits on concurrency, team inputs, and automatic rounds. A token limit applies where runtimes report usage. The lead still follows the project's workflow phases and review gates, including `spec-complex`.
+
+### Attach an existing Codex chat
+
+1. Install the current Stratus binary using the [install command](#install) and run `stratus serve` with that binary from the chat's project root. In the same project, run `stratus init --target codex` for first-time setup or `stratus refresh --target codex` to update an existing adapter. See [Codex adapter](#codex-adapter) if the project also has OpenCode configured.
+2. In Codex desktop, reload the project's MCP configuration and enable Stratus MCP in the trusted project. The app must make its native app-tools connector available to the chat. An existing standalone Codex CLI chat cannot attach through this connector.
+3. In the chat you want to keep using, say **“Connect this chat to the Stratus team.”** It leads a new project team if there is no active team. Otherwise it joins as a member. You can switch the lead from **Tím** with **Viesť tím z tohto chatu** (Lead from this chat) when the team's work allows it.
+4. Give the chat a team task. A member forwards the task to the lead, and Stratus delivers the final result to the original chat, waking it when needed. Its history and model carry over.
+
+To detach, say **“Disconnect this chat from the Stratus team”** or click **Odpojiť od tímu** (Detach from team). You can keep working in the chat. After a server restart, ask to join again in the same chat and use **Pokračovať** (Resume) if the team is paused.
+
+Stratus can launch new managed sessions in Codex, Claude Code, and OpenCode. Attaching an existing chat currently requires Codex desktop with the app-tools connector. See the [managed teams guide](docs/usage/managed-teams.md) for model profiles, approvals, and recovery.
 
 ---
 
@@ -295,7 +315,7 @@ Hooks ship in the `stratus` plugin and register automatically — no manual `.cl
 
 ## MCP Tools
 
-Registered in `.mcp.json` (Claude Code) or `opencode.json` (OpenCode) by `stratus init`. The server exposes 35 tools; the core ones:
+`stratus init` registers MCP in `.mcp.json` (Claude Code), `opencode.json` (OpenCode), or `.codex/config.toml` (Codex), depending on the target. Core tools include:
 
 | Tool | Description |
 |------|-------------|
@@ -685,7 +705,7 @@ Use `stratus init --target codex` to add the standalone Codex adapter, including
 
 If OpenCode is already installed, first refresh its Stratus plugin using the current binary with `stratus refresh --target opencode`. An older or customized installed plugin causes a prerequisite conflict rather than being overwritten by the Codex installer. Review customized files through the existing sync process.
 
-Run `stratus serve` in the project and start a fresh trusted Codex session. Review its project MCP and hook definitions through Codex's normal trust flow; file installation does not enable disabled capabilities or change models/permissions. The adapter stores files only under `.codex/` plus its sync metadata in `.stratus.json`. It leaves `.claude/`, `.opencode/`, and root `AGENTS.md` alone.
+Run `stratus serve` in the project and open it in Codex. Review its project MCP and hook definitions through Codex's normal trust flow. To connect an existing desktop chat, follow [Attach an existing Codex chat](#attach-an-existing-codex-chat). The adapter stores its files under `.codex/` and sync metadata in `.stratus.json`.
 
 Open `http://localhost:<configured-port>/?view=dashboard` in Codex's native browser for status without an embedded terminal. Obtain the port with `stratus port`. Native instructions live under `.codex/stratus/`. SessionStart supplies the native session ID for workflow registration; use `bind_workflow_session` to continue a Codex-owned workflow in a new session.
 
