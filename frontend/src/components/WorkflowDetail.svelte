@@ -112,7 +112,7 @@
     <span class="id">{wf.id}</span>
     {#if wf.runtime === 'codex'}<span class="phase">Codex</span>{/if}
     <span class="phase">{wf.aborted ? 'aborted' : wf.phase}</span>
-    {#if team}<WorkflowTeamLink {team} />{/if}
+    {#if team}<WorkflowTeamLink {team} workflowId={wf.id} />{/if}
     {#if wf.runtime === 'codex' && agents.every(a => a.usage_available !== true)}
       <span class="tokens">Usage unavailable</span>
     {:else if tokensIn + tokensOut > 0}

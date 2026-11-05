@@ -442,7 +442,7 @@
           <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
           <a class="wf-id" href="{WF_HASH}{encodeURIComponent(wf.id)}" onclick={() => { focusId = wf.id }} title="Open this workflow only">{wf.id}</a>
           <span class="wf-phase">{wf.phase}</span>
-          {#if teamForWorkflow.get(wf.id)}<WorkflowTeamLink team={teamForWorkflow.get(wf.id)!} />{/if}
+          {#if teamForWorkflow.get(wf.id)}<WorkflowTeamLink team={teamForWorkflow.get(wf.id)!} workflowId={wf.id} />{/if}
           <div class="wf-actions">
             {#if confirmDelete === wf.id}
               <span class="confirm-label">Delete?</span>
@@ -656,7 +656,7 @@
             <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
             <a class="wf-id" href="{WF_HASH}{encodeURIComponent(wf.id)}" onclick={() => { focusId = wf.id }} title="Open agents and tasks of this run">{wf.id}</a>
             <span class="wf-phase" class:aborted={wf.aborted}>{wf.aborted ? 'aborted' : wf.phase}</span>
-            {#if teamForWorkflow.get(wf.id)}<WorkflowTeamLink team={teamForWorkflow.get(wf.id)!} />{/if}
+            {#if teamForWorkflow.get(wf.id)}<WorkflowTeamLink team={teamForWorkflow.get(wf.id)!} workflowId={wf.id} />{/if}
             <span class="wf-ts">{new Date(wf.updated_at).toLocaleDateString()}</span>
             <div class="wf-actions">
               {#if confirmDelete === wf.id}

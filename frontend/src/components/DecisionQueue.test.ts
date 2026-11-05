@@ -219,3 +219,73 @@ it('should label action buttons with the item title and announce list changes po
   expect(labels).toContain(`Povoliť raz: ${approval.title}`)
   expect(labels).toContain(`Zamietnuť: ${approval.title}`)
 })
+
+const designReview: DecisionItem = {
+  id: 'design_review:t1:spec-x', kind: 'design_review', severity: 'warning', title: 'Review návrhu: spec-x',
+  detail: 'vyčerpané kolá: [must_fix] chýba rollback', created_at: '2026-11-05T10:00:00Z', link: '#/workflow/spec-x',
+  actions: [{ name: 'override', method: 'POST', path: '/teams/t1/design-review/override', body: { workflow_id: 'spec-x', reason: 'Review sa nepodarilo dokončiť' } }],
+}
+const overrideButton = () => Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Schváliť bez review') as HTMLButtonElement | undefined
+const confirmButton = () => Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Áno, schváliť') as HTMLButtonElement | undefined
+const posts = () => calls.filter(c => c.method === 'POST')
+
+it('should render a design review item like the others', async () => {
+  items = [designReview]
+  await show()
+  const row = document.querySelector('.row')!
+  expect(row.querySelector('.chip')?.textContent).toBe('Review návrhu')
+  expect(row.textContent).toContain('chýba rollback')
+  expect(row.querySelector('a')?.getAttribute('href')).toBe('#/workflow/spec-x')
+  expect(row.querySelector('a')?.textContent).toBe('Otvoriť')
+  expect(overrideButton()).toBeDefined()
+})
+
+it('should ask for confirmation before overriding and send nothing until it is given', async () => {
+  items = [designReview]
+  await show()
+  overrideButton()!.click()
+  flushSync()
+  expect(document.body.textContent).toContain('Schváliť návrh bez úspešného review?')
+  expect(posts()).toHaveLength(0)
+})
+
+it('should post the override with the edited reason after the confirmation and reload', async () => {
+  items = [designReview]
+  await show()
+  overrideButton()!.click()
+  flushSync()
+  const input = document.querySelector('input[aria-label="Dôvod schválenia"]') as HTMLInputElement
+  expect(input.value).toBe('Review sa nepodarilo dokončiť')
+  input.value = 'Prečítal som to sám'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  flushSync()
+  const before = decisionCalls().length
+  confirmButton()!.click()
+  await vi.waitFor(() => expect(posts()).toHaveLength(1))
+  expect(posts()[0].url).toBe('/api/teams/t1/design-review/override')
+  expect(posts()[0].body).toEqual({ workflow_id: 'spec-x', reason: 'Prečítal som to sám' })
+  await vi.waitFor(() => expect(decisionCalls().length).toBe(before + 1))
+})
+
+it('should not allow an override with an empty reason', async () => {
+  items = [designReview]
+  await show()
+  overrideButton()!.click()
+  flushSync()
+  const input = document.querySelector('input[aria-label="Dôvod schválenia"]') as HTMLInputElement
+  input.value = '  '
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  flushSync()
+  expect(confirmButton()!.disabled).toBe(true)
+})
+
+it('should send nothing when the override is cancelled', async () => {
+  items = [designReview]
+  await show()
+  overrideButton()!.click()
+  flushSync()
+  ;(Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Zrušiť') as HTMLButtonElement).click()
+  flushSync()
+  expect(confirmButton()).toBeUndefined()
+  expect(posts()).toHaveLength(0)
+})

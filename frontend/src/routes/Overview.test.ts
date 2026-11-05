@@ -148,3 +148,22 @@ it('shows no chip when there are no teams', async () => {
   expect(chips()).toHaveLength(0)
   expect(openButtons()).toHaveLength(0)
 })
+
+it('shows the design review status only for workflows of a team that has the gate', async () => {
+  const fetched: string[] = []
+  const inner = globalThis.fetch
+  vi.stubGlobal('fetch', async (input: string) => {
+    if (String(input).endsWith('/design-review')) { fetched.push(String(input)); return Response.json({ enabled: true, state: 'pass', round: 1, max_rounds: 3, docs: [], gated_transition: 'design->governance', doc_hash: '', last_verdict: 'pass', last_review_task_id: '', issues_excerpt: '', waived: false }) }
+    return inner(input)
+  })
+  workflows = [wf('spec-a'), wf('spec-b')]
+  const gated = team('team-aaaa-1', 'running', ['spec-a'])
+  gated.design_review = { enabled: true, reviewer_member_id: 'review-4', max_rounds: 3 }
+  teams = [gated, team('team-bbbb-2', 'running', ['spec-b'])]
+  await show()
+  await vi.waitFor(() => expect(document.querySelector('.design-review')).not.toBeNull())
+  expect(document.querySelectorAll('.design-review')).toHaveLength(1)
+  expect(document.querySelector('.design-review')?.closest('.workflow-card')?.textContent).toContain('spec-a')
+  expect(document.querySelector('.design-review summary')?.textContent).toContain('PASS')
+  expect(fetched).toEqual(['/api/workflows/spec-a/design-review'])
+})

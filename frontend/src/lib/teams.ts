@@ -6,7 +6,7 @@ export interface TeamAttachment {id:string;generation:number;state:string;expire
 export interface TeamMember extends TeamMemberConfig {workspace_dir?:string;workspace_branch?:string;native_id?:string;state:string;observed_model?:string;observed_effort?:string;active_task_id?:string;error?:string;approval?:TeamEvent;approval_response_id?:string;last_output?:string;attachment?:TeamAttachment}
 export interface TeamTask {id:string;from:string;to:string;role:string;text:string;workflow_id?:string;revision?:string;state:string;result?:string;error?:string;kind:string;created_at:string;origin?:string;profile?:TeamProfile;profile_reason?:string}
 export interface TeamLimits {max_concurrent:number;max_auto_rounds:number;max_turns:number;max_tokens:number}
-export interface ManagedTeam {id:string;project_id:string;project_root:string;state:string;members:TeamMember[];tasks:TeamTask[];limits:TeamLimits;turns:number;auto_wakeups:number;input_tokens:number;output_tokens:number;usage_known:boolean;reason?:string;created_at?:string;isolated_workspaces?:boolean;integration_dir?:string;integration_branch?:string;integration_base?:string}
+export interface ManagedTeam {id:string;project_id:string;project_root:string;state:string;members:TeamMember[];tasks:TeamTask[];limits:TeamLimits;turns:number;auto_wakeups:number;input_tokens:number;output_tokens:number;usage_known:boolean;reason?:string;created_at?:string;design_review?:{enabled:boolean;reviewer_member_id:string;max_rounds:number};design_review_waivers?:{workflow_id:string;doc_hash:string;reason:string;at:string}[];isolated_workspaces?:boolean;integration_dir?:string;integration_branch?:string;integration_base?:string}
 export interface TeamPreflight {project_id:string;project_root:string;runtimes:{runtime:string;available:boolean;reason?:string;models:{id:string;efforts:string[]}[]}[];profiles:Record<string,Record<string,TeamProfile>>;profile_sources?:Record<string,Record<string,string>>;complex_efforts?:Record<string,Record<string,string>>;warnings:string[];limits:TeamLimits}
 export const teamStateLabels:Record<string,string>={running:'Pracuje',working:'Pracuje',active:'Aktívny',ready:'Pripravený',idle:'Pripravený',queued:'Vo fronte',waiting:'Čaká na kolegu',waiting_colleague:'Čaká na kolegu',needs_user:'Potrebuje teba',paused:'Pozastavený',stopped:'Zastavený',done:'Hotovo',completed:'Hotovo',complete:'Hotovo',error:'Chyba',failed:'Chyba',cancelled:'Zrušené',stale:'Zmenený podklad',connected:'Pripojený',disconnected:'Spojenie prerušené',detached:'Odpojený',expired:'Spojenie vypršalo',unknown:'Spojenie sa overuje'}
 export const teamStateLabel=(value:string):string=>teamStateLabels[value]??value
@@ -20,11 +20,12 @@ export function teamsByWorkflow(teams:ManagedTeam[]):Map<string,ManagedTeam> {
  }
  return map
 }
+export const memberId=(row:{role:string},index:number):string=>`${row.role}-${index+1}`
 export function launchMembers(rows:TeamChoice[]):TeamMemberConfig[] {
  return rows.map((row,i)=>{
   if(!row.model.trim()||!row.effort.trim()||!row.runtime) throw new Error(`Vyber model a úroveň uvažovania pre rolu ${row.role}.`)
   const profile={runtime:row.runtime,model:row.model.trim(),effort:row.effort.trim()}
-  return {id:`${row.role}-${i+1}`,role:row.role,profile,complex_profile:{...profile,effort:row.complexEffort.trim()||profile.effort}}
+  return {id:memberId(row,i),role:row.role,profile,complex_profile:{...profile,effort:row.complexEffort.trim()||profile.effort}}
  })
 }
 export type SavedProfiles=Record<string,Record<string,{model:string;effort:string;complex_effort?:string}>>

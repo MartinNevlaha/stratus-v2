@@ -332,3 +332,68 @@ it('opens the workflow of a task in the Overview', async () => {
  expect(window.location.hash).toBe('#/workflow/spec-demo')
  expect(appState.activeTab).toBe('overview')
 })
+
+function reviewBox(): HTMLInputElement | null { return document.querySelector('input[aria-label="Review návrhov (voliteľné)"]') }
+function reviewerSelect(): HTMLSelectElement | null { return document.querySelector('select[aria-label="Kto robí review"]') }
+function roundsInput(): HTMLInputElement | null { return document.querySelector('input[aria-label="Max. kôl"]') }
+function tick(box: HTMLInputElement) { box.click(); flushSync() }
+
+it('does not add design_review to the create request unless it is chosen', async () => {
+ await showPickers()
+ expect(reviewBox()).not.toBeNull()
+ expect(reviewBox()!.checked).toBe(false)
+ expect(reviewerSelect()).toBeNull()
+ startButton().click()
+ await vi.waitFor(() => expect(requests.some(request => request.path === '/api/teams')).toBe(true))
+ const body = requests.find(request => request.path === '/api/teams')!.body as Record<string, unknown>
+ expect(Object.keys(body).sort()).toEqual(['limits', 'members'])
+})
+
+it('sends design_review with the chosen reviewer id and max rounds, ids matching the members', async () => {
+ await showPickers()
+ tick(reviewBox()!)
+ choose(reviewerSelect()!, 'review-4')
+ roundsInput()!.value = '5'
+ roundsInput()!.dispatchEvent(new Event('input', { bubbles: true }))
+ flushSync()
+ startButton().click()
+ await vi.waitFor(() => expect(requests.some(request => request.path === '/api/teams')).toBe(true))
+ const body = requests.find(request => request.path === '/api/teams')!.body as { members: { id: string }[]; design_review: unknown }
+ expect(body.design_review).toEqual({ enabled: true, reviewer_member_id: 'review-4', max_rounds: 5 })
+ expect(body.members.map(member => member.id)).toContain('review-4')
+})
+
+it('lists every setup row except the lead as a reviewer with role label and id', async () => {
+ await showPickers()
+ tick(reviewBox()!)
+ const values = [...reviewerSelect()!.options].map(option => option.value).filter(Boolean)
+ expect(values).toEqual(['implementation-2', 'design-3', 'review-4', 'diagnosis-5', 'mechanical-6'])
+ expect([...reviewerSelect()!.options].find(option => option.value === 'review-4')!.textContent).toContain('Nezávislá kontrola · review-4')
+ expect(roundsInput()!.value).toBe('3')
+})
+
+it('requires a reviewer and 1-10 rounds before the team can start', async () => {
+ await showPickers()
+ tick(reviewBox()!)
+ expect(startButton().disabled).toBe(true)
+ expect(document.querySelector('.setup')!.parentElement!.textContent).toContain('Vyber, kto robí review.')
+ choose(reviewerSelect()!, 'review-4')
+ expect(startButton().disabled).toBe(false)
+ for (const bad of ['0', '11', '']) {
+  roundsInput()!.value = bad
+  roundsInput()!.dispatchEvent(new Event('input', { bubbles: true }))
+  flushSync()
+  expect(startButton().disabled).toBe(true)
+ }
+})
+
+it('shows the design review chip in the header of a team that has it enabled', async () => {
+ team.design_review = { enabled: true, reviewer_member_id: 'review-2', max_rounds: 2 }
+ await show()
+ expect(document.querySelector('.design-chip')?.textContent).toBe('Review návrhov: review-2 · max. 2 kôl')
+})
+
+it('shows no design review chip for a team without the gate', async () => {
+ await show()
+ expect(document.querySelector('.design-chip')).toBeNull()
+})

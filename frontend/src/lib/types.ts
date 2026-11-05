@@ -132,7 +132,7 @@ export interface WorkflowDenial {
 }
 
 export interface DecisionAction {
-  name: 'approve' | 'deny' | 'recover' | 'dismiss'
+  name: 'approve' | 'deny' | 'recover' | 'dismiss' | 'override'
   method: 'POST' | 'PUT'
   path: string
   body?: Record<string, unknown>
@@ -140,13 +140,40 @@ export interface DecisionAction {
 
 export interface DecisionItem {
   id: string
-  kind: 'team_approval' | 'team_recover' | 'workflow' | 'guardian'
+  kind: 'team_approval' | 'team_recover' | 'workflow' | 'guardian' | 'design_review'
   severity: string
   title: string
   detail: string
   created_at: string
   link?: string
   actions: DecisionAction[]
+}
+
+export type DesignReviewState =
+  | 'none' | 'reviewing' | 'pass' | 'fail' | 'reworking' | 'waived' | 'exhausted'
+  | 'review_failed' | 'documents_missing' | 'documents_invalid' | 'inactive'
+
+// GET /api/workflows/{id}/design-review; `{enabled:false}` when the workflow has no gate.
+export interface DesignReviewStatus {
+  enabled: boolean
+  gated_transition?: 'design->governance' | 'plan->implement' | ''
+  state?: DesignReviewState
+  round?: number
+  max_rounds?: number
+  reviewer?: { id: string; role: string }
+  author?: { id: string; role: string }
+  docs?: { path: string; bytes: number }[]
+  doc_hash?: string
+  last_verdict?: string
+  last_review_task_id?: string
+  issues_excerpt?: string
+  waived?: boolean
+  message?: string
+  missing?: string[]
+  team_state?: string
+  reviewer_state?: string
+  stuck?: boolean
+  reason?: string
 }
 
 export interface DecisionSummary {

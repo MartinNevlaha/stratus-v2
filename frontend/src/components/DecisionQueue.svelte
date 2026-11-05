@@ -6,14 +6,15 @@
   import { teamRequest } from '$lib/teams'
   import { debounce } from '$lib/comms'
   import { relativeTime } from '$lib/ui'
+  import DesignReviewOverride from './DesignReviewOverride.svelte'
   import type { DecisionAction, DecisionItem, DecisionSummary } from '$lib/types'
 
   const LAST_SEEN_KEY = 'stratus-last-seen'
   const kinds: Record<DecisionItem['kind'], string> = {
-    team_approval: 'Povolenie', team_recover: 'Obnova tímu', workflow: 'Workflow', guardian: 'Guardian',
+    team_approval: 'Povolenie', team_recover: 'Obnova tímu', workflow: 'Workflow', guardian: 'Guardian', design_review: 'Review návrhu',
   }
   const labels: Record<DecisionAction['name'], string> = {
-    approve: 'Povoliť raz', deny: 'Zamietnuť', recover: 'Obnoviť po kontrole', dismiss: 'Zavrieť',
+    approve: 'Povoliť raz', deny: 'Zamietnuť', recover: 'Obnoviť po kontrole', dismiss: 'Zavrieť', override: 'Schváliť bez review',
   }
 
   let items = $state<DecisionItem[]>([])
@@ -132,7 +133,11 @@
         {#if it.created_at}<span class="when">{relativeTime(it.created_at)}</span>{/if}
         <div class="actions">
           {#each it.actions as a (a.name)}
-            <button class:primary={a.name === 'approve'} disabled={busy} aria-label="{labels[a.name]}: {it.title}" onclick={() => run(a)}>{labels[a.name]}</button>
+            {#if a.name === 'override'}
+              <DesignReviewOverride path={a.path} body={a.body ?? {}} ariaLabel="{labels[a.name]}: {it.title}" ondone={load} />
+            {:else}
+              <button class:primary={a.name === 'approve'} disabled={busy} aria-label="{labels[a.name]}: {it.title}" onclick={() => run(a)}>{labels[a.name]}</button>
+            {/if}
           {/each}
           {#if it.link}
             <a class="open" href={it.link} aria-label="Otvoriť: {it.title}">Otvoriť</a>
