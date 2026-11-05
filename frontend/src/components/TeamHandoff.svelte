@@ -81,6 +81,9 @@
   })
 
   const gateLabels: Record<string, string> = { build: 'build', vet: 'vet', placeholder_scan: 'placeholder' }
+  // The first line carries the absolute path and revision, the rest is the tool output; keep it whole but bounded.
+  const clip = (text: string) => (text.length > 4000 ? text.slice(0, 4000) + '…' : text)
+  let failedGates = $derived((data?.checks?.gates ?? []).filter(g => g.verdict === 'fail'))
   let gates = $derived(Object.keys(gateLabels).map(name => ({ name, gate: data?.checks?.gates.find(g => g.name === name) })))
 
   function gateState(g: MissionHandoffGate): 'pass' | 'fail' | 'info' {
@@ -109,7 +112,7 @@
       <button class="danger" onclick={() => remove(false)} disabled={busy} aria-label={`Upratať pracovné priestory tímu ${short}`}>Upratať pracovné priestory</button>
     </div>
   </div>
-  {#if error}<div class="error" role="alert">{error}{#if blockers.length}<ul>{#each blockers as b}<li>{b}</li>{/each}</ul>{/if}</div>{/if}
+  {#if error}<div class="error" role="alert">{#if blockers.length}<div>Upratanie je blokované (neuložená alebo nezlúčená práca):</div><ul>{#each blockers as b}<li>{b}</li>{/each}</ul>{:else}{error}{/if}</div>{/if}
   {#if forceOffer && !confirmForce}
     <button class="danger" onclick={() => (confirmForce = true)} disabled={busy}>Vynútiť upratanie</button>
   {/if}
@@ -171,6 +174,15 @@
         {/each}
         <span class="checks" class:ok={data.checks?.checks_ok}>{data.checks?.checks_ok ? 'Kontroly OK' : 'Kontroly neúplné'}</span>
       </div>
+      {#if failedGates.length}
+        <details class="gate-detail" open={failedGates.length === 1}>
+          <summary>Detail zlyhaných kontrol</summary>
+          {#each failedGates as g (g.name)}
+            <div class="gate-name">{gateLabels[g.name] ?? g.name}</div>
+            <pre>{clip(g.content)}</pre>
+          {/each}
+        </details>
+      {/if}
       {#if data.review}
         {@const rs = reviewState(data.review)}
         <div class="row">
@@ -222,6 +234,10 @@
   .review-state.stale { color: #e3b341; }
   .review-state.failed { color: #f85149; }
   .review-state.none { color: #8b949e; }
+  .gate-detail { margin: 0; font-size: 12px; }
+  .gate-detail summary { cursor: pointer; color: #f85149; }
+  .gate-name { font-weight: 600; color: #8b949e; margin-top: 4px; }
+  .gate-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14em; overflow: auto; margin: 2px 0 0; font: inherit; font-family: monospace; font-size: 11px; background: #0d1117; border-radius: 4px; padding: 6px; }
   .reason { font-weight: 400; color: #8b949e; }
   .warning { font-size: 11px; color: #e3b341; }
 </style>

@@ -221,7 +221,8 @@ describe('TeamHandoff', () => {
     show({ onremoved })
     await vi.waitFor(() => expect(text()).toContain('abcdef1'))
     button('Upratať pracovné priestory').click()
-    await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('conflict: workspaces hold unmerged work'))
+    await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('Upratanie je blokované (neuložená alebo nezlúčená práca):'))
+    expect(target.querySelector('[role="alert"]')?.textContent).not.toContain('conflict: workspaces hold unmerged work')
     const items = [...target.querySelectorAll('[role="alert"] ul li')].map(li => li.textContent)
     expect(items).toEqual(['member a has 2 unmerged commit(s)', 'integration has uncommitted changes'])
     expect(calls.filter(c => c.method === 'DELETE').map(c => c.path)).toEqual(['/api/teams/t1/workspaces'])
@@ -276,6 +277,17 @@ describe('TeamHandoff', () => {
     button('Upratať pracovné priestory').click()
     await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('is working'))
     expect(maybeButton('Vynútiť upratanie')).toBeUndefined()
+  })
+
+  it('should show the error text when a workspaces_blocked refusal carries no blockers', async () => {
+    stub((path, method) => method === 'DELETE'
+      ? Response.json({ code: 'workspaces_blocked', error: 'conflict: workspaces hold unmerged work' }, { status: 409 })
+      : Response.json(handoff()))
+    show()
+    await vi.waitFor(() => expect(text()).toContain('abcdef1'))
+    button('Upratať pracovné priestory').click()
+    await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('conflict: workspaces hold unmerged work'))
+    expect(target.querySelector('[role="alert"]')?.textContent).not.toContain('Upratanie je blokované')
   })
 
   it('should not offer force for a 409 without the workspaces_blocked code even when the text mentions force=true', async () => {
@@ -355,6 +367,49 @@ describe('TeamHandoff', () => {
     expect(chips[1].textContent).toContain('nepoužiteľné')
     expect(chips[2].className).toContain('pass')
     expect(text()).toContain('Kontroly neúplné')
+  })
+
+  describe('failed gate detail', () => {
+    const failing = (name: string, content: string) => ({ name, verdict: 'fail', content, revision: REV, current: true })
+    const COMPILER = 'go build FAILED (in /abs/path [integration] @ e7526dc):\n# example.com/p\n./dup.go:4:6: Alpha redeclared in this block\n\t./alpha.go:4:6: other declaration of Alpha\n'
+    const withGates = (gates: NonNullable<Handoff['checks']>['gates']) =>
+      handoff({ checks: { gates, checks_ok: false, revision: REV, current: true } })
+
+    it('should show the compiler output of a failing gate in an open details', async () => {
+      stub(() => Response.json(withGates([failing('build', COMPILER), { name: 'vet', verdict: 'pass', content: 'vet clean output', revision: REV, current: true }])))
+      show()
+      await vi.waitFor(() => expect(target.querySelector('details.gate-detail')).not.toBeNull())
+      const details = target.querySelector('details.gate-detail') as HTMLDetailsElement
+      expect(details.open).toBe(true)
+      expect(details.querySelector('summary')?.textContent).toContain('Detail zlyhaných kontrol')
+      expect(details.querySelector('pre')?.textContent).toBe(COMPILER)
+      expect(details.textContent).toContain('build')
+      expect(details.textContent).toContain('Alpha redeclared in this block')
+      expect(details.textContent).not.toContain('vet clean output')
+      expect(target.querySelector('.gate-chip.fail')?.getAttribute('title')).toBe(COMPILER)
+    })
+
+    it('should start collapsed when several gates failed', async () => {
+      stub(() => Response.json(withGates([failing('build', 'b failed'), failing('vet', 'v failed')])))
+      show()
+      await vi.waitFor(() => expect(target.querySelectorAll('details.gate-detail pre')).toHaveLength(2))
+      expect((target.querySelector('details.gate-detail') as HTMLDetailsElement).open).toBe(false)
+    })
+
+    it('should not render the detail when no gate failed', async () => {
+      stub(() => Response.json(withGates([{ name: 'build', verdict: 'pass', content: 'ok', revision: REV, current: true }])))
+      show()
+      await vi.waitFor(() => expect(text()).toContain('abcdef1'))
+      expect(target.querySelector('details.gate-detail')).toBeNull()
+    })
+
+    it('should truncate very long output to 4000 characters with an ellipsis', async () => {
+      stub(() => Response.json(withGates([failing('build', 'x'.repeat(10000))])))
+      show()
+      await vi.waitFor(() => expect(target.querySelector('details.gate-detail pre')).not.toBeNull())
+      const shown = target.querySelector('details.gate-detail pre')!.textContent!
+      expect(shown).toBe('x'.repeat(4000) + '…')
+    })
   })
 
   describe('long running actions', () => {

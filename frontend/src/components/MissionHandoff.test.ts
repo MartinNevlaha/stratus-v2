@@ -143,6 +143,58 @@ describe('MissionHandoff', () => {
     }
   })
 
+  describe('failed gate detail', () => {
+    const rev = 'abcdef1234567890'
+    const COMPILER = 'go vet FAILED (in /abs/path [integration] @ e7526dc):\n# example.com/p\n./dup.go:4:6: Alpha redeclared in this block\n'
+    const gate = (name: string, verdict: string, content: string) => ({ name, verdict, content, revision: rev, current: true })
+
+    it('should show the output of the failing gate only, in an open details', async () => {
+      const { target, app } = await render(handoff({ gates: [gate('build', 'pass', 'build clean output'), gate('vet', 'fail', COMPILER)] }))
+      try {
+        await vi.waitFor(() => expect(target.querySelector('details.gate-detail')).not.toBeNull())
+        const details = target.querySelector('details.gate-detail') as HTMLDetailsElement
+        expect(details.open).toBe(true)
+        expect(details.querySelector('summary')?.textContent).toContain('Detail zlyhaných kontrol')
+        expect(details.querySelector('pre')?.textContent).toBe(COMPILER)
+        expect(details.textContent).toContain('vet')
+        expect(details.textContent).not.toContain('build clean output')
+        expect(target.querySelector('.gate-chip.fail')?.getAttribute('title')).toBe(COMPILER)
+      } finally {
+        await unmount(app)
+      }
+    })
+
+    it('should start collapsed when several gates failed', async () => {
+      const { target, app } = await render(handoff({ gates: [gate('build', 'fail', 'b failed'), gate('vet', 'fail', 'v failed')] }))
+      try {
+        await vi.waitFor(() => expect(target.querySelectorAll('details.gate-detail pre')).toHaveLength(2))
+        expect((target.querySelector('details.gate-detail') as HTMLDetailsElement).open).toBe(false)
+      } finally {
+        await unmount(app)
+      }
+    })
+
+    it('should not render the detail when nothing failed', async () => {
+      const { target, app } = await render(handoff({ gates: [gate('build', 'pass', 'ok')] }))
+      try {
+        await vi.waitFor(() => expect(target.textContent).toContain('abcdef1'))
+        expect(target.querySelector('details.gate-detail')).toBeNull()
+      } finally {
+        await unmount(app)
+      }
+    })
+
+    it('should truncate very long output to 4000 characters with an ellipsis', async () => {
+      const { target, app } = await render(handoff({ gates: [gate('build', 'fail', 'x'.repeat(10000))] }))
+      try {
+        await vi.waitFor(() => expect(target.querySelector('details.gate-detail pre')).not.toBeNull())
+        expect(target.querySelector('details.gate-detail pre')!.textContent).toBe('x'.repeat(4000) + '…')
+      } finally {
+        await unmount(app)
+      }
+    })
+  })
+
   it('should show neuložené zmeny when the tree is dirty', async () => {
     const { target, app } = await render(handoff({ dirty: true, review: undefined }))
     try {
