@@ -179,9 +179,13 @@ func (s *Server) syncTeamTaskEvidence(team teams.Team, task teams.Task) error {
 	revisionStale := false
 	reviewer := strings.Contains(role, "reviewer")
 	if reviewer && task.State == "complete" {
-		revision, e := teamCodeRevision(team.ReviewRoot())
-		if e != nil || task.Revision == "" || revision != task.Revision {
-			revisionStale = true
+		if task.Purpose == teams.PurposeDesignReview {
+			// A design review describes its documents, not the whole tree.
+			_, hash, e := designDocs(team, *wf, designDocKind(wf))
+			revisionStale = e != nil || task.Revision == "" || hash != task.Revision
+		} else {
+			revision, e := teamCodeRevision(team.ReviewRoot())
+			revisionStale = e != nil || task.Revision == "" || revision != task.Revision
 		}
 	}
 	scope, _ := json.Marshal(struct {

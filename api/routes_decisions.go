@@ -188,6 +188,7 @@ func (s *Server) teamDecisions(since time.Time) ([]decisionItem, bool, error) {
 		return nil, false, fmt.Errorf("list teams: %w", err)
 	}
 	items, updated := decisionsFromTeams(list, since)
+	items = append(items, s.designReviewDecisions(list)...)
 	return items, updated, nil
 }
 

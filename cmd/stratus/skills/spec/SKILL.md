@@ -100,6 +100,8 @@ workflow_id: "<slug>"
 phase: "implement"
 ```
 
+If the team has design review enabled, the transition from `plan` to `implement` (and the legacy `plan` to `accept`) returns 409 `design_review_required` until the reviewer chosen for the team passes the current plan (`docs/plans/<slug>-plan.md`). Stratus starts the review itself and sends FAIL feedback to the author automatically; do not work around it and do not edit the plan while a review or rework is running. On a 409, wait for the team results and call the transition again. After a FAIL rework the plan has changed: re-present the revised plan to the user and get approval again before you transition. If the 409 says the author is unknown, revise the plan yourself (the FAIL report was returned to you), re-present it to the user, and retry. If the 409 says the review cannot continue (`stuck`), `design_review_exhausted`, or a document problem, ask the user: they can override or transition the phase from the dashboard.
+
 **Autopilot (Claude Code, optional):** once the transition succeeds, offer the user a goal that keeps this workflow running to completion without a prompt per step. Print it exactly, with the workflow id filled in:
 
 ```

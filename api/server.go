@@ -33,6 +33,7 @@ const emitEventTimeout = 5 * time.Second
 
 type Server struct {
 	teamEvidenceMu       sync.Mutex
+	designMu             sync.Mutex // serializes design review steps; see designStep
 	teamAttachmentJoinMu sync.Mutex
 	teamAttachmentsMu    sync.Mutex
 	teamAttachments      map[string]*teamAttachmentBroker
@@ -139,6 +140,7 @@ func NewServer(
 		})
 		s.teams.SetWorkspaceProvider(newGitWorkspaces())
 		s.teams.SetBriefBuilder(s.buildBrief)
+		s.setupDesignReview()
 	}
 	if s.teamsErr != nil {
 		log.Printf("teams unavailable: %v", s.teamsErr)

@@ -33,6 +33,8 @@ func (s *Server) registerTeamRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/teams/{id}/integrate", s.handleTeamIntegrate)
 	mux.HandleFunc("POST /api/teams/{id}/verify", s.handleTeamVerify)
 	mux.HandleFunc("GET /api/teams/{id}/handoff", s.handleTeamHandoff)
+	mux.HandleFunc("POST /api/teams/{id}/design-review/override", s.handleDesignReviewOverride)
+	mux.HandleFunc("GET /api/workflows/{id}/design-review", s.handleDesignReviewStatus)
 	mux.HandleFunc("DELETE /api/teams/{id}/workspaces", s.handleTeamWorkspaceRemove)
 	mux.HandleFunc("GET /api/team-context", s.handleTeamContext)
 	mux.HandleFunc("POST /api/team-delegate", s.handleTeamDelegate)
@@ -533,8 +535,15 @@ func (s *Server) managedTeamGuard(next http.Handler) http.Handler {
 				jsonErr(w, 409, "Team evidence needs attention: "+err.Error())
 				return
 			}
+			if !rejectAmbiguousPhaseBody(w, r) {
+				return
+			}
 		}
 		if !s.bindManagedIdentity(w, r, t, m) {
+			return
+		}
+		// The gate reads the body bindManagedIdentity normalized: the bytes the handler will see.
+		if strings.HasPrefix(path, "/api/workflows/") && r.Method != "GET" && m.Role == "lead" && !s.designGateGuard(w, r, t) {
 			return
 		}
 		next.ServeHTTP(w, r)

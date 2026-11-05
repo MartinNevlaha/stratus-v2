@@ -48,6 +48,8 @@ type Manager struct {
 	closed            bool
 	active            int
 	revisionValidator func(string, string) bool
+	purposeValidator  func(Team, Task) bool
+	finishedHook      func(Team, Task)
 	workspaces        WorkspaceProvider
 	workspaceBusy     map[string]bool
 	briefBuilder      func(workflowID, role string, since time.Time) string
@@ -251,6 +253,11 @@ func (m *Manager) create(ctx context.Context, r CreateRequest, attachedMemberID 
 	if binding != nil && !ids[attachedMemberID] {
 		return nil, ErrNotFound
 	}
+	designReview, err := validateDesignReview(r.DesignReview, tm, attachedMemberID)
+	if err != nil {
+		return nil, err
+	}
+	tm.DesignReview = designReview
 	cleanupWorkspaces, err := m.provisionWorkspaces(ctx, tm, binding != nil)
 	if err != nil {
 		return nil, err
@@ -454,6 +461,9 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 	if len(r.ID) > 256 || (strings.HasPrefix(r.ID, "result:") || strings.HasPrefix(r.ID, "external:")) {
 		return nil, errors.New("request ID is too long or uses a reserved result namespace")
 	}
+	if !r.systemRequest && strings.HasPrefix(r.ID, designTaskIDPrefix) {
+		return nil, errors.New("request ID uses the reserved " + designTaskIDPrefix + " namespace of the design review automation")
+	}
 	if r.From == "" {
 		r.From = "user"
 	}
@@ -498,6 +508,16 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 			return nil, ErrForbidden
 		}
 		parent := m.assignmentForRequestLocked(tm, sender, r.ParentTaskID)
+		if r.systemRequest {
+			// Trusted server automation acting for the lead (design review). The lead may be
+			// idle and its running task may belong to another workflow, so the task starts a
+			// fresh chain that only returns its result to the lead.
+			if CanonicalRole(sender.Role) != "lead" {
+				return nil, ErrForbidden
+			}
+			r.ParentTaskID = ""
+			parent = &Task{State: "running", WorkflowID: r.WorkflowID, WorkflowType: r.WorkflowType, Complexity: r.Complexity, Revision: r.Revision}
+		}
 		if parent == nil || parent.State != "running" {
 			return nil, fmt.Errorf("%w: sender has no active assignment", ErrForbidden)
 		}
@@ -556,6 +576,11 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 	task.RequestTaskID = requestTaskID
 	if task.Role == "" {
 		task.Role = member.Role
+	}
+	task.Purpose = r.Purpose
+	if r.Purpose == PurposeDesignReview {
+		// Any member may review, but evidence records a verdict only for review tasks.
+		task.Role = "review"
 	}
 	if r.From != "user" && r.Kind == "message" && isAcknowledgement(r.Text) {
 		task.State = "complete"
@@ -646,7 +671,9 @@ func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, stri
 	}
 	compatible := func(v *Member) bool {
 		conversationInput := (r.From == "user" || r.attachedRequest) && (r.To == v.ID || (r.To == "" && r.Role == "" && v.ID == target.ID)) && r.WorkflowID == ""
-		return v.Profile == profile && CanonicalRole(v.Role) == CanonicalRole(role) && (conversationInput || v.WorkflowID == "" || v.WorkflowID == r.WorkflowID) && (conversationInput || CanonicalRole(role) != "review" || v.Revision == "" || v.Revision == r.Revision)
+		// Every design review round goes to the reviewer the team chose, whatever it reviewed before.
+		designReview := r.Purpose == PurposeDesignReview
+		return v.Profile == profile && CanonicalRole(v.Role) == CanonicalRole(role) && (conversationInput || designReview || v.WorkflowID == "" || v.WorkflowID == r.WorkflowID) && (conversationInput || designReview || CanonicalRole(role) != "review" || v.Revision == "" || v.Revision == r.Revision)
 	}
 	if compatible(target) {
 		return target, profile, reason, nil
@@ -1055,17 +1082,34 @@ func (m *Manager) run(teamID, memberID, taskID string, slot *runtimeSlot) {
 	stale := false
 	if err == nil && CanonicalRole(task.Role) == "review" {
 		m.mu.Lock()
-		validator := m.revisionValidator
-		revision := findTask(rec.team, taskID).Revision
+		validator, purposeValidator := m.revisionValidator, m.purposeValidator
+		current := *findTask(rec.team, taskID)
+		var snapshot *Team
+		if current.Purpose != "" && purposeValidator != nil {
+			snapshot = cloneTeam(rec.team)
+		}
 		m.mu.Unlock()
-		if validator != nil {
-			stale = !validator(spec.ProjectRoot, revision)
+		if current.Purpose != "" {
+			// Purpose reviews describe documents, not the whole tree; see SetPurposeValidator.
+			if snapshot != nil {
+				stale = !safeValidate(purposeValidator, *snapshot, current)
+			}
+		} else if validator != nil {
+			stale = !validator(spec.ProjectRoot, current.Revision)
 		}
 	}
 	m.finish(teamID, memberID, taskID, slot, result, err, true, stale)
 }
 
 func (m *Manager) finish(teamID, memberID, taskID string, slot *runtimeSlot, result Result, submitErr error, submitted, stale bool) {
+	snapshot, done := m.finishLocked(teamID, memberID, taskID, slot, result, submitErr, submitted, stale)
+	m.fireFinished(snapshot, done)
+}
+
+// finishLocked records the outcome under the manager lock. When a finished-task hook
+// is set and a purpose task was among the finished tasks it also returns a team
+// snapshot and those task IDs, for the hook to run after the lock is released.
+func (m *Manager) finishLocked(teamID, memberID, taskID string, slot *runtimeSlot, result Result, submitErr error, submitted, stale bool) (snapshot *Team, done []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rec := m.teams[teamID]
@@ -1201,6 +1245,17 @@ func (m *Manager) finish(teamID, memberID, taskID string, slot *runtimeSlot, res
 	}
 	m.saveOrPauseLocked(rec)
 	m.signalLocked()
+	if m.finishedHook != nil {
+		for i := range completed {
+			if completed[i].Purpose != "" {
+				done = append(done, completed[i].ID)
+			}
+		}
+		if len(done) > 0 {
+			snapshot = cloneTeam(tm)
+		}
+	}
+	return snapshot, done
 }
 
 func (m *Manager) queueReturnLocked(tm *Team, source *Task, text string) {

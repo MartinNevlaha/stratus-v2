@@ -88,9 +88,39 @@ type CreateRequest struct {
 	Limits      Limits         `json:"limits"`
 	// IsolatedWorkspaces gives write-capable members their own git worktree; see WorkspaceProvider.
 	IsolatedWorkspaces bool `json:"isolated_workspaces,omitempty"`
+	// DesignReview optionally gates the design/plan phase transition on a review by one member.
+	DesignReview *DesignReviewConfig `json:"design_review,omitempty"`
+}
+
+// Task purposes set only by server automation (never by a request body).
+const (
+	PurposeDesignReview = "design_review"
+	PurposeDesignRework = "design_rework"
+)
+
+// DefaultDesignReviewRounds is used when DesignReviewConfig.MaxRounds is 0.
+const DefaultDesignReviewRounds = 3
+
+// DesignReviewConfig is the optional design review gate of a team.
+type DesignReviewConfig struct {
+	Enabled          bool   `json:"enabled"`
+	ReviewerMemberID string `json:"reviewer_member_id"`
+	MaxRounds        int    `json:"max_rounds"`
+}
+
+// DesignReviewWaiver records that the user accepted the documents with the given
+// content hash without a passing review.
+type DesignReviewWaiver struct {
+	WorkflowID string    `json:"workflow_id"`
+	DocHash    string    `json:"doc_hash"`
+	Reason     string    `json:"reason"`
+	At         time.Time `json:"at"`
 }
 type TaskRequest struct {
-	attachedRequest    bool
+	attachedRequest bool
+	systemRequest   bool
+	// Purpose is set by server automation only; it is deliberately not part of the JSON body.
+	Purpose            string   `json:"-"`
 	WorkflowPhase      string   `json:"workflow_phase,omitempty"`
 	WorkflowGeneration int64    `json:"workflow_generation,omitempty"`
 	WorkflowTaskIndex  *int     `json:"workflow_task_index,omitempty"`
@@ -170,6 +200,8 @@ type Task struct {
 	StartedAt          *time.Time `json:"started_at,omitempty"`
 	FinishedAt         *time.Time `json:"finished_at,omitempty"`
 	RequestHash        string     `json:"request_hash,omitempty"`
+	// Purpose marks tasks created by the design review automation; see PurposeDesignReview.
+	Purpose string `json:"purpose,omitempty"`
 }
 type Team struct {
 	ID           string    `json:"id"`
@@ -193,6 +225,9 @@ type Team struct {
 	IntegrationBranch  string `json:"integration_branch,omitempty"`
 	// IntegrationBase is the project HEAD the integration branch started from; checks diff against it.
 	IntegrationBase string `json:"integration_base,omitempty"`
+
+	DesignReview        *DesignReviewConfig  `json:"design_review,omitempty"`
+	DesignReviewWaivers []DesignReviewWaiver `json:"design_review_waivers,omitempty"`
 }
 
 var (

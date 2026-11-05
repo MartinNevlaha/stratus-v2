@@ -113,6 +113,68 @@ doručenie; celé prepojenie API, MCP, potvrdení a výsledkov overujú integra�
 testy. Podrobnosti a hranice podpory sú v
 [zázname overenia pripojení](../testing/existing-chat-attachments.md).
 
+## Kontrola návrhu iným členom tímu
+
+Pri zakladaní tímu možno voliteľne zapnúť kontrolu návrhu (`design_review` v
+požiadavke na vytvorenie tímu: `enabled`, `reviewer_member_id`, `max_rounds`).
+Recenzentom môže byť ktorýkoľvek člen okrem vedúceho (ten vlastní workflow) a
+okrem pripojeného natívneho chatu; `max_rounds` je 1 až 10 (predvolene 3).
+Bez tejto voľby sa nič nemení. Neplatné hodnoty sa odmietnu aj pri `enabled: false`.
+
+Kontrola stráži len prechody, ktoré robí vedúci cez `transition_phase`:
+
+| Workflow | Stráženy prechod | Kontrolované dokumenty |
+|----------|------------------|------------------------|
+| spec-complex | `design` → `governance` | `docs/plans/<workflow-id>-design.md` a každý súbor v `docs/adr/`, ktorý je od základného commitu workflowu nový alebo zmenený |
+| spec-complex | `plan` → `implement` a `plan` → `accept` | rovnaké dokumenty návrhu: stačí PASS (alebo schválenie používateľom) pre ich aktuálny obsah, takže jeden PASS pokryje `governance` aj tento prechod; chýbajúci návrh prechod zablokuje |
+| spec (jednoduchý) | `plan` → `implement` a `plan` → `accept` | `docs/plans/<workflow-id>-plan.md` |
+
+Prechody späť (`design` → `plan`), zrušenie workflowu a prechody používateľa z
+dashboardu (bez tokenu tímu) kontrola nikdy neblokuje; práve dashboard je cesta von,
+keď kontrola uviazne. Telo požiadavky na zmenu fázy s opakovaným kľúčom (aj s
+inou veľkosťou písmen, napr. `phase` a `Phase`) sa odmietne s 400.
+
+Priebeh: prvý pokus o stráženy prechod vráti 409 `design_review_required` a
+Stratus sám zadá recenzentovi úlohu (číta dokumenty podľa absolútnych ciest;
+obsah sa do úlohy nevkladá). Recenzia sa viaže na presný obsah dokumentov (hash):
+akákoľvek zmena kontrolovaných súborov znamená novú recenziu, nesúvisiace zmeny
+inde v strome ju neovplyvnia. Výsledok musí obsahovať celý riadok
+`Verdict: PASS` alebo `Verdict: FAIL`; odpoveď bez neho sa nikdy nepočíta ako PASS.
+Každé kolo ide tomu istému zvolenému recenzentovi.
+
+- **PASS** pre aktuálny obsah: vedúci môže znova zavolať `transition_phase`.
+  Server fázu sám nikdy nemení.
+- **FAIL**: pripomienky recenzenta automaticky dostane autor dokumentov (člen,
+  ktorý naposledy dokončil úlohu roly návrh/architekt) ako úlohu na prepracovanie.
+  Po jej dokončení sa so zmenenými dokumentmi automaticky začne ďalšie kolo. Pri
+  jednoduchom spec je plán po prepracovaní zmenený, preto ho vedúci znova predloží
+  používateľovi na schválenie. Recenzent nesmie byť autor (409
+  `design_review_conflict`). Ak autora nemožno určiť, FAIL dostane vedúci a
+  dokument prepracuje sám.
+- **Kolá** sa počítajú od posledného PASS alebo schválenia používateľom pre
+  predchádzajúci obsah: úprava už schválených dokumentov začína novou recenziou od
+  kola 1. Po `max_rounds` kolách bez PASS vráti prechod 409
+  `design_review_exhausted` a rozhodnúť musí používateľ.
+- Chýbajúci alebo nebezpečný dokument (symbolický odkaz mimo `docs/`, súbor nad
+  1 MiB, viac ako 20 ADR alebo viac ako 4 MiB spolu, názov súboru s inými znakmi než
+  písmená, číslice a `. _ - /`) vráti 409 `design_review_documents_missing` /
+  `design_review_documents_invalid`; telo uvádza, že používateľ môže fázu prepnúť z
+  dashboardu.
+- **Uviaznutá kontrola**: odpoveď 409 aj stav obsahujú `team_state`,
+  `reviewer_state`, `stuck` a `reason`. Kontrola je uviaznutá, keď beží recenzia
+  alebo prepracovanie, no tím je pozastavený či zastavený, alebo zodpovedný člen
+  čaká na rozhodnutie používateľa (`needs_user`), je zastavený či chýba. Vedúci
+  vtedy požiada používateľa.
+
+Stav pre workflow vráti `GET /api/workflows/{id}/design-review`. Vyčerpané kolá sa
+zobrazia aj vo fronte rozhodnutí. Používateľ môže v dashboarde kontrolu
+prepísať (`POST /api/teams/{id}/design-review/override` s `workflow_id` a
+`reason`, najviac 300 znakov): záznam platí len pre presný obsah dokumentov a po
+ich ďalšej úprave sa kontrola vyžaduje znova. Prepísanie je možné po FAIL, pri
+vyčerpaných kolách a pri uviaznutej kontrole; token člena tímu ho nikdy nesmie
+vykonať. Každé prepísanie sa zapíše do pamäte projektu ako rozhodnutie
+(`design_review_waived`) s dôvodom.
+
 ## Projektové kontroly
 
 Odovzdanie (swarm handoff aj odovzdanie izolovaného tímu) hodnotí `checks_ok`
