@@ -151,6 +151,7 @@ type Task struct {
 	Result             string     `json:"result,omitempty"`
 	Error              string     `json:"error,omitempty"`
 	Profile            Profile    `json:"profile"`
+	ProfileReason      string     `json:"profile_reason,omitempty"`
 	Kind               string     `json:"kind"`
 	ParentTaskID       string     `json:"parent_task_id,omitempty"`
 	ReturnTo           string     `json:"return_to,omitempty"`

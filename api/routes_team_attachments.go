@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/projectidentity"
 	"github.com/MartinNevlaha/stratus-v2/teams"
 	"github.com/google/uuid"
@@ -431,24 +432,27 @@ func attachedHumanScope(team *teams.Team, member *teams.Member) bool {
 // project fields also override the corresponding complex-workflow defaults.
 func teamAttachmentWorkers(root string) []teams.MemberConfig {
 	profiles, _ := teamProfiles(root)
-	var config struct {
+	var project struct {
 		ManagedTeam struct {
-			Profiles map[string]map[string]teams.Profile `json:"profiles"`
+			Profiles map[string]map[string]config.ManagedTeamProfile `json:"profiles"`
 		} `json:"managed_team"`
 	}
 	if raw, err := os.ReadFile(filepath.Join(root, ".stratus.json")); err == nil {
-		_ = json.Unmarshal(raw, &config)
+		_ = json.Unmarshal(raw, &project)
 	}
 	workers := make([]teams.MemberConfig, 0, 5)
 	for _, role := range []string{"implementation", "design", "review", "diagnosis", "mechanical"} {
 		profile := profiles["codex"][role]
 		complex := teams.DefaultProfile("codex", role, "spec-complex", "complex")
-		override := config.ManagedTeam.Profiles["codex"][role]
+		override := project.ManagedTeam.Profiles["codex"][role]
 		if override.Model != "" {
 			complex.Model = override.Model
 		}
 		if override.Effort != "" {
 			complex.Effort = override.Effort
+		}
+		if override.ComplexEffort != "" {
+			complex.Effort = override.ComplexEffort
 		}
 		workers = append(workers, teams.MemberConfig{ID: role, Role: role, Profile: profile, ComplexProfile: &complex})
 	}

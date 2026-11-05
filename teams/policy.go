@@ -26,32 +26,49 @@ func CanonicalRole(role string) string {
 	}
 }
 
+// DefaultProfile returns the built-in profile for a role; see ResolveProfile.
 func DefaultProfile(runtime, role, workflowType, complexity string) Profile {
+	p, _ := ResolveProfile(runtime, role, workflowType, complexity)
+	return p
+}
+
+// ResolveProfile returns the built-in profile for a runtime and role together
+// with a short human-readable reason for the choice.
+func ResolveProfile(runtime, role, workflowType, complexity string) (Profile, string) {
 	p := Profile{Runtime: runtime}
+	canonical := CanonicalRole(role)
+	reason := "predvolené pre rolu " + canonical
 	switch runtime {
 	case "codex":
 		p.Model, p.Effort = "gpt-6.1-sol", "high"
-		switch CanonicalRole(role) {
+		switch canonical {
 		case "design", "review", "diagnosis":
 			p.Model = "gpt-6-astra"
-			if complexity == "complex" || complexity == "high" || workflowType == "spec-complex" {
+			reason = "rola " + canonical + " → " + p.Model
+			if isComplex(workflowType, complexity) {
 				p.Effort = "xhigh"
+				reason += ", náročná úloha → xhigh"
 			}
 		case "mechanical":
 			p.Model, p.Effort = "gpt-6-luna", "medium"
+			reason = "rola mechanical → " + p.Model
 		}
 	case "claude", "claude-code":
 		p.Model, p.Effort = "sonnet", "high"
-		if CanonicalRole(role) == "design" || CanonicalRole(role) == "review" || CanonicalRole(role) == "diagnosis" {
+		switch canonical {
+		case "design", "review", "diagnosis":
 			p.Model = "opus"
-		}
-		if CanonicalRole(role) == "mechanical" {
+			reason = "rola " + canonical + " → opus"
+		case "mechanical":
 			p.Model, p.Effort = "haiku", "medium"
+			reason = "rola mechanical → haiku"
 		}
+	default:
+		// OpenCode provider/model IDs are local configuration; inventing one would
+		// silently replace the user's provider. Its profile must be supplied.
+		reason = runtime + " nemá vstavaný model, treba profil projektu"
 	}
-	// OpenCode provider/model IDs are local configuration; inventing one would
-	// silently replace the user's provider. Its profile must be supplied.
-	return p
+	return p, reason
 }
 
 func normalizedLimits(l Limits) (Limits, error) {
@@ -68,6 +85,11 @@ func normalizedLimits(l Limits) (Limits, error) {
 		return l, fmt.Errorf("invalid team limits (concurrency 1–16, automatic rounds 1–32, turns 1–10000, tokens >= 0)")
 	}
 	return l, nil
+}
+
+// ValidateProfile reports whether the runtime confirms the profile's model and effort.
+func ValidateProfile(a Availability, p Profile) error {
+	return validateAvailability(a, p)
 }
 
 func validateAvailability(a Availability, p Profile) error {

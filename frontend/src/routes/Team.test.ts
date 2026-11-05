@@ -3,13 +3,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushSync, mount, unmount } from 'svelte'
 import Team from './Team.svelte'
 import type { ManagedTeam, TeamPreflight } from '$lib/teams'
+import { appState } from '$lib/store'
 
 vi.mock('$lib/ws', () => ({ wsClient: { on: () => () => {} } }))
 let app: ReturnType<typeof mount> | undefined
 let team: ManagedTeam
 let requests: { path: string; body: unknown }[]
+let putPaths: string[]
 beforeEach(() => {
  requests = []
+ putPaths = []
  team = {
   id: 'team-test', project_id: 'project', project_root: '/project', state: 'running',
   limits: { max_concurrent: 2, max_auto_rounds: 4, max_turns: 40, max_tokens: 0 },
@@ -21,8 +24,10 @@ beforeEach(() => {
   tasks: []
  }
  vi.stubGlobal('fetch', async (path: string, init?: RequestInit) => {
-  if (init?.method === 'POST') {
+  if (init?.method === 'POST' || init?.method === 'PUT') {
    requests.push({ path, body: JSON.parse(String(init.body)) })
+   if (init.method === 'PUT') putPaths.push(path)
+   if (init.method === 'PUT') return Response.json({ profiles: JSON.parse(String(init.body)) })
    if (path.endsWith('/attachments')) team.members[0].attachment!.state = 'detached'
    return Response.json({ ok: true })
   }
@@ -33,6 +38,7 @@ afterEach(async () => {
  if (app) await unmount(app)
  app = undefined
  document.body.innerHTML = ''
+ appState.pendingTeamTask = null
  vi.unstubAllGlobals()
 })
 async function show() {
@@ -166,4 +172,83 @@ it('does not present manual native turn bookkeeping as team-assigned work', asyn
  await show()
  expect(document.querySelector('.task-list')?.textContent).toContain('Review requested change')
  expect(document.querySelector('.task-list')?.textContent).not.toContain('Private manual bookkeeping')
+})
+
+it('saves the current choices as the project profile with complex effort', async () => {
+ await showPickers()
+ choose(picker('Model: Návrh a plán'), 'gpt-6.1-sol')
+ choose(picker('Uvažovanie: Návrh a plán'), 'medium')
+ choose(picker('Zložitá úloha: Návrh a plán'), 'high')
+ const save = [...document.querySelectorAll('button')].find(b => b.textContent === 'Uložiť ako profil projektu')!
+ save.click()
+ await vi.waitFor(() => expect(requests.some(request => request.path === '/api/teams/profiles')).toBe(true))
+ const request = requests.find(request => request.path === '/api/teams/profiles') as { body: Record<string, Record<string, unknown>> }
+ expect(putPaths).toEqual(['/api/teams/profiles'])
+ expect(request.body.codex.design).toEqual({ model: 'gpt-6.1-sol', effort: 'medium', complex_effort: 'high' })
+ expect(Object.keys(request.body.codex).sort()).toEqual(['design', 'diagnosis', 'implementation', 'lead', 'mechanical', 'review'])
+ await vi.waitFor(() => expect(document.querySelector('[role="status"]')?.textContent).toContain('Profil projektu je uložený'))
+ expect(requests.some(request => request.path === '/api/teams')).toBe(false)
+})
+
+it('shows a save failure and the layer each role profile came from', async () => {
+ const catalog = pickerCatalog()
+ catalog.profile_sources = { codex: { lead: 'project', review: 'default' } }
+ await showPickers(catalog)
+ expect(document.querySelector('.setup table')?.textContent).toContain('Zdroj: Profil projektu')
+ expect(document.querySelector('.setup table')?.textContent).toContain('Zdroj: Predvolené')
+ const original = globalThis.fetch
+ vi.stubGlobal('fetch', (path: string, init?: RequestInit) => init?.method === 'PUT'
+  ? Promise.resolve(Response.json({ error: 'codex/review: model is unknown' }, { status: 400 })) : original(path, init))
+ ;[...document.querySelectorAll('button')].find(b => b.textContent === 'Uložiť ako profil projektu')!.click()
+ await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain('model is unknown'))
+})
+
+it('explains why each task got its model', async () => {
+ team.tasks = [{ id: 'review', from: 'lead', to: 'chat', role: 'review', text: 'Review it', state: 'queued', kind: 'task', created_at: '2026-11-04T12:00:01Z',
+  profile: { runtime: 'codex', model: 'gpt-6-astra', effort: 'xhigh' }, profile_reason: 'rola review → gpt-6-astra, náročná úloha → xhigh' }]
+ await show()
+ const list = document.querySelector('.task-list')!
+ expect(list.textContent).toContain('Prečo tento model?')
+ expect(list.textContent).toContain('gpt-6-astra / xhigh · rola review → gpt-6-astra, náročná úloha → xhigh')
+})
+
+const taskInput = () => document.querySelector('#team-input') as HTMLTextAreaElement
+
+it('pre-fills the task textarea from a pending Risk Analyzer hand-off and clears it', async () => {
+ appState.pendingTeamTask = { text: 'Add Excel export' }
+ await show()
+ expect(taskInput().value).toBe('Add Excel export')
+ expect(appState.pendingTeamTask).toBeNull()
+})
+
+async function showWithoutTeam() {
+ vi.stubGlobal('fetch', async () => Response.json({ teams: [] }))
+ app = mount(Team, { target: document.body })
+ flushSync()
+ await vi.waitFor(() => expect(document.body.textContent).toContain('Pripraviť tím'))
+}
+
+it('shows the pending task as a read-only block in the setup when no team exists', async () => {
+ appState.pendingTeamTask = { text: 'Add Excel export' }
+ await showWithoutTeam()
+ expect(document.querySelector('#team-input')).toBeNull()
+ expect(document.querySelector('.setup .pending-task')?.textContent).toContain('Zadanie: Add Excel export')
+})
+
+it('shows no pending task block in the setup when nothing is pending', async () => {
+ await showWithoutTeam()
+ expect(document.querySelector('.pending-task')).toBeNull()
+})
+
+it('leaves the task textarea empty and sends only the task fields when nothing is pending', async () => {
+ await show()
+ expect(taskInput().value).toBe('')
+ taskInput().value = 'Manual task'
+ taskInput().dispatchEvent(new Event('input', { bubbles: true }))
+ flushSync()
+ ;(document.querySelector('form.compose') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+ await vi.waitFor(() => expect(requests.some(r => r.path === '/api/teams/team-test/tasks')).toBe(true))
+ const body = requests.find(r => r.path === '/api/teams/team-test/tasks')!.body as Record<string, unknown>
+ expect(body).not.toHaveProperty('workflow_type')
+ expect(body).not.toHaveProperty('complexity')
 })

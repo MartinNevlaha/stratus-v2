@@ -20,6 +20,7 @@ interface AppState {
   guardianAlertCount: number
   activeTab: TabId
   pendingTerminalInput: string | null
+  pendingTeamTask: { text: string } | null
   language: Language
 }
 
@@ -74,6 +75,7 @@ export const appState: AppState = $state({
   guardianAlertCount: 0,
   activeTab: loadActiveTab(),
   pendingTerminalInput: null,
+  pendingTeamTask: null,
   language: 'en',
 })
 
@@ -88,6 +90,11 @@ export function setActiveTab(id: TabId) {
 
 export function requestTerminalPrefill(text: string) {
   appState.pendingTerminalInput = text
+}
+
+export function requestTeamTask(task: NonNullable<AppState['pendingTeamTask']>) {
+  appState.pendingTeamTask = task
+  setActiveTab('team')
 }
 
 export async function refreshDashboard() {

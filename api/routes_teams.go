@@ -21,6 +21,7 @@ import (
 func (s *Server) registerTeamRoutes(mux *http.ServeMux) {
 	s.registerTeamAttachmentRoutes(mux)
 	mux.HandleFunc("GET /api/teams/preflight", s.handleTeamPreflight)
+	mux.HandleFunc("PUT /api/teams/profiles", s.handlePutTeamProfiles)
 	mux.HandleFunc("GET /api/teams", s.handleListTeams)
 	mux.HandleFunc("POST /api/teams", s.handleCreateTeam)
 	mux.HandleFunc("GET /api/teams/{id}", s.handleGetTeam)
@@ -549,8 +550,8 @@ func (s *Server) handleTeamPreflight(w http.ResponseWriter, r *http.Request) {
 		}(i, name)
 	}
 	wg.Wait()
-	profiles, warnings := teamProfiles(root)
-	json200(w, map[string]any{"project_id": id, "project_root": root, "runtimes": availability, "profiles": profiles, "warnings": warnings, "limits": teams.Limits{MaxConcurrent: 2, MaxAutoRounds: 4, MaxTurns: 40}})
+	set := loadTeamProfiles(root)
+	json200(w, map[string]any{"project_id": id, "project_root": root, "runtimes": availability, "profiles": set.Profiles, "profile_sources": set.Sources, "complex_efforts": set.ComplexEfforts, "warnings": set.Warnings, "limits": teams.Limits{MaxConcurrent: 2, MaxAutoRounds: 4, MaxTurns: 40}})
 }
 
 // Bind all legacy Comms identity fields to the authenticated owned session.

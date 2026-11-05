@@ -192,6 +192,22 @@ type Config struct {
 	// DailyTokenBudget caps LLM tokens per day across all subsystems.
 	DailyTokenBudget int         `json:"daily_token_budget"`
 	Learn            LearnConfig `json:"learn"`
+	// ManagedTeam holds project-level team settings saved from the dashboard.
+	ManagedTeam *ManagedTeamConfig `json:"managed_team,omitempty"`
+}
+
+// ManagedTeamConfig is the "managed_team" section of .stratus.json.
+type ManagedTeamConfig struct {
+	// Profiles maps runtime -> role -> saved profile.
+	Profiles map[string]map[string]ManagedTeamProfile `json:"profiles,omitempty"`
+}
+
+// ManagedTeamProfile is a saved per-role model choice. ComplexEffort applies to
+// complex work (spec-complex); empty means the regular effort is used.
+type ManagedTeamProfile struct {
+	Model         string `json:"model"`
+	Effort        string `json:"effort"`
+	ComplexEffort string `json:"complex_effort,omitempty"`
 }
 
 // ValidLanguage returns true if s is a supported UI language code.

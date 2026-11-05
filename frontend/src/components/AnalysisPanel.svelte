@@ -1,40 +1,58 @@
 <script lang="ts">
   import { analyzeWorkflow } from '$lib/api'
+  import { requestTeamTask } from '$lib/store'
   import type { AnalysisResult } from '$lib/types'
 
   let description = $state('')
   let result = $state<AnalysisResult | null>(null)
   let loading = $state(false)
   let error = $state<string | null>(null)
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let llmCopied = $state(false)
+  let analyzedFor = $state('')
+  let requestId = 0
+
+  const canAnalyze = $derived(!loading && description.trim().length >= 5)
 
   function onInput() {
-    if (debounceTimer) clearTimeout(debounceTimer)
+    // Typing invalidates any in-flight request so its response is dropped.
+    requestId++
+    loading = false
     result = null
     error = null
-    if (description.trim().length < 5) return
-    debounceTimer = setTimeout(runAnalysis, 600)
+  }
+
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && !e.isComposing) runAnalysis()
   }
 
   async function runAnalysis() {
-    if (description.trim().length < 5) return
+    if (!canAnalyze) return
+    const text = description.trim()
+    const id = ++requestId
     loading = true
     error = null
     try {
-      result = await analyzeWorkflow(description.trim())
+      const res = await analyzeWorkflow(text)
+      if (id !== requestId) return
+      result = res
+      analyzedFor = text
     } catch (e) {
+      if (id !== requestId) return
       error = e instanceof Error ? e.message : 'Analysis failed'
     } finally {
-      loading = false
+      if (id === requestId) loading = false
     }
   }
 
   function useRecommendations() {
     if (!result) return
     navigator.clipboard?.writeText(
-      `/${result.recommended_type}${result.recommended_complexity === 'complex' ? '-complex' : ''} ${description}`
+      `/${result.recommended_type}${result.recommended_complexity === 'complex' ? '-complex' : ''} ${analyzedFor}`
     ).catch(() => {})
+  }
+
+  function startTeam() {
+    requestTeamTask({ text: analyzedFor })
   }
 
   function riskColor(level: string) {
@@ -51,7 +69,7 @@
 <div class="panel">
   <div class="panel-header">
     <span class="panel-title">Risk Analyzer</span>
-    <span class="hint">Type a task description to get recommendations before starting a workflow</span>
+    <span class="hint">Describe a task and press Analyze to get recommendations before starting a workflow</span>
   </div>
 
   <div class="input-row">
@@ -60,8 +78,10 @@
       placeholder="e.g. Migrate auth from sessions to JWT, update database schema"
       bind:value={description}
       oninput={onInput}
+      onkeydown={onKeydown}
       class="desc-input"
     />
+    <button class="copy-btn" onclick={runAnalysis} disabled={!canAnalyze}>Analyze</button>
     {#if loading}
       <span class="spinner"></span>
     {/if}
@@ -114,6 +134,9 @@
       <div class="actions">
         <button class="copy-btn" onclick={useRecommendations} title="Copy slash command to clipboard">
           Copy /{result.recommended_type}{result.recommended_complexity === 'complex' ? '-complex' : ''} command
+        </button>
+        <button class="copy-btn" onclick={startTeam} title="Open the Team page with this task pre-filled">
+          Spustiť tím s týmto zadaním
         </button>
       </div>
 
@@ -314,6 +337,7 @@
 
   .actions {
     display: flex;
+    gap: 8px;
   }
 
   .copy-btn {
@@ -327,7 +351,12 @@
     transition: background 0.15s, border-color 0.15s;
   }
 
-  .copy-btn:hover {
+  .copy-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .copy-btn:hover:not(:disabled) {
     background: #30363d;
     border-color: #58a6ff;
   }

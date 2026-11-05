@@ -517,7 +517,7 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 	} else if r.ReturnTo != "" || r.ParentTaskID != "" {
 		return nil, errors.New("user tasks cannot forge automatic return metadata")
 	}
-	member, profile, err := m.resolveLocked(tm, r)
+	member, profile, reason, err := m.resolveLocked(tm, r)
 	if err != nil {
 		rec.team = before
 		return nil, err
@@ -528,7 +528,7 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 	if CanonicalRole(member.Role) == "review" && member.Attachment == nil {
 		member.Revision = r.Revision
 	}
-	task := Task{WorkflowPhase: r.WorkflowPhase, WorkflowGeneration: r.WorkflowGeneration, WorkflowTaskIndex: r.WorkflowTaskIndex, WorkflowSessionID: r.WorkflowSessionID, ID: r.ID, From: r.From, To: member.ID, Role: r.Role, Text: r.Text, WorkflowID: r.WorkflowID, WorkflowType: r.WorkflowType, Complexity: r.Complexity, Revision: r.Revision, State: "queued", Profile: profile, Kind: r.Kind, ParentTaskID: r.ParentTaskID, ReturnTo: r.ReturnTo, AutoRound: autoRound, CreatedAt: time.Now().UTC(), RequestHash: hash}
+	task := Task{WorkflowPhase: r.WorkflowPhase, WorkflowGeneration: r.WorkflowGeneration, WorkflowTaskIndex: r.WorkflowTaskIndex, WorkflowSessionID: r.WorkflowSessionID, ID: r.ID, From: r.From, To: member.ID, Role: r.Role, Text: r.Text, WorkflowID: r.WorkflowID, WorkflowType: r.WorkflowType, Complexity: r.Complexity, Revision: r.Revision, State: "queued", Profile: profile, ProfileReason: reason, Kind: r.Kind, ParentTaskID: r.ParentTaskID, ReturnTo: r.ReturnTo, AutoRound: autoRound, CreatedAt: time.Now().UTC(), RequestHash: hash}
 	task.RequestTaskID = requestTaskID
 	if task.Role == "" {
 		task.Role = member.Role
@@ -553,12 +553,12 @@ func (m *Manager) Enqueue(ctx context.Context, id string, r TaskRequest) (*Task,
 	return cloneTask(&task), nil
 }
 
-func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, error) {
+func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, string, error) {
 	var target *Member
 	if r.To != "" {
 		target = findMember(tm, r.To)
 		if target == nil {
-			return nil, Profile{}, ErrNotFound
+			return nil, Profile{}, "", ErrNotFound
 		}
 	}
 	role := r.Role
@@ -582,20 +582,20 @@ func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, erro
 	if target == nil {
 		target = &tm.Members[0]
 	}
-	profile := DefaultProfile(target.Profile.Runtime, role, r.WorkflowType, r.Complexity)
+	profile, reason := ResolveProfile(target.Profile.Runtime, role, r.WorkflowType, r.Complexity)
 	if configured != nil && configured.ProfileExplicit {
-		profile = configured.Profile
+		profile, reason = configured.Profile, "profil zvolený pri založení tímu pre rolu "+CanonicalRole(role)
 	} else if target.ProfileExplicit && CanonicalRole(target.Role) == CanonicalRole(role) {
-		profile = target.Profile
+		profile, reason = target.Profile, "profil zvolený pri založení tímu pre rolu "+CanonicalRole(role)
 	}
 	if configured != nil && configured.ComplexProfile != nil && isComplex(r.WorkflowType, r.Complexity) {
-		profile = *configured.ComplexProfile
+		profile, reason = *configured.ComplexProfile, "náročná úloha → profil pre náročné úlohy roly "+CanonicalRole(role)
 	}
 	if r.From == "user" && (r.To == target.ID || (r.To == "" && r.Role == "")) && (r.Role == "" || CanonicalRole(r.Role) == CanonicalRole(target.Role)) {
-		profile = target.Profile
+		profile, reason = target.Profile, "priama správa členovi "+target.ID+" zachová jeho profil"
 	}
 	if r.Profile != nil {
-		profile = *r.Profile
+		profile, reason = *r.Profile, "explicitné nastavenie úlohy"
 		if profile.Runtime == "" {
 			profile.Runtime = target.Profile.Runtime
 		}
@@ -615,32 +615,32 @@ func (m *Manager) resolveLocked(tm *Team, r TaskRequest) (*Member, Profile, erro
 		}
 	}
 	if !selected {
-		return nil, Profile{}, fmt.Errorf("runtime %q was not selected for this team", profile.Runtime)
+		return nil, Profile{}, "", fmt.Errorf("runtime %q was not selected for this team", profile.Runtime)
 	}
 	if profile.Model == "" && !(target.Attachment != nil && profile == target.Profile && CanonicalRole(target.Role) == CanonicalRole(role)) {
-		return nil, Profile{}, errors.New("an explicit runtime model is required")
+		return nil, Profile{}, "", errors.New("an explicit runtime model is required")
 	}
 	compatible := func(v *Member) bool {
 		conversationInput := (r.From == "user" || r.attachedRequest) && (r.To == v.ID || (r.To == "" && r.Role == "" && v.ID == target.ID)) && r.WorkflowID == ""
 		return v.Profile == profile && CanonicalRole(v.Role) == CanonicalRole(role) && (conversationInput || v.WorkflowID == "" || v.WorkflowID == r.WorkflowID) && (conversationInput || CanonicalRole(role) != "review" || v.Revision == "" || v.Revision == r.Revision)
 	}
 	if compatible(target) {
-		return target, profile, nil
+		return target, profile, reason, nil
 	}
 	for i := range tm.Members {
 		v := &tm.Members[i]
 		if compatible(v) && v.ID != r.From {
-			return v, profile, nil
+			return v, profile, reason, nil
 		}
 	}
 	if CanonicalRole(role) == "lead" {
-		return nil, Profile{}, fmt.Errorf("%w: canonical lead is incompatible with this request; choose a worker role or update the lead explicitly", ErrConflict)
+		return nil, Profile{}, "", fmt.Errorf("%w: canonical lead is incompatible with this request; choose a worker role or update the lead explicitly", ErrConflict)
 	}
 	if len(tm.Members) >= 128 {
-		return nil, Profile{}, errors.New("team worker capacity reached")
+		return nil, Profile{}, "", errors.New("team worker capacity reached")
 	}
 	tm.Members = append(tm.Members, Member{ID: uuid.NewString(), Token: uuid.NewString(), Role: role, Profile: profile, State: "ready", WorkflowID: r.WorkflowID, Revision: r.Revision})
-	return &tm.Members[len(tm.Members)-1], profile, nil
+	return &tm.Members[len(tm.Members)-1], profile, reason, nil
 }
 
 func (m *Manager) Approve(ctx context.Context, teamID, memberID, approvalID string, allow bool) error {

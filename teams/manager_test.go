@@ -408,6 +408,71 @@ func TestDedupPersistsAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestTaskCarriesProfileReason(t *testing.T) {
+	a := newFixture()
+	m, _ := testManager(t, a)
+	tm := createFixtureTeam(t, m, Limits{})
+	enqueue(t, m, tm.ID, TaskRequest{ID: "review", Role: "review", Text: "review revision", WorkflowType: "spec-complex", Revision: "abc"})
+	complete(nextCall(t, a), "PASS")
+	enqueue(t, m, tm.ID, TaskRequest{ID: "override", Role: "implementation", Text: "explicit override", Profile: &Profile{Runtime: "codex", Model: "gpt-6-luna", Effort: "medium"}})
+	complete(nextCall(t, a), "done")
+	awaitTeam(t, m, tm.ID, func(tm *Team) bool { return taskState(tm, "override") == "complete" })
+	got, err := m.Get(tm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := map[string]string{}
+	for _, task := range got.Tasks {
+		reasons[task.ID] = task.ProfileReason
+	}
+	if reasons["review"] == "" {
+		t.Fatalf("review task has no profile reason: %+v", reasons)
+	}
+	if reasons["override"] != "explicitné nastavenie úlohy" {
+		t.Fatalf("override reason = %q", reasons["override"])
+	}
+}
+
+// Each resolveLocked branch must report its own reason, and later branches
+// must win over earlier ones: default < explicit member < complex < direct
+// message < task override.
+func TestTaskProfileReasonPerResolutionBranch(t *testing.T) {
+	a := newFixture()
+	m, _ := testManager(t, a)
+	reviewer := Profile{Runtime: "codex", Model: "gpt-6-astra", Effort: "high"}
+	complexReviewer := Profile{Runtime: "codex", Model: "gpt-6-astra", Effort: "xhigh"}
+	tm, err := m.Create(context.Background(), CreateRequest{ProjectID: "reasons", ProjectRoot: t.TempDir(), Members: []MemberConfig{
+		{ID: "lead", Role: "lead", Profile: Profile{Runtime: "codex"}},
+		{ID: "worker", Role: "implementation", Profile: Profile{Runtime: "codex"}},
+		{ID: "reviewer", Role: "review", Profile: reviewer, ComplexProfile: &complexReviewer},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	override := Profile{Runtime: "codex", Model: "gpt-6-luna", Effort: "medium"}
+	cases := []struct {
+		name    string
+		req     TaskRequest
+		profile Profile
+		reason  string
+	}{
+		{"default", TaskRequest{Role: "implementation"}, Profile{Runtime: "codex", Model: "gpt-6.1-sol", Effort: "high"}, "predvolené pre rolu implementation"},
+		{"explicit member profile", TaskRequest{Role: "review"}, reviewer, "profil zvolený pri založení tímu pre rolu review"},
+		{"complex profile beats explicit member profile", TaskRequest{Role: "review", WorkflowType: "spec-complex"}, complexReviewer, "náročná úloha → profil pre náročné úlohy roly review"},
+		{"direct message keeps target profile", TaskRequest{To: "reviewer"}, reviewer, "priama správa členovi reviewer zachová jeho profil"},
+		{"direct message beats complex profile", TaskRequest{To: "reviewer", WorkflowType: "spec-complex"}, reviewer, "priama správa členovi reviewer zachová jeho profil"},
+		{"task override beats everything", TaskRequest{To: "reviewer", WorkflowType: "spec-complex", Profile: &override}, override, "explicitné nastavenie úlohy"},
+	}
+	for i, c := range cases {
+		c.req.ID = fmt.Sprintf("reason-%d", i)
+		c.req.Text = c.name
+		task := enqueue(t, m, tm.ID, c.req)
+		if task.ProfileReason != c.reason || task.Profile != c.profile {
+			t.Errorf("%s: got %+v / %q, want %+v / %q", c.name, task.Profile, task.ProfileReason, c.profile, c.reason)
+		}
+		complete(nextCall(t, a), "ok")
+	}
+}
 func TestConfiguredComplexProfileAndReviewFreshness(t *testing.T) {
 	a := newFixture()
 	m, _ := testManager(t, a)
