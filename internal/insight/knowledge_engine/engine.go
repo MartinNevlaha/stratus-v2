@@ -2,6 +2,7 @@ package knowledge_engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -175,13 +176,14 @@ func (e *Engine) BuildProblemStatistics(ctx context.Context) error {
 func (e *Engine) MineSolutionPatterns(ctx context.Context) error {
 	slog.Debug("knowledge_engine: mining solution patterns")
 
-	artifacts, err := e.artifactQuery.GetSuccessfulArtifactsWithSolution(ctx, e.config.AnalysisBatchSize)
+	// Load failed artifacts as well: a success rate computed from successes only is always 1.
+	artifacts, err := e.artifactQuery.ListArtifacts(ctx, ArtifactFilterOptions{Limit: e.config.AnalysisBatchSize})
 	if err != nil {
-		return err
+		return fmt.Errorf("list artifacts for pattern mining: %w", err)
 	}
 
 	if len(artifacts) == 0 {
-		slog.Debug("knowledge_engine: no successful artifacts with solutions")
+		slog.Debug("knowledge_engine: no artifacts to mine")
 		return nil
 	}
 
@@ -214,17 +216,17 @@ func (e *Engine) MineSolutionPatterns(ctx context.Context) error {
 
 	var savedPatterns int
 	for _, agg := range patternMap {
-		if agg.totalCount < e.config.MinOccurrencesForPattern {
-			continue
-		}
-
 		successRate := float64(agg.successCount) / float64(agg.totalCount)
-		if successRate < e.config.MinSuccessRateForPattern {
-			continue
-		}
-
 		confidence := calculatePatternConfidence(agg.totalCount, successRate)
-		if confidence < e.config.PatternConfidenceThreshold {
+
+		if agg.totalCount < e.config.MinOccurrencesForPattern ||
+			successRate < e.config.MinSuccessRateForPattern ||
+			confidence < e.config.PatternConfidenceThreshold {
+			// The table is derived from artifacts: drop a row saved by an earlier run
+			// (possibly with an inflated rate) so it cannot outrank real patterns.
+			if err := e.knowledgeStore.DeleteSolutionPattern(ctx, agg.problemClass, agg.solutionPattern, agg.repoType); err != nil {
+				slog.Warn("failed to delete stale solution pattern", "pattern", agg.solutionPattern, "error", err)
+			}
 			continue
 		}
 

@@ -11,6 +11,7 @@ import (
 
 type KnowledgeStore interface {
 	SaveSolutionPattern(ctx context.Context, pattern SolutionPattern) error
+	DeleteSolutionPattern(ctx context.Context, problemClass, solutionPattern, repoType string) error
 	GetSolutionPatternByID(ctx context.Context, id string) (*SolutionPattern, error)
 	ListSolutionPatterns(ctx context.Context, filters SolutionPatternFilters) ([]SolutionPattern, error)
 	GetBestSolutionForProblem(ctx context.Context, problemClass, repoType string) (*SolutionPattern, error)
@@ -79,6 +80,10 @@ func NewDBKnowledgeStore(database *db.DB) *DBKnowledgeStore {
 func (s *DBKnowledgeStore) SaveSolutionPattern(ctx context.Context, pattern SolutionPattern) error {
 	dbPattern := solutionPatternToDB(pattern)
 	return s.database.SaveSolutionPattern(dbPattern)
+}
+
+func (s *DBKnowledgeStore) DeleteSolutionPattern(ctx context.Context, problemClass, solutionPattern, repoType string) error {
+	return s.database.DeleteSolutionPattern(problemClass, solutionPattern, repoType)
 }
 
 func (s *DBKnowledgeStore) GetSolutionPatternByID(ctx context.Context, id string) (*SolutionPattern, error) {

@@ -93,6 +93,18 @@ func (d *DB) SaveSolutionPattern(pattern *SolutionPattern) error {
 	return err
 }
 
+// DeleteSolutionPattern removes the pattern stored for the given key. Deleting a key that does not exist is not an error.
+func (d *DB) DeleteSolutionPattern(problemClass, solutionPattern, repoType string) error {
+	_, err := d.sql.Exec(`
+		DELETE FROM insight_solution_patterns
+		WHERE problem_class = ? AND solution_pattern = ? AND repo_type = ?
+	`, problemClass, solutionPattern, repoType)
+	if err != nil {
+		return fmt.Errorf("delete solution pattern: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) GetSolutionPatternByID(id string) (*SolutionPattern, error) {
 	row := d.sql.QueryRow(`
 		SELECT id, problem_class, solution_pattern, repo_type, success_rate, occurrence_count,
