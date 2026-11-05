@@ -172,7 +172,7 @@ export function initStore() {
   })
 
   // Swarm real-time events — targeted refresh instead of full dashboard reload
-  const swarmTypes = ['mission_status', 'worker_spawned', 'worker_status', 'ticket_status', 'forge_update', 'signal_sent']
+  const swarmTypes = ['mission_status', 'worker_spawned', 'worker_status', 'ticket_status', 'forge_update', 'signal_sent', 'gate_result', 'evidence_recorded']
   for (const type of swarmTypes) {
     wsClient.on(type, () => { emitSwarmUpdate() })
   }

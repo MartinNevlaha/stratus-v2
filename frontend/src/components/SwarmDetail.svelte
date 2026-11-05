@@ -5,6 +5,7 @@
   import SwarmGraph from './SwarmGraph.svelte'
   import SignalBus from './SignalBus.svelte'
   import EvidenceTrail from './EvidenceTrail.svelte'
+  import MissionHandoff from './MissionHandoff.svelte'
   import { relativeTime, workerStatusColor, ticketIcon, toggleSet } from '$lib/ui'
   import type { WorkflowState, SwarmMission, SwarmMissionDetail } from '$lib/types'
 
@@ -74,6 +75,7 @@
         <button class="view-btn" class:active={(swarmViews[wf.id] ?? 'list') === 'graph'} onclick={() => swarmViews[wf.id] = 'graph'}>Graph</button>
       </div>
     {/if}
+    <MissionHandoff missionId={detail.mission.id} />
     {#if (swarmViews[wf.id] ?? 'list') === 'graph' && detail.tickets.length > 0}
       <SwarmGraph detail={detail} />
     {:else}

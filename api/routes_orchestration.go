@@ -704,7 +704,7 @@ func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {
 	if delegated == nil {
 		delegated = []string{}
 	}
-	json200(w, map[string]any{
+	resp := map[string]any{
 		"workflow_id":      id,
 		"type":             state.Type,
 		"phase":            phase,
@@ -712,7 +712,11 @@ func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {
 		"total_tasks":      state.TotalTasks,
 		"current_task":     state.CurrentTask,
 		"tasks":            state.Tasks,
-	})
+	}
+	if brief := s.buildBrief(id, ""); brief != "" {
+		resp["brief"] = brief
+	}
+	json200(w, resp)
 }
 
 type pastItem struct {

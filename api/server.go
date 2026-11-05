@@ -41,6 +41,10 @@ type Server struct {
 	teamAdapters map[string]teams.Adapter
 	teamsErr     error
 
+	// ciExec runs git/gh for the GitHub CI endpoint; nil means real exec (tests inject a stub).
+	ciExec  ciExecFunc
+	ciGuard ciGuardState // one CI check at a time plus a short cache
+
 	// idleThrottle limits idle_prompt "waiting" broadcasts so a finished turn per prompt
 	// does not toast every time; its zero value is ready to use.
 	idleThrottle waitingThrottle
@@ -131,6 +135,7 @@ func NewServer(
 			current, err := teamCodeRevision(root)
 			return err == nil && current == revision
 		})
+		s.teams.SetBriefBuilder(s.buildBrief)
 	}
 	if s.teamsErr != nil {
 		log.Printf("teams unavailable: %v", s.teamsErr)
@@ -336,6 +341,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/workflows/{id}/plan", s.handleSetPlanContent)
 	mux.HandleFunc("PUT /api/workflows/{id}/design", s.handleSetDesignContent)
 	mux.HandleFunc("GET /api/workflows/{id}/dispatch", s.handleDispatch)
+	mux.HandleFunc("GET /api/workflows/{id}/brief", s.handleBrief)
 	mux.HandleFunc("GET /api/workflows/{id}/summary", s.handleGetSummary)
 	mux.HandleFunc("GET /api/workflows/{id}/summary.md", s.handleGetSummaryMD)
 	mux.HandleFunc("PUT /api/workflows/{id}/summary", s.handleUpdateSummary)
@@ -349,10 +355,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/workflows/{id}/run-summary", s.handleRunSummary)
 	mux.HandleFunc("GET /api/workflows/{id}/comparison", s.handleRunComparison)
 	mux.HandleFunc("GET /api/workflow-agents/attention", s.handleAttention)
+	mux.HandleFunc("GET /api/decisions", s.handleDecisions)
 	mux.HandleFunc("POST /api/workflow-agents/events", s.handleWorkflowAgentEvent)
 	mux.HandleFunc("POST /api/integrations/codex/events", s.handleCodexEvent)
 	mux.HandleFunc("GET /api/integrations/codex/agents/role", s.handleCodexAgentRole)
 	mux.HandleFunc("GET /api/integrations/codex/workflows", s.handleCodexWorkflows)
+	mux.HandleFunc("GET /api/integrations/github/ci/failure", s.handleGitHubCIFailure)
 	mux.HandleFunc("PUT /api/workflow-agents/{id}/status", s.handleSetWorkflowAgentStatus)
 
 	// System
@@ -398,6 +406,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/swarm/tickets/{id}/evidence", s.handleRecordEvidence)
 	mux.HandleFunc("GET /api/swarm/tickets/{id}/evidence", s.handleListTicketEvidence)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/evidence", s.handleListMissionEvidence)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/handoff", s.handleMissionHandoff)
 	mux.HandleFunc("POST /api/swarm/guardrails/track", s.handleTrackToolCall)
 	mux.HandleFunc("GET /api/swarm/workers/{id}/guardrails", s.handleGetGuardrail)
 	mux.HandleFunc("POST /api/swarm/missions/{id}/drift", s.handleCheckDrift)

@@ -539,10 +539,15 @@ func (s *Store) CleanupMission(missionID string) error {
 
 // --- Evidence ---
 
-// RecordEvidence creates a structured evidence record for a ticket.
+// RecordEvidence creates a structured evidence record for a ticket with no revision.
 func (s *Store) RecordEvidence(ticketID, missionID, evidenceType, content, agent, verdict string) (*db.SwarmEvidence, error) {
+	return s.RecordEvidenceAt(ticketID, missionID, evidenceType, content, agent, verdict, "")
+}
+
+// RecordEvidenceAt creates an evidence record tied to the commit it was produced against.
+func (s *Store) RecordEvidenceAt(ticketID, missionID, evidenceType, content, agent, verdict, revision string) (*db.SwarmEvidence, error) {
 	id := generateID()
-	if err := s.db.CreateEvidence(id, ticketID, missionID, evidenceType, content, agent, verdict); err != nil {
+	if err := s.db.CreateEvidence(id, ticketID, missionID, evidenceType, content, agent, verdict, revision); err != nil {
 		return nil, err
 	}
 	return &db.SwarmEvidence{
@@ -553,6 +558,7 @@ func (s *Store) RecordEvidence(ticketID, missionID, evidenceType, content, agent
 		Content:   content,
 		Agent:     agent,
 		Verdict:   verdict,
+		Revision:  revision,
 	}, nil
 }
 

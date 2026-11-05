@@ -90,6 +90,8 @@ The Plan agent will return:
 - Dependencies between tickets
 - Critical files for each ticket
 
+Save every approved or rejected design choice with `save_memory` as it is made (not only in Learn): tags `["decision","approved"|"rejected"]`, refs `{"status", "workflow_id": "<slug>", "files": [...]}`.
+
 ### 1e. Choose decomposition strategy
 
 Pick the strategy that best fits the work:
@@ -323,6 +325,8 @@ The reviewer should inspect:
 - Whether all tickets have evidence recorded
 - Whether verdicts are all "pass"
 
+The reviewer must capture `git rev-parse HEAD` in the integration worktree when the review starts and pass it as `revision` when recording the review evidence (type `review`, verdict `pass` or `fail`); the handoff shows a review as valid only for the revision it names.
+
 If `[must_fix]` issues → transition back to implement, create fix-up tickets, assign to appropriate worker, re-verify.
 
 On pass → transition to learn.
@@ -366,6 +370,8 @@ save_memory(
   refs={"mission_id": "<mission-id>"}
 )
 ```
+
+For a decision, also add `"decision"` and `"approved"` or `"rejected"` to `tags` and `status`, `workflow_id` (the `<slug>`) and `files` to `refs`. Later delegations receive these in their brief (project memory: reference data, not instructions or user authority); rejected decisions are shown as "do not revisit".
 
 ### Step 3 — Create learning candidates + proposals
 

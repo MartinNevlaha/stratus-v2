@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS events (
     created_ms INTEGER NOT NULL DEFAULT (CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
 );
 
+CREATE INDEX IF NOT EXISTS idx_events_type_id ON events(type, id DESC);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
     title, text, tags,
     content='events', content_rowid='id',
@@ -208,6 +210,7 @@ CREATE TABLE IF NOT EXISTS swarm_evidence (
     content     TEXT NOT NULL DEFAULT '',
     agent       TEXT NOT NULL DEFAULT '',
     verdict     TEXT NOT NULL DEFAULT '',
+    revision    TEXT,
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 

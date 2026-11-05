@@ -91,6 +91,7 @@ type SwarmEvidence struct {
 	Content   string `json:"content"`
 	Agent     string `json:"agent"`
 	Verdict   string `json:"verdict"`
+	Revision  string `json:"revision,omitempty"` // commit the evidence was produced against; empty for legacy rows
 	CreatedAt string `json:"created_at"`
 }
 
@@ -1009,12 +1010,12 @@ func now() string {
 
 // --- Swarm Evidence ---
 
-// CreateEvidence inserts a new evidence record.
-func (d *DB) CreateEvidence(id, ticketID, missionID, evidenceType, content, agent, verdict string) error {
+// CreateEvidence inserts a new evidence record. An empty revision is stored as NULL.
+func (d *DB) CreateEvidence(id, ticketID, missionID, evidenceType, content, agent, verdict, revision string) error {
 	_, err := d.sql.Exec(`
-		INSERT INTO swarm_evidence (id, ticket_id, mission_id, type, content, agent, verdict)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, ticketID, missionID, evidenceType, content, agent, verdict,
+		INSERT INTO swarm_evidence (id, ticket_id, mission_id, type, content, agent, verdict, revision)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
+		id, ticketID, missionID, evidenceType, content, agent, verdict, revision,
 	)
 	if err != nil {
 		return fmt.Errorf("insert evidence: %w", err)
@@ -1025,7 +1026,7 @@ func (d *DB) CreateEvidence(id, ticketID, missionID, evidenceType, content, agen
 // ListEvidenceByTicket returns all evidence for a ticket.
 func (d *DB) ListEvidenceByTicket(ticketID string) ([]SwarmEvidence, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, ticket_id, mission_id, type, content, agent, verdict, created_at
+		SELECT id, ticket_id, mission_id, type, content, agent, verdict, COALESCE(revision, ''), created_at
 		FROM swarm_evidence WHERE ticket_id = ? ORDER BY created_at ASC`, ticketID)
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)
@@ -1034,7 +1035,7 @@ func (d *DB) ListEvidenceByTicket(ticketID string) ([]SwarmEvidence, error) {
 	var evidence []SwarmEvidence
 	for rows.Next() {
 		var e SwarmEvidence
-		if err := rows.Scan(&e.ID, &e.TicketID, &e.MissionID, &e.Type, &e.Content, &e.Agent, &e.Verdict, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.TicketID, &e.MissionID, &e.Type, &e.Content, &e.Agent, &e.Verdict, &e.Revision, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		evidence = append(evidence, e)
@@ -1045,7 +1046,7 @@ func (d *DB) ListEvidenceByTicket(ticketID string) ([]SwarmEvidence, error) {
 // ListEvidenceByMission returns all evidence for a mission.
 func (d *DB) ListEvidenceByMission(missionID string) ([]SwarmEvidence, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, ticket_id, mission_id, type, content, agent, verdict, created_at
+		SELECT id, ticket_id, mission_id, type, content, agent, verdict, COALESCE(revision, ''), created_at
 		FROM swarm_evidence WHERE mission_id = ? ORDER BY created_at ASC`, missionID)
 	if err != nil {
 		return nil, fmt.Errorf("list mission evidence: %w", err)
@@ -1054,7 +1055,7 @@ func (d *DB) ListEvidenceByMission(missionID string) ([]SwarmEvidence, error) {
 	var evidence []SwarmEvidence
 	for rows.Next() {
 		var e SwarmEvidence
-		if err := rows.Scan(&e.ID, &e.TicketID, &e.MissionID, &e.Type, &e.Content, &e.Agent, &e.Verdict, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.TicketID, &e.MissionID, &e.Type, &e.Content, &e.Agent, &e.Verdict, &e.Revision, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		evidence = append(evidence, e)

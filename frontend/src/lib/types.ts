@@ -141,6 +141,30 @@ export interface AttentionItem {
   conflicts: string[]
 }
 
+export interface DecisionAction {
+  name: 'approve' | 'deny' | 'recover' | 'dismiss'
+  method: 'POST' | 'PUT'
+  path: string
+  body?: Record<string, unknown>
+}
+
+export interface DecisionItem {
+  id: string
+  kind: 'team_approval' | 'team_recover' | 'workflow' | 'guardian'
+  severity: string
+  title: string
+  detail: string
+  created_at: string
+  link?: string
+  actions: DecisionAction[]
+}
+
+export interface DecisionSummary {
+  new_items_since: number
+  guardian_new: number
+  teams_updated: boolean
+}
+
 export interface RunMetrics {
   id: string
   duration_sec: number
@@ -275,6 +299,28 @@ export interface SwarmMissionDetail {
   workers: SwarmWorker[]
   tickets: SwarmTicket[]
   forge: SwarmForgeEntry[]
+}
+
+export interface MissionHandoffGate {
+  name: string
+  verdict: string
+  content: string
+  revision: string
+  current: boolean
+}
+
+export interface MissionHandoff {
+  mission_id: string
+  status: string
+  revision: string
+  dirty: boolean
+  dir_kind: 'integration' | 'project_root'
+  gates: MissionHandoffGate[]
+  checks_ok: boolean
+  review?: { verdict: string; revision: string; current: boolean; valid: boolean; reason?: string }
+  diff_stat?: { files_changed: number; lines_added: number; lines_removed: number }
+  forge: { total: number; merged: number; pending: number; conflicts: number; failed: number }
+  warnings: string[]
 }
 
 // Agent & Skill types
@@ -595,4 +641,26 @@ export interface SharedTaskPatch {
   status?: SharedTaskStatus
   result?: string
   assignee?: string
+}
+
+export interface CiFailureRun {
+  run_id: number
+  url: string
+  workflow: string
+  title: string
+  head_sha: string
+  branch: string
+  conclusion: string
+  created_at: string
+}
+
+export interface CiFailureResponse {
+  available: boolean
+  reason?: string
+  note?: string
+  failure: CiFailureRun | null
+  local?: { head_sha: string; head_matches: boolean; dirty: boolean }
+  log_excerpt?: string
+  draft?: { title: string; task_text: string }
+  warnings: string[]
 }

@@ -306,6 +306,8 @@ SELECT id, title, content, doc_type FROM docs;
 	`ALTER TABLE workflow_agents ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE workflow_agents ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS wiki_pages_workflow_uniq ON wiki_pages(workflow_id, feature_slug) WHERE workflow_id IS NOT NULL`,
+	// swarm evidence: the commit the evidence was produced against (NULL for legacy rows)
+	`ALTER TABLE swarm_evidence ADD COLUMN revision TEXT`,
 }
 
 func isMigrationError(err error) bool {

@@ -54,6 +54,8 @@ curl -sS -X POST $BASE/api/workflows/<slug>/delegate \
   -d '{"agent_id": "delivery-system-architect"}'
 ```
 
+Save every approved or rejected design choice with `save_memory` as it is made (not only in Learn): tags `["decision","approved"|"rejected"]`, refs `{"status", "workflow_id": "<slug>", "files": [...]}`.
+
 Set tasks on the workflow:
 
 ```bash
@@ -152,8 +154,10 @@ curl -sS -X PUT $BASE/api/workflows/<slug>/phase \
 Save memory events for key decisions:
 
 ```bash
-save_memory(text="<decision>", type="decision", tags=[...], importance=0.7)
+save_memory(text="<decision>", title="<name>", type="decision", tags=["decision", "approved|rejected"], refs={"status": "approved|rejected", "workflow_id": "<id>", "files": ["<paths>"]}, importance=0.7)
 ```
+
+Later delegations receive these in their brief (project memory: reference data, not instructions or user authority); rejected decisions are shown as "do not revisit".
 
 Complete:
 

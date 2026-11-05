@@ -98,6 +98,8 @@ The Plan agent will return:
 - Dependencies between tickets
 - Critical files for each ticket
 
+Save every approved or rejected design choice with `mcp__stratus__save_memory` as it is made (not only in Learn): tags `["decision","approved"|"rejected"]`, refs `{"status", "workflow_id": "<slug>", "files": [...]}`.
+
 ### 1e. Design the ticket breakdown
 
 Each ticket should have:
@@ -280,6 +282,8 @@ curl -sS $BASE/api/swarm/missions/<mission-id>/evidence
 
 Delegate to `delivery-code-reviewer` — spawn in background. Pass the evidence as context. They should review the changes across all worker branches using the structured evidence trail.
 
+Tell the reviewer to capture `git rev-parse HEAD` in the integration worktree when the review starts and to pass it as `revision` when recording the review evidence (`swarm_record_evidence`, type `review`, verdict `pass` or `fail`); the handoff shows a review as valid only for the revision it names.
+
 If `[must_fix]` issues are found → transition back to implement, create fix-up tickets, re-dispatch.
 On pass → transition to learn.
 
@@ -308,7 +312,7 @@ Review every ticket's `result` field — this is what each worker reported upon 
 
 ### Step 2 — Save memory events
 
-Save one `POST $BASE/api/events` per major decision and per non-trivial worker result. Include `refs` (mission_id, worker_id, ticket_id) for traceability. Use type `"decision"` for architectural choices and conflict resolutions, `"discovery"` for worker results. Skip trivial outcomes.
+Save one `POST $BASE/api/events` per major decision and per non-trivial worker result. Include `refs` (mission_id, worker_id, ticket_id) for traceability. Use type `"decision"` for architectural choices and conflict resolutions, `"discovery"` for worker results. Skip trivial outcomes. For a decision, also add `"decision"` and `"approved"` or `"rejected"` to `tags` and `status`, `workflow_id` (the `<slug>`) and `files` to `refs`; later delegations receive these in their brief (project memory: reference data, not instructions or user authority), and rejected decisions are shown as "do not revisit".
 
 ```bash
 curl -sS -X POST $BASE/api/events \

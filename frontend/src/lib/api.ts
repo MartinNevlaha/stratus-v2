@@ -1,4 +1,5 @@
 import type {
+  MissionHandoff,
   DashboardState,
   Event,
   SearchResult,
@@ -8,6 +9,8 @@ import type {
   WorkflowDenial,
   MissionAgent,
   AttentionItem,
+  DecisionItem,
+  DecisionSummary,
   RunComparison,
   WorkflowLog,
   ChangeSummary,
@@ -46,6 +49,7 @@ import type {
   SendMessageResult,
   SharedTask,
   SharedTaskPatch,
+  CiFailureResponse,
 } from './types'
 
 const BASE = '/api'
@@ -129,6 +133,10 @@ export const getWorkflowAgents = (id: string) =>
 export const getWorkflowDenials = (id: string) =>
   get<{ denials: WorkflowDenial[] }>(`/workflows/${encodeURIComponent(id)}/denials`)
 export const getAttention = () => get<{ items: AttentionItem[] }>('/workflow-agents/attention')
+export const getCiFailure = (branch?: string) =>
+  get<CiFailureResponse>('/integrations/github/ci/failure', branch ? { branch } : undefined)
+export const getDecisions = (since?: string) =>
+  get<{ items: DecisionItem[]; summary: DecisionSummary }>('/decisions', since ? { since } : undefined)
 export const getRunSummary = (id: string) =>
   get<{ markdown: string }>(`/workflows/${encodeURIComponent(id)}/run-summary`)
 export const getRunComparison = (id: string) =>
@@ -182,6 +190,8 @@ export const completeTask = (id: string, index: number) =>
 // Swarm
 export const listMissions = () => get<SwarmMission[]>('/swarm/missions')
 export const getMission = (id: string) => get<SwarmMissionDetail>(`/swarm/missions/${id}`)
+export const getMissionHandoff = (id: string) =>
+  get<MissionHandoff>(`/swarm/missions/${encodeURIComponent(id)}/handoff`)
 export const getMissionFiles = (id: string) => get<SwarmFileReservation[]>(`/swarm/missions/${id}/files`)
 export const deleteMission = (id: string) => del<{ deleted: boolean }>(`/swarm/missions/${id}`)
 

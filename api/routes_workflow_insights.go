@@ -54,15 +54,25 @@ type attentionItem struct {
 	StaleAgents   int      `json:"stale_agents"`
 	ReviewFailed  bool     `json:"review_failed"`
 	Conflicts     []string `json:"conflicts"`
+	UpdatedAt     string   `json:"-"` // for the decision queue; not part of the attention API
 }
 
 // handleAttention summarises, across active workflows, what needs a human: idle agents,
 // a failing latest review, files touched by several agents. Quiet workflows are omitted.
 func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request) {
-	active, err := s.coordinator.ListActive()
+	items, err := s.attentionItems()
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list workflows failed")
 		return
+	}
+	json200(w, map[string]any{"items": items})
+}
+
+// attentionItems lists the active workflows that currently need a human.
+func (s *Server) attentionItems() ([]attentionItem, error) {
+	active, err := s.coordinator.ListActive()
+	if err != nil {
+		return nil, fmt.Errorf("list active workflows: %w", err)
 	}
 	items := []attentionItem{}
 	for _, wf := range active {
@@ -70,7 +80,7 @@ func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		it := attentionItem{WorkflowID: wf.ID, Title: wf.Title, Phase: string(wf.Phase), Conflicts: fileConflicts(agents)}
+		it := attentionItem{WorkflowID: wf.ID, Title: wf.Title, Phase: string(wf.Phase), UpdatedAt: wf.UpdatedAt, Conflicts: fileConflicts(agents)}
 		var lastVerdict string
 		for _, a := range agents {
 			if a.Status == "running" {
@@ -91,7 +101,7 @@ func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request) {
 			items = append(items, it)
 		}
 	}
-	json200(w, map[string]any{"items": items})
+	return items, nil
 }
 
 // handleRunSummary renders a markdown report of one run from its tasks, agents and reviews.

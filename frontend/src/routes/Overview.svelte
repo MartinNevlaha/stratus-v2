@@ -8,8 +8,9 @@
   import SwarmDetail from '../components/SwarmDetail.svelte'
   import WorkflowActivity from '../components/WorkflowActivity.svelte'
   import WorkflowDetail from '../components/WorkflowDetail.svelte'
-  import AttentionStrip from '../components/AttentionStrip.svelte'
+  import DecisionQueue from '../components/DecisionQueue.svelte'
   import MissionControl from '../components/MissionControl.svelte'
+  import CiFailurePanel from '../components/CiFailurePanel.svelte'
   import { relativeTime } from '$lib/ui'
   import type { WorkflowState, SwarmMission, PastItem, GuardianAlert, AgentDef } from '$lib/types'
 
@@ -402,8 +403,9 @@
 
   <!-- Active workflows -->
   {#if !focusId}
-    <AttentionStrip />
+    <DecisionQueue />
     {#if activeWfs.length > 0}<MissionControl />{/if}
+    <CiFailurePanel />
   {/if}
   {#if focusId}
     <a class="focus-back" href="#/" onclick={() => { focusId = null }}>← All workflows</a>
