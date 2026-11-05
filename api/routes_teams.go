@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -241,9 +242,16 @@ func (s *Server) handleTeamApproval(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "Invalid approval")
 		return
 	}
+	// Capture what is being answered before the manager consumes the approval.
+	pending, workflowID, found := pendingApproval(t, req.MemberID, req.ApprovalID)
 	if err = s.teams.Approve(r.Context(), t.ID, req.MemberID, req.ApprovalID, req.Allow); err != nil {
 		s.teamError(w, err)
 		return
+	}
+	if !req.Allow && found {
+		if err := s.recordApprovalDenial(t.ID, req.MemberID, pending, workflowID); err != nil {
+			log.Printf("warning: remember denied approval for team %s: %v", t.ID, err)
+		}
 	}
 	json200(w, map[string]bool{"ok": true})
 }

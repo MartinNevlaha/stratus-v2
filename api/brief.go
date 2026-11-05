@@ -10,6 +10,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/MartinNevlaha/stratus-v2/db"
+	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/teams"
 )
 
@@ -24,12 +26,22 @@ const (
 	briefLineRunes     = 200
 	briefMaxFiles      = 3
 	briefFileRunes     = 80
+	briefAgentRunes    = 64
+
+	// workflowAgentTimeLayout is how workflow_agents stores its timestamps.
+	workflowAgentTimeLayout = "2006-01-02T15:04:05.000Z"
 )
 
 // buildBrief composes a compact, capped context brief for a delegated agent:
-// the task line, recent decisions of this workflow and pointers (no excerpts)
-// from its latest context prefetch. It returns "" when there are no decisions
-// and no pointers, so callers never inject boilerplate.
+// the task line, the latest review verdict, recent decisions of this workflow
+// and pointers (no excerpts) from its latest context prefetch. It returns ""
+// when there is no review, no decisions and no pointers, so callers never
+// inject boilerplate.
+//
+// The review line comes from workflow_agents (hook-observed reviewers and the
+// projected team reviews alike); only counts are stored, so only counts are
+// shown. User-denied team approvals arrive as rejected decisions (see
+// recordApprovalDenial), so neither depends on agents saving anything.
 //
 // Decision convention (see the spec/swarm skills): save_memory with type
 // "decision", tags ["decision", "approved"|"rejected"] and refs
@@ -39,9 +51,9 @@ const (
 // pointers.
 //
 // A non-zero since is the start of the recipient's previous turn (lastTurnStart):
-// only decisions created after it are listed and context pointers and governance rules are
-// omitted (the recipient already saw them), so the result is "" when nothing
-// is new. A zero since yields the full brief.
+// only decisions created after it are listed, a review is shown only if it
+// finished after it, and context pointers and governance rules are omitted
+// (the recipient already saw them), so the result is "" when nothing is new. A zero since yields the full brief.
 func (s *Server) buildBrief(workflowID, role string, since time.Time) string {
 	state, err := s.coordinator.Get(workflowID)
 	if err != nil {
@@ -49,12 +61,13 @@ func (s *Server) buildBrief(workflowID, role string, since time.Time) string {
 	}
 	phase := string(state.Phase)
 
+	review := s.briefReviewLine(state, since)
 	decisions := s.briefDecisionLines(workflowID, since)
 	var pointers, rules []string
 	if since.IsZero() {
 		pointers, rules = s.briefPointerLines(workflowID, phase)
 	}
-	if len(decisions) == 0 && len(pointers) == 0 && len(rules) == 0 {
+	if review == "" && len(decisions) == 0 && len(pointers) == 0 && len(rules) == 0 {
 		return ""
 	}
 
@@ -64,6 +77,9 @@ func (s *Server) buildBrief(workflowID, role string, since time.Time) string {
 	}
 
 	sections := []string{task}
+	if review != "" {
+		sections = append(sections, review)
+	}
 	if len(decisions) > 0 {
 		sections = append(sections, "Decisions:\n"+strings.Join(decisions, "\n"))
 	}
@@ -87,6 +103,111 @@ func (s *Server) buildBrief(workflowID, role string, since time.Time) string {
 		}
 	}
 	return clipRunes(strings.Join(kept, "\n\n"), briefMaxRunes)
+}
+
+// briefReviewLine renders the latest finished review of the workflow as one
+// line, or "" when there is none (or, with a non-zero since, none that finished
+// after it). Codex workflows use the same scoped projection as the attention
+// items (db.CodexReview: current phase, task and generation). Other runtimes
+// take the newest PASS/FAIL reviewer run across phases, so a FAIL stays
+// visible while the fix is made, and say when later work or a running
+// re-review makes it stale.
+func (s *Server) briefReviewLine(state *orchestration.WorkflowState, since time.Time) string {
+	agents, err := s.db.ListWorkflowAgents(state.ID)
+	if err != nil {
+		return ""
+	}
+	var latest *db.WorkflowAgent
+	mustFix, shouldFix := 0, 0
+	suffix := ""
+	if state.Runtime == "codex" {
+		rs := db.CodexReview(agents, string(state.Phase), state.CurrentTask, state.ReviewGeneration)
+		if rs.Status != "PASS" && rs.Status != "FAIL" && rs.Status != "outdated" {
+			return ""
+		}
+		for i := range agents {
+			if agents[i].ID == rs.AgentID {
+				latest = &agents[i]
+			}
+		}
+		mustFix, shouldFix = rs.MustFix, rs.ShouldFix
+		if rs.Status == "outdated" {
+			suffix = " - outdated, work continued after it"
+		}
+	} else {
+		for i := range agents {
+			if v := agents[i].Verdict; v == "PASS" || v == "FAIL" {
+				latest = &agents[i]
+			}
+		}
+		if latest != nil {
+			mustFix, shouldFix = latest.MustFix, latest.ShouldFix
+			suffix = reviewFollowUp(agents, latest)
+		}
+	}
+	if latest == nil || (latest.Verdict != "PASS" && latest.Verdict != "FAIL") {
+		return ""
+	}
+	if !since.IsZero() {
+		if t, err := time.Parse(workflowAgentTimeLayout, reviewEnd(*latest)); err != nil || !t.After(since) {
+			return ""
+		}
+	}
+	who := strings.TrimPrefix(clipRunes(oneLine(latest.AgentType), briefAgentRunes), "delivery-")
+	var where []string
+	if who != "" {
+		where = append(where, who)
+	}
+	if phase := clipRunes(oneLine(latest.Phase), briefAgentRunes); phase != "" {
+		where = append(where, phase)
+	}
+	line := "Latest review"
+	if len(where) > 0 {
+		line += " (" + strings.Join(where, ", ") + ")"
+	}
+	return line + fmt.Sprintf(": %s (%d must_fix, %d should_fix)", latest.Verdict, mustFix, shouldFix) + suffix
+}
+
+// reviewEnd is when a review run finished, as stored in workflow_agents.
+func reviewEnd(a db.WorkflowAgent) string {
+	for _, ts := range []string{a.EndedAt, a.LastActivity, a.StartedAt} {
+		if ts != "" {
+			return ts
+		}
+	}
+	return ""
+}
+
+// isReviewAgent mirrors db.CodexReview's notion of a review run.
+func isReviewAgent(a db.WorkflowAgent) bool {
+	return a.Verdict != "" || strings.Contains(a.AgentType, "reviewer")
+}
+
+// reviewFollowUp says what happened after a review without a scope to compare
+// against: any non-review agent started after it finished makes it outdated,
+// and a reviewer that is running and newer means a re-review is under way.
+func reviewFollowUp(agents []db.WorkflowAgent, review *db.WorkflowAgent) string {
+	end := reviewEnd(*review)
+	outdated, rerun := false, false
+	for _, a := range agents {
+		if a.ID == review.ID || a.StartedAt <= end {
+			continue
+		}
+		switch {
+		case !isReviewAgent(a):
+			outdated = true
+		case a.Status == "running":
+			rerun = true
+		}
+	}
+	suffix := ""
+	if outdated {
+		suffix += " - outdated, work continued after it"
+	}
+	if rerun {
+		suffix += " - re-review running"
+	}
+	return suffix
 }
 
 func (s *Server) briefDecisionLines(workflowID string, since time.Time) []string {
