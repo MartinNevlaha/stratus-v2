@@ -4,13 +4,14 @@
  import { debounce } from '$lib/comms'
  import { appState } from '$lib/store'
  import { applySavedProfiles, defaultComplexEffort, launchMembers, saveProjectProfile, sourceLabel, teamRequest, usageLabel } from '$lib/teams'
+ import TeamHandoff from '../components/TeamHandoff.svelte'
  import type { ManagedTeam, TeamChoice, TeamLimits, TeamPreflight } from '$lib/teams'
  let preflight=$state<TeamPreflight|null>(null)
  let teams=$state<ManagedTeam[]>([])
  let selected=$state('')
  let choices=$state<TeamChoice[]>([])
  let limits=$state<TeamLimits>({max_concurrent:2,max_auto_rounds:4,max_turns:40,max_tokens:0})
- let busy=$state(false),loading=$state(true),error=$state(''),notice=$state(''),showSetup=$state(false)
+ let busy=$state(false),loading=$state(true),error=$state(''),notice=$state(''),showSetup=$state(false),isolated=$state(false)
  let text=$state(''),recipient=$state('')
  let pendingRequest:{id:string;text:string;to:string}|null=null
  const roles:Record<string,string>={lead:'Vedenie postupu',implementation:'Implementácia',design:'Návrh a plán',review:'Nezávislá kontrola',diagnosis:'Diagnostika',mechanical:'Jednoduché úpravy'}
@@ -60,7 +61,7 @@
   }catch(e){error=e instanceof Error?e.message:String(e)}finally{busy=false}
  }
  async function perform(fn:()=>Promise<void>) {busy=true;error='';try{await fn();await refresh()}catch(e){error=e instanceof Error?e.message:String(e)}finally{busy=false}}
- async function start() {await perform(async()=>{const created=await teamRequest<ManagedTeam>('teams',{members:launchMembers(choices),limits});selected=created.id;showSetup=false})}
+ async function start() {await perform(async()=>{const created=await teamRequest<ManagedTeam>('teams',{members:launchMembers(choices),limits,...(isolated?{isolated_workspaces:true}:{})});selected=created.id;showSetup=false})}
  async function saveProfile() {
   busy=true;error='';notice=''
   try {const saved=await saveProjectProfile(choices);if(preflight)preflight=applySavedProfiles(preflight,saved);notice='Profil projektu je uložený. Nové tímy ho použijú, bežiace tímy sa nezmenia.'}
@@ -127,6 +128,8 @@
     {/each}
    </tbody></table></div>
    <div class="limits"><label>Súbežní agenti<input type="number" min="1" max="8" bind:value={limits.max_concurrent}/></label><label>Automatické kolá<input type="number" min="1" max="20" bind:value={limits.max_auto_rounds}/></label><label>Najviac tímových vstupov<input type="number" min="1" max="1000" bind:value={limits.max_turns}/></label><label>Limit známych tokenov (0 = bez limitu)<input type="number" min="0" step="1000" bind:value={limits.max_tokens}/></label></div>
+   <label class="isolate"><input type="checkbox" aria-label="Izolované pracovné priestory" bind:checked={isolated} disabled={busy}/> Izolované pracovné priestory (implementátori pracujú vo vlastných git worktree)</label>
+   <p class="muted">Nedá sa kombinovať s pripojeným chatom; server takú žiadosť odmietne.</p>
    <p class="muted">Čakanie nevolá model. Keď nástroj neoznamuje spotrebu tokenov, platí limit tímových vstupov. Súčasné fázy a povinné kontroly workflow zostávajú zachované.</p>
    <div class="actions"><button class="primary" onclick={start} disabled={busy||!validChoices}>Spustiť tím</button><button onclick={saveProfile} disabled={busy||!validChoices}>Uložiť ako profil projektu</button></div>
   {/if}
@@ -136,6 +139,7 @@
  {#if team}
  <div class="team-toolbar"><strong>{team.state==='running'?'Aktívny':status(team.state)}</strong><span>{team.turns} / {team.limits.max_turns} tímových vstupov · {usageLabel(team.usage_known,team.input_tokens,team.output_tokens)}</span><div class="actions"><button onclick={()=>action('pause')} disabled={busy||team.state==='paused'||team.state==='stopped'}>Pozastaviť</button><button onclick={()=>action('resume')} disabled={busy||team.state==='stopped'}>Pokračovať</button><button class="danger" onclick={()=>action('stop')} disabled={busy||team.state==='stopped'}>Zastaviť</button></div></div>
  {#if team.reason}<p class="warning">{team.reason}</p>{/if}
+ {#if team.isolated_workspaces}{#key team.id}<TeamHandoff teamId={team.id} onremoved={()=>{notice='Pracovné priestory sú upratané.';refresh()}}/>{/key}{/if}
  <div class="members">
   {#each team.members as member}
    <article class="member">
@@ -167,5 +171,5 @@
  {/if}
 </div>
 <style>
- .team-page{height:100%;overflow:auto;padding:4px 6px 28px;display:flex;flex-direction:column;gap:18px}.page-heading,.section-heading,.team-toolbar,.compose-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}.page-heading p,.muted,small{color:#8b949e}h1{font-size:24px}h2{font-size:17px}h3{font-size:15px}button,input,select,textarea{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px 10px;font:inherit}button{cursor:pointer;white-space:nowrap}button:hover:not(:disabled){border-color:#58a6ff}button:disabled{opacity:.45;cursor:default}.primary{background:#238636;color:white;border-color:#2ea043}.danger{color:#f85149}.setup,.compose,.member,.task-list article{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}.setup{display:flex;flex-direction:column;gap:14px}.setup>.actions{align-self:flex-start}.runtimes,.limits,.actions{display:flex;gap:12px;flex-wrap:wrap}.runtimes>div{display:flex;flex-direction:column;gap:4px;border-left:3px solid #3fb950;padding:8px 12px;flex:1}.runtimes>.unavailable{border-color:#8b949e}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:8px;border-bottom:1px solid #30363d}th{color:#8b949e;font-weight:500;font-size:12px}td select{width:100%;min-width:90px}td:nth-child(3){min-width:180px}.limits label{display:flex;flex-direction:column;gap:5px;font-size:12px}.limits input{max-width:180px}.team-toolbar{flex-wrap:wrap}.members{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.member p{margin:9px 0}.state{font-size:12px;color:#3fb950}.attention,.warning{color:#d29922}.warning,.error{padding:10px;border-radius:6px;background:#d2992210}.notice{color:#3fb950;padding:10px;border-radius:6px;background:#3fb95010}.error{color:#ff7b72;background:#f8514910;white-space:pre-wrap}.compose{display:flex;flex-direction:column;gap:10px}textarea{resize:vertical;width:100%}.task-list{display:flex;flex-direction:column;gap:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:10px 0}details{margin-top:10px}summary{cursor:pointer;color:#58a6ff}.approval{margin-top:12px;border:1px solid #d29922;padding:12px;border-radius:6px}.approval button{margin-right:8px}.team-picker select{margin-left:8px}@media(max-width:650px){.page-heading{align-items:flex-start}.members{grid-template-columns:1fr}.team-toolbar{align-items:flex-start;flex-direction:column}.limits input{max-width:125px}}
+ .team-page{height:100%;overflow:auto;padding:4px 6px 28px;display:flex;flex-direction:column;gap:18px}.page-heading,.section-heading,.team-toolbar,.compose-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}.page-heading p,.muted,small{color:#8b949e}h1{font-size:24px}h2{font-size:17px}h3{font-size:15px}button,input,select,textarea{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px 10px;font:inherit}button{cursor:pointer;white-space:nowrap}button:hover:not(:disabled){border-color:#58a6ff}button:disabled{opacity:.45;cursor:default}.primary{background:#238636;color:white;border-color:#2ea043}.danger{color:#f85149}.setup,.compose,.member,.task-list article{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}.setup{display:flex;flex-direction:column;gap:14px}.setup>.actions{align-self:flex-start}.runtimes,.limits,.actions{display:flex;gap:12px;flex-wrap:wrap}.runtimes>div{display:flex;flex-direction:column;gap:4px;border-left:3px solid #3fb950;padding:8px 12px;flex:1}.runtimes>.unavailable{border-color:#8b949e}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:8px;border-bottom:1px solid #30363d}th{color:#8b949e;font-weight:500;font-size:12px}td select{width:100%;min-width:90px}td:nth-child(3){min-width:180px}.isolate{display:flex;align-items:center;gap:8px}.isolate input{padding:0}.limits label{display:flex;flex-direction:column;gap:5px;font-size:12px}.limits input{max-width:180px}.team-toolbar{flex-wrap:wrap}.members{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.member p{margin:9px 0}.state{font-size:12px;color:#3fb950}.attention,.warning{color:#d29922}.warning,.error{padding:10px;border-radius:6px;background:#d2992210}.notice{color:#3fb950;padding:10px;border-radius:6px;background:#3fb95010}.error{color:#ff7b72;background:#f8514910;white-space:pre-wrap}.compose{display:flex;flex-direction:column;gap:10px}textarea{resize:vertical;width:100%}.task-list{display:flex;flex-direction:column;gap:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:10px 0}details{margin-top:10px}summary{cursor:pointer;color:#58a6ff}.approval{margin-top:12px;border:1px solid #d29922;padding:12px;border-radius:6px}.approval button{margin-right:8px}.team-picker select{margin-left:8px}@media(max-width:650px){.page-heading{align-items:flex-start}.members{grid-template-columns:1fr}.team-toolbar{align-items:flex-start;flex-direction:column}.limits input{max-width:125px}}
 </style>

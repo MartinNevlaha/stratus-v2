@@ -1,6 +1,9 @@
 package db
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 const workflowEventColumns = `id,ts,actor,scope,type,text,title,tags,refs,ttl,importance,dedupe_key,project,session_id,created_ms`
 
@@ -27,11 +30,17 @@ func (d *DB) LatestWorkflowEvent(eventType, workflowID, phase string) (*Event, e
 
 // RecentWorkflowDecisions returns up to limit decision events tied to the
 // workflow (refs.workflow_id or a tag equal to the workflow id), newest first.
-func (d *DB) RecentWorkflowDecisions(workflowID string, limit int) ([]Event, error) {
+// A non-zero since keeps only decisions created strictly after it.
+func (d *DB) RecentWorkflowDecisions(workflowID string, limit int, since time.Time) ([]Event, error) {
+	var sinceMs int64
+	if !since.IsZero() {
+		sinceMs = since.UnixMilli()
+	}
 	rows, err := d.sql.Query(`SELECT `+workflowEventColumns+` FROM events
 		WHERE type = 'decision' AND (json_extract(refs,'$.workflow_id') = ?
 			OR EXISTS (SELECT 1 FROM json_each(events.tags) WHERE json_each.value = ?))
-		ORDER BY id DESC LIMIT ?`, workflowID, workflowID, limit)
+			AND created_ms > ?
+		ORDER BY id DESC LIMIT ?`, workflowID, workflowID, sinceMs, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query workflow decisions: %w", err)
 	}

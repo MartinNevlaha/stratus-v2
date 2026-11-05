@@ -40,6 +40,7 @@ type Server struct {
 	teams        *teams.Manager
 	teamAdapters map[string]teams.Adapter
 	teamsErr     error
+	teamChecks   teamChecksCache
 
 	// ciExec runs git/gh for the GitHub CI endpoint; nil means real exec (tests inject a stub).
 	ciExec  ciExecFunc
@@ -135,6 +136,7 @@ func NewServer(
 			current, err := teamCodeRevision(root)
 			return err == nil && current == revision
 		})
+		s.teams.SetWorkspaceProvider(newGitWorkspaces())
 		s.teams.SetBriefBuilder(s.buildBrief)
 	}
 	if s.teamsErr != nil {
@@ -407,6 +409,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/swarm/tickets/{id}/evidence", s.handleListTicketEvidence)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/evidence", s.handleListMissionEvidence)
 	mux.HandleFunc("GET /api/swarm/missions/{id}/handoff", s.handleMissionHandoff)
+	mux.HandleFunc("GET /api/swarm/missions/{id}/screenshots/{evidenceId}", s.handleMissionScreenshot)
 	mux.HandleFunc("POST /api/swarm/guardrails/track", s.handleTrackToolCall)
 	mux.HandleFunc("GET /api/swarm/workers/{id}/guardrails", s.handleGetGuardrail)
 	mux.HandleFunc("POST /api/swarm/missions/{id}/drift", s.handleCheckDrift)

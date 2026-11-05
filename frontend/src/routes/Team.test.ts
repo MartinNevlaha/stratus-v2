@@ -252,3 +252,49 @@ it('leaves the task textarea empty and sends only the task fields when nothing i
  expect(body).not.toHaveProperty('workflow_type')
  expect(body).not.toHaveProperty('complexity')
 })
+
+function workspaceCheckbox(): HTMLInputElement | null {
+ return document.querySelector('input[aria-label="Izolované pracovné priestory"]')
+}
+function startButton() {
+ return [...document.querySelectorAll('button')].find(b => b.textContent === 'Spustiť tím')!
+}
+
+it('sends isolated_workspaces when the isolation checkbox is ticked and it defaults to off', async () => {
+ await showPickers()
+ const box = workspaceCheckbox()
+ expect(box).not.toBeNull()
+ expect(box!.checked).toBe(false)
+ expect(document.querySelector('label.isolate')!.textContent).toContain('Izolované pracovné priestory (implementátori pracujú vo vlastných git worktree)')
+ box!.click()
+ flushSync()
+ startButton().click()
+ await vi.waitFor(() => expect(requests.some(request => request.path === '/api/teams')).toBe(true))
+ expect(requests.find(request => request.path === '/api/teams')!.body).toMatchObject({ isolated_workspaces: true })
+})
+
+it('keeps the create request unchanged when isolation is not chosen', async () => {
+ await showPickers()
+ startButton().click()
+ await vi.waitFor(() => expect(requests.some(request => request.path === '/api/teams')).toBe(true))
+ const body = requests.find(request => request.path === '/api/teams')!.body as Record<string, unknown>
+ expect(Object.keys(body).sort()).toEqual(['limits', 'members'])
+})
+
+it('shows the handoff card only for a team with isolated workspaces', async () => {
+ const handoffGets: string[] = []
+ const ordinaryFetch = globalThis.fetch
+ vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+  if (path.endsWith('/handoff')) { handoffGets.push(path); return Promise.resolve(Response.json({ isolated: true, members: [], merged: [], conflicts: [], warnings: [] })) }
+  return ordinaryFetch(path, init)
+ })
+ await show()
+ expect(document.querySelector('.team-handoff')).toBeNull()
+ expect(handoffGets).toEqual([])
+ team.isolated_workspaces = true
+ await unmount(app!)
+ document.body.innerHTML = ''
+ await show()
+ await vi.waitFor(() => expect(document.querySelector('.team-handoff')).not.toBeNull())
+ expect(handoffGets).toEqual(['/api/teams/team-test/handoff'])
+})

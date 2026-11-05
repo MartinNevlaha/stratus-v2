@@ -86,6 +86,8 @@ type CreateRequest struct {
 	ProjectRoot string         `json:"project_root"`
 	Members     []MemberConfig `json:"members"`
 	Limits      Limits         `json:"limits"`
+	// IsolatedWorkspaces gives write-capable members their own git worktree; see WorkspaceProvider.
+	IsolatedWorkspaces bool `json:"isolated_workspaces,omitempty"`
 }
 type TaskRequest struct {
 	attachedRequest    bool
@@ -129,6 +131,11 @@ type Member struct {
 	Configured         bool               `json:"configured"`
 	ProfileExplicit    bool               `json:"profile_explicit"`
 	LastOutput         string             `json:"last_output,omitempty"`
+	WorkspaceDir       string             `json:"workspace_dir,omitempty"`
+	WorkspaceBranch    string             `json:"workspace_branch,omitempty"`
+	// SessionRoot is the directory the native session was last opened in when that was
+	// not the project root; it decides whether the session may be resumed.
+	SessionRoot string `json:"session_root,omitempty"`
 }
 type Task struct {
 	Origin             string     `json:"origin,omitempty"`
@@ -180,6 +187,12 @@ type Team struct {
 	Reason       string    `json:"reason,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+
+	IsolatedWorkspaces bool   `json:"isolated_workspaces,omitempty"`
+	IntegrationDir     string `json:"integration_dir,omitempty"`
+	IntegrationBranch  string `json:"integration_branch,omitempty"`
+	// IntegrationBase is the project HEAD the integration branch started from; checks diff against it.
+	IntegrationBase string `json:"integration_base,omitempty"`
 }
 
 var (

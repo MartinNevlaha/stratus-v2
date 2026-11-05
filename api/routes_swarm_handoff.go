@@ -182,6 +182,9 @@ func (s *Server) handleMissionHandoff(w http.ResponseWriter, r *http.Request) {
 	} else if rev.Dirty {
 		warnings = append(warnings, "working tree has uncommitted changes")
 	}
+	if rev.Dir != "" && noGoModule(rev.Dir) {
+		warnings = append(warnings, noChecksWarning)
+	}
 
 	// Latest row per gate (evidence is ordered oldest first) and the latest review.
 	latest := map[string]db.SwarmEvidence{}
@@ -258,6 +261,12 @@ func (s *Server) handleMissionHandoff(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		warnings = append(warnings, "diff stat unavailable: "+reason)
+	}
+
+	shots, hasCurrentShot := handoffScreenshots(evidence, rev.SHA, rev.Dirty)
+	resp["screenshots"] = shots
+	if !hasCurrentShot && diffTouchesUI(rev, mission.BaseBranch) {
+		warnings = append(warnings, "UI changes without a current screenshot")
 	}
 
 	var fc handoffForge

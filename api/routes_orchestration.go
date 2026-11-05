@@ -713,7 +713,7 @@ func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {
 		"current_task":     state.CurrentTask,
 		"tasks":            state.Tasks,
 	}
-	if brief := s.buildBrief(id, ""); brief != "" {
+	if brief := s.buildBrief(id, "", time.Time{}); brief != "" {
 		resp["brief"] = brief
 	}
 	json200(w, resp)

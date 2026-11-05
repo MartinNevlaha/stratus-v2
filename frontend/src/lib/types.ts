@@ -309,6 +309,60 @@ export interface MissionHandoffGate {
   current: boolean
 }
 
+export interface MissionHandoffScreenshot {
+  id: string
+  revision: string
+  current: boolean
+  created_at: string
+  agent: string
+}
+
+export interface TeamHandoffMember {
+  id: string
+  role: string
+  branch: string
+  ahead: number
+  uncommitted: number
+}
+
+export interface TeamConflict {
+  member: string
+  branch: string
+  files: string[]
+  reason?: string
+}
+
+export interface TeamChecks {
+  gates: MissionHandoffGate[]
+  checks_ok: boolean
+  revision: string
+  current: boolean
+}
+
+export interface TeamHandoff {
+  isolated: boolean
+  integration?: { dir_kind: string; branch: string; revision: string; dirty: boolean }
+  members: TeamHandoffMember[]
+  merged: string[]
+  conflicts: TeamConflict[]
+  failed?: TeamConflict[]
+  checks?: TeamChecks
+  review?: { verdict: string; revision: string; current: boolean; valid: boolean; reason?: string }
+  diff_stat?: { files_changed: number; lines_added: number; lines_removed: number }
+  warnings: string[]
+}
+
+export interface TeamIntegrationResult {
+  branch: string
+  revision: string
+  dirty: boolean
+  merged: string[]
+  conflicts: TeamConflict[]
+  failed?: TeamConflict[]
+  nothing_to_merge: string[]
+  warnings: string[]
+}
+
 export interface MissionHandoff {
   mission_id: string
   status: string
@@ -320,6 +374,7 @@ export interface MissionHandoff {
   review?: { verdict: string; revision: string; current: boolean; valid: boolean; reason?: string }
   diff_stat?: { files_changed: number; lines_added: number; lines_removed: number }
   forge: { total: number; merged: number; pending: number; conflicts: number; failed: number }
+  screenshots: MissionHandoffScreenshot[]
   warnings: string[]
 }
 

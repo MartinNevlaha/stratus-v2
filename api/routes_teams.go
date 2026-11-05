@@ -29,6 +29,10 @@ func (s *Server) registerTeamRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/teams/{id}/tasks", s.handleTeamTask)
 	mux.HandleFunc("POST /api/teams/{id}/approvals", s.handleTeamApproval)
 	mux.HandleFunc("POST /api/teams/{id}/recover", s.handleTeamRecovery)
+	mux.HandleFunc("POST /api/teams/{id}/integrate", s.handleTeamIntegrate)
+	mux.HandleFunc("POST /api/teams/{id}/verify", s.handleTeamVerify)
+	mux.HandleFunc("GET /api/teams/{id}/handoff", s.handleTeamHandoff)
+	mux.HandleFunc("DELETE /api/teams/{id}/workspaces", s.handleTeamWorkspaceRemove)
 	mux.HandleFunc("GET /api/team-context", s.handleTeamContext)
 	mux.HandleFunc("POST /api/team-delegate", s.handleTeamDelegate)
 	mux.HandleFunc("POST /api/team-message", s.handleTeamMessage)
@@ -57,6 +61,8 @@ func (s *Server) teamError(w http.ResponseWriter, err error) {
 		code = 409
 	case errors.Is(err, teams.ErrClosed):
 		code = 503
+	case errors.Is(err, teams.ErrWorkspaceCreate):
+		code = 500
 	}
 	jsonErr(w, code, err.Error())
 }
@@ -204,7 +210,7 @@ func (s *Server) handleTeamTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Kind != "message" && teams.CanonicalRole(req.Role) == "review" {
-		req.Revision, err = teamCodeRevision(t.ProjectRoot)
+		req.Revision, err = teamCodeRevision(t.ReviewRoot())
 		if err != nil {
 			s.teamError(w, err)
 			return
@@ -386,7 +392,7 @@ func (s *Server) handleTeamAgentTask(w http.ResponseWriter, r *http.Request, kin
 		}
 	}
 	if req.Kind != "message" && teams.CanonicalRole(req.Role) == "review" {
-		req.Revision, err = teamCodeRevision(t.ProjectRoot)
+		req.Revision, err = teamCodeRevision(t.ReviewRoot())
 		if err != nil {
 			s.teamError(w, err)
 			return

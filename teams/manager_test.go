@@ -855,7 +855,7 @@ func TestDelegatedTaskInputCarriesBriefAfterTaskText(t *testing.T) {
 	a := newFixture()
 	m, _ := testManager(t, a)
 	var gotWF, gotRole string
-	m.SetBriefBuilder(func(workflowID, role string) string {
+	m.SetBriefBuilder(func(workflowID, role string, _ time.Time) string {
 		gotWF, gotRole = workflowID, role
 		return "Decision: use sqlite"
 	})
@@ -880,7 +880,7 @@ func TestDelegatedTaskInputCarriesBriefAfterTaskText(t *testing.T) {
 func TestUserTaskInputHasNoBrief(t *testing.T) {
 	a := newFixture()
 	m, _ := testManager(t, a)
-	m.SetBriefBuilder(func(string, string) string { return "should not appear" })
+	m.SetBriefBuilder(func(string, string, time.Time) string { return "should not appear" })
 	tm := createFixtureTeam(t, m, Limits{})
 	enqueue(t, m, tm.ID, TaskRequest{ID: "user-brief", To: "lead", Text: "plain user text", WorkflowID: "wf-brief"})
 	lead := nextCall(t, a)
@@ -893,7 +893,7 @@ func TestUserTaskInputHasNoBrief(t *testing.T) {
 func TestEmptyBriefChangesNothing(t *testing.T) {
 	a := newFixture()
 	m, _ := testManager(t, a)
-	m.SetBriefBuilder(func(string, string) string { return "" })
+	m.SetBriefBuilder(func(string, string, time.Time) string { return "" })
 	tm := createFixtureTeam(t, m, Limits{})
 	enqueue(t, m, tm.ID, TaskRequest{ID: "empty-parent", To: "lead", Text: "lead", WorkflowID: "wf-brief", WorkflowType: "spec"})
 	lead := nextCall(t, a)
@@ -909,7 +909,7 @@ func TestEmptyBriefChangesNothing(t *testing.T) {
 func TestBriefDoesNotAffectRequestHash(t *testing.T) {
 	a := newFixture()
 	m, _ := testManager(t, a)
-	m.SetBriefBuilder(func(string, string) string { return "brief" })
+	m.SetBriefBuilder(func(string, string, time.Time) string { return "brief" })
 	tm := createFixtureTeam(t, m, Limits{})
 	enqueue(t, m, tm.ID, TaskRequest{ID: "hash-parent", To: "lead", Text: "lead", WorkflowID: "wf-brief", WorkflowType: "spec"})
 	lead := nextCall(t, a)
@@ -934,7 +934,7 @@ func TestBriefDoesNotAffectRequestHash(t *testing.T) {
 func TestPanickingBriefBuilderDoesNotBreakRun(t *testing.T) {
 	a := newFixture()
 	m, _ := testManager(t, a)
-	m.SetBriefBuilder(func(string, string) string { panic("boom") })
+	m.SetBriefBuilder(func(string, string, time.Time) string { panic("boom") })
 	tm := createFixtureTeam(t, m, Limits{})
 	enqueue(t, m, tm.ID, TaskRequest{ID: "panic-parent", To: "lead", Text: "lead", WorkflowID: "wf-brief", WorkflowType: "spec"})
 	lead := nextCall(t, a)

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { appState } from '$lib/store'
-  import { getMissionHandoff } from '$lib/api'
-  import type { MissionHandoff, MissionHandoffGate } from '$lib/types'
+  import { getMissionHandoff, missionScreenshotUrl } from '$lib/api'
+  import type { MissionHandoff, MissionHandoffGate, MissionHandoffScreenshot } from '$lib/types'
 
   let { missionId }: { missionId: string } = $props()
 
@@ -39,6 +39,13 @@
     return { label: 'Bez verdiktu', cls: 'none' }
   }
 
+  let brokenShots = $state<string[]>([])
+
+  function shotAlt(shot: MissionHandoffScreenshot): string {
+    const detail = [shot.agent, shot.revision ? `@ ${shot.revision.slice(0, 7)}` : ''].filter(Boolean).join(' ')
+    return detail ? `Snímka obrazovky, ${detail}` : 'Snímka obrazovky'
+  }
+
   function gateState(g: MissionHandoffGate): 'pass' | 'fail' | 'info' {
     if (g.verdict === 'pass') return 'pass'
     if (g.verdict === 'fail') return 'fail'
@@ -65,7 +72,7 @@
           {@const state = gateState(g)}
           <span class="gate-chip {state}" class:outdated={!g.current} title={g.content}>
             {gateLabels[name]}
-            {#if !g.current}zastaralé{:else if state === 'pass'}✓{:else if state === 'fail'}✕{:else}·{/if}
+            {#if !g.current}zastaralé{:else if g.verdict === 'info' && (name === 'build' || name === 'vet')}nepoužiteľné{:else if state === 'pass'}✓{:else if state === 'fail'}✕{:else}·{/if}
           </span>
         {:else}
           <span class="gate-chip missing">{gateLabels[name]} chýba</span>
@@ -80,6 +87,24 @@
           Review: {rs.label}
           {#if data.review.reason}<span class="reason">({data.review.reason})</span>{/if}
         </span>
+      </div>
+    {/if}
+    {#if data.screenshots.length > 0}
+      <div class="detail-label">Náhľady</div>
+      <div class="shots">
+        {#each data.screenshots as shot (shot.id)}
+          {@const url = missionScreenshotUrl(data.mission_id, shot.id)}
+          <div class="shot" title="{shot.agent} @ {shot.revision.slice(0, 7)}">
+            {#if brokenShots.includes(shot.id)}
+              <span class="shot-missing">Snímka nie je dostupná</span>
+            {:else}
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                <img src={url} alt={shotAlt(shot)} loading="lazy" onerror={() => (brokenShots = [...brokenShots, shot.id])} />
+              </a>
+            {/if}
+            <span class="shot-chip" class:outdated={!shot.current}>{shot.current ? 'aktuálna' : 'zastaralá'}</span>
+          </div>
+        {/each}
       </div>
     {/if}
     {#each data.warnings as w}
@@ -114,5 +139,14 @@
   .review-state.failed { color: #f85149; }
   .review-state.none { color: #8b949e; }
   .reason { font-weight: 400; color: #8b949e; }
+  .shots { display: flex; flex-wrap: wrap; gap: 8px; }
+  .shot { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .shot img {
+    display: block; max-width: 120px; max-height: 80px; object-fit: contain;
+    border: 1px solid #30363d; border-radius: 4px; background: #0d1117;
+  }
+  .shot-missing { font-size: 11px; color: #8b949e; }
+  .shot-chip { border: 1px solid #3fb95055; border-radius: 10px; padding: 0 6px; font-size: 10px; color: #3fb950; }
+  .shot-chip.outdated { color: #e3b341; border-color: #e3b34155; }
   .warning { font-size: 11px; color: #e3b341; }
 </style>

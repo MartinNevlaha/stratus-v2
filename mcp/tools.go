@@ -482,11 +482,11 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 		Description: "Record structured evidence for a ticket. Use after completing meaningful actions (tests, builds, reviews) to create an audit trail that reviewers can inspect.",
 		InputSchema: obj(
 			req("ticket_id", "string", "Ticket ID this evidence belongs to"),
-			req("type", "string", "Evidence type: diff | test_result | review | build | note | gate"),
-			req("content", "string", "Evidence content (diff output, test results, review comments, etc.)"),
+			req("type", "string", "Evidence type: diff | test_result | review | build | note | gate | screenshot"),
+			req("content", "string", "Evidence content (diff output, test results, review comments, etc.). For type screenshot: the path of an image file inside the project (absolute, or relative to the mission's integration worktree), .png/.jpg/.jpeg/.webp/.gif, max 5 MiB. Save it to a gitignored location or to an absolute path under the project root's .stratus/screenshots/ (outside the integration worktree), never to a tracked or unignored path inside it: untracked files make the tree dirty and the review and gates +dirty"),
 			opt("agent", "string", "Agent that produced this evidence"),
 			opt("verdict", "string", "Verdict: pass | fail | info"),
-			opt("revision", "string", "Commit SHA (7-64 hex) this evidence refers to. Default = current HEAD at record time (reviews only). Reviewers should pass the revision they reviewed (git rev-parse HEAD captured when the review started)"),
+			opt("revision", "string", "Commit SHA (7-64 hex) this evidence refers to. Default = current HEAD at record time (reviews and screenshots only). Reviewers should pass the revision they reviewed (git rev-parse HEAD captured when the review started)"),
 		),
 		Handler: func(args map[string]any) (any, error) {
 			ticketID, _ := args["ticket_id"].(string)

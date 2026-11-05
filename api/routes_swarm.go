@@ -155,34 +155,11 @@ func (s *Server) runQualityGates(missionID string) {
 	if rev.Err != nil {
 		log.Printf("warning: quality gates for mission %s: %v", missionID, rev.Err)
 	}
-	dir, where := rev.Dir, rev.where()
+	dir := rev.Dir
 	// Use the first ticket as the evidence anchor for mission-level gates
 	ticketID := tickets[0].ID
 
-	var outcomes []gateOutcome
-
-	// Gate 1: go build. -o /dev/null: a lone main package would otherwise leave its binary in the tree, dirtying it.
-	if out, err := runGateCmd(dir, "go", "build", "-o", "/dev/null", "./..."); err != nil {
-		outcomes = append(outcomes, gateOutcome{fmt.Sprintf("go build FAILED (in %s):\n%s", where, out), "fail",
-			map[string]any{"gate": "build", "passed": false, "output": truncate(out, 500)}})
-	} else {
-		outcomes = append(outcomes, gateOutcome{"go build: OK (in " + where + ")", "pass",
-			map[string]any{"gate": "build", "passed": true}})
-	}
-
-	// Gate 2: go vet
-	if out, err := runGateCmd(dir, "go", "vet", "./..."); err != nil {
-		outcomes = append(outcomes, gateOutcome{fmt.Sprintf("go vet FAILED (in %s):\n%s", where, out), "fail",
-			map[string]any{"gate": "vet", "passed": false, "output": truncate(out, 500)}})
-	} else {
-		outcomes = append(outcomes, gateOutcome{"go vet: OK (in " + where + ")", "pass",
-			map[string]any{"gate": "vet", "passed": true}})
-	}
-
-	// Gate 3: placeholder scan (TODO/FIXME/PLACEHOLDER in lines changed since the base branch)
-	if o := runPlaceholderGate(rev, mission.BaseBranch); o != nil {
-		outcomes = append(outcomes, *o)
-	}
+	outcomes := runCodeGates(rev, mission.BaseBranch)
 
 	recorded := rev.recorded()
 	var moved string
@@ -771,7 +748,7 @@ func (s *Server) handleRecordEvidence(w http.ResponseWriter, r *http.Request) {
 		Content string `json:"content"`
 		Agent   string `json:"agent"`
 		Verdict string `json:"verdict"`
-		// Revision is the commit the evidence refers to; reviews default to the current one.
+		// Revision is the commit the evidence refers to; reviews and screenshots default to the current one.
 		Revision string `json:"revision"`
 	}
 	if err := decodeBody(r, &body); err != nil {
@@ -784,7 +761,11 @@ func (s *Server) handleRecordEvidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !swarm.ValidEvidenceTypes[body.Type] {
-		jsonErr(w, http.StatusBadRequest, "invalid evidence type: "+body.Type+". Valid: diff, test_result, review, build, note, gate")
+		jsonErr(w, http.StatusBadRequest, "invalid evidence type: "+body.Type+". Valid: diff, test_result, review, build, note, gate, screenshot")
+		return
+	}
+	if body.Type == swarm.EvidenceScreenshot && !ciLocalRequest(r) {
+		jsonErr(w, http.StatusForbidden, "screenshots can only be recorded from the local machine")
 		return
 	}
 	// Get ticket to find mission_id
@@ -792,6 +773,17 @@ func (s *Server) handleRecordEvidence(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, http.StatusNotFound, "ticket not found: "+err.Error())
 		return
+	}
+	if body.Type == swarm.EvidenceScreenshot {
+		var defaultRev string
+		if body.Content, defaultRev, err = s.checkScreenshot(ticket.MissionID, body.Content); err != nil {
+			log.Printf("screenshot for ticket %s rejected: %v", ticketID, err)
+			jsonErr(w, http.StatusBadRequest, "screenshot rejected: "+screenshotRejection(err))
+			return
+		}
+		if revision == "" {
+			revision = defaultRev
+		}
 	}
 	if revision == "" && body.Type == swarm.EvidenceReview {
 		revision = s.defaultReviewRevision(ticket.MissionID)

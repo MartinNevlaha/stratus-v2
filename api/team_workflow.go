@@ -179,7 +179,7 @@ func (s *Server) syncTeamTaskEvidence(team teams.Team, task teams.Task) error {
 	revisionStale := false
 	reviewer := strings.Contains(role, "reviewer")
 	if reviewer && task.State == "complete" {
-		revision, e := teamCodeRevision(team.ProjectRoot)
+		revision, e := teamCodeRevision(team.ReviewRoot())
 		if e != nil || task.Revision == "" || revision != task.Revision {
 			revisionStale = true
 		}

@@ -97,12 +97,14 @@ const (
 	EvidenceBuild      = "build"
 	EvidenceNote       = "note"
 	EvidenceGate       = "gate"
+	// EvidenceScreenshot's content is the path of an image file inside the project.
+	EvidenceScreenshot = "screenshot"
 )
 
 // ValidEvidenceTypes is the set of valid evidence type values.
 var ValidEvidenceTypes = map[string]bool{
 	EvidenceDiff: true, EvidenceTestResult: true, EvidenceReview: true,
-	EvidenceBuild: true, EvidenceNote: true, EvidenceGate: true,
+	EvidenceBuild: true, EvidenceNote: true, EvidenceGate: true, EvidenceScreenshot: true,
 }
 
 // Assignment represents a ticket-to-worker dispatch result.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { afterEach, vi } from 'vitest'
-import { applySavedProfiles, defaultComplexEffort, launchMembers, profileSaveBody, saveProjectProfile, sourceLabel, usageLabel } from './teams'
+import { applySavedProfiles, defaultComplexEffort, launchMembers, profileSaveBody, saveProjectProfile, sourceLabel, teamRequest, TeamTimeoutError, usageLabel } from './teams'
 import type { TeamPreflight } from './teams'
 
 describe('team launch choices', () => {
@@ -54,5 +54,43 @@ describe('project profile', () => {
   expect(sourceLabel('project')).toBe('Profil projektu')
   expect(sourceLabel('agent-file')).toBe('Súbor agenta')
   expect(sourceLabel(undefined)).toBe('')
+ })
+})
+
+describe('teamRequest timeout', () => {
+ // A fetch that never answers and rejects like the browser does once its signal aborts.
+ function hangingFetch() {
+  vi.stubGlobal('fetch', (_path: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+   init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')))
+  }))
+ }
+ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+ it('aborts after 30 seconds by default with a readable message', async () => {
+  vi.useFakeTimers()
+  hangingFetch()
+  const pending = teamRequest('teams').then(() => 'resolved', (e: unknown) => e)
+  await vi.advanceTimersByTimeAsync(29_999)
+  let settled = false
+  void pending.then(() => { settled = true })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(settled).toBe(false)
+  await vi.advanceTimersByTimeAsync(1)
+  const error = await pending
+  expect(error).toBeInstanceOf(TeamTimeoutError)
+  expect((error as Error).message).toBe('Požiadavka trvá príliš dlho; server ju možno ešte spracúva. Obnovte stav o chvíľu.')
+ })
+
+ it('honours a longer timeoutMs', async () => {
+  vi.useFakeTimers()
+  hangingFetch()
+  const pending = teamRequest('teams/t/verify', {}, 'POST', 360_000).then(() => 'resolved', (e: unknown) => e)
+  await vi.advanceTimersByTimeAsync(359_999)
+  let settled = false
+  void pending.then(() => { settled = true })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(settled).toBe(false)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(await pending).toBeInstanceOf(TeamTimeoutError)
  })
 })

@@ -284,6 +284,8 @@ Delegate to `delivery-code-reviewer` — spawn in background. Pass the evidence 
 
 Tell the reviewer to capture `git rev-parse HEAD` in the integration worktree when the review starts and to pass it as `revision` when recording the review evidence (`swarm_record_evidence`, type `review`, verdict `pass` or `fail`); the handoff shows a review as valid only for the revision it names.
 
+For UI changes, capture a screenshot of the integrated result (for example with Playwright) and save it to a gitignored location, or to an absolute path under the project root's `.stratus/screenshots/` (outside the integration worktree), never to a tracked or unignored path inside the integration worktree: an untracked file makes the tree dirty and marks the review and gates `+dirty`. Then record it with `swarm_record_evidence`, type `screenshot`, `content` = the file path (png/jpg/webp/gif, max 5 MiB) and `revision` = `git rev-parse HEAD` of the integration worktree; the handoff shows it as current only for that revision and warns about UI changes without a current screenshot.
+
 If `[must_fix]` issues are found → transition back to implement, create fix-up tickets, re-dispatch.
 On pass → transition to learn.
 

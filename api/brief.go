@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -36,15 +37,23 @@ const (
 // "do not revisit". Events without a status render as plain decisions.
 // role only biases ordering: reviewer roles see governance rules before code
 // pointers.
-func (s *Server) buildBrief(workflowID, role string) string {
+//
+// A non-zero since is the start of the recipient's previous turn (lastTurnStart):
+// only decisions created after it are listed and context pointers and governance rules are
+// omitted (the recipient already saw them), so the result is "" when nothing
+// is new. A zero since yields the full brief.
+func (s *Server) buildBrief(workflowID, role string, since time.Time) string {
 	state, err := s.coordinator.Get(workflowID)
 	if err != nil {
 		return ""
 	}
 	phase := string(state.Phase)
 
-	decisions := s.briefDecisionLines(workflowID)
-	pointers, rules := s.briefPointerLines(workflowID, phase)
+	decisions := s.briefDecisionLines(workflowID, since)
+	var pointers, rules []string
+	if since.IsZero() {
+		pointers, rules = s.briefPointerLines(workflowID, phase)
+	}
 	if len(decisions) == 0 && len(pointers) == 0 && len(rules) == 0 {
 		return ""
 	}
@@ -80,8 +89,8 @@ func (s *Server) buildBrief(workflowID, role string) string {
 	return clipRunes(strings.Join(kept, "\n\n"), briefMaxRunes)
 }
 
-func (s *Server) briefDecisionLines(workflowID string) []string {
-	events, err := s.db.RecentWorkflowDecisions(workflowID, briefDecisionPool)
+func (s *Server) briefDecisionLines(workflowID string, since time.Time) []string {
+	events, err := s.db.RecentWorkflowDecisions(workflowID, briefDecisionPool, since)
 	if err != nil {
 		return nil
 	}
@@ -201,7 +210,7 @@ func (s *Server) handleBrief(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, err.Error())
 		return
 	}
-	json200(w, map[string]any{"workflow_id": id, "brief": s.buildBrief(id, role)})
+	json200(w, map[string]any{"workflow_id": id, "brief": s.buildBrief(id, role, time.Time{})})
 }
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)

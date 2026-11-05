@@ -1,6 +1,9 @@
 package db
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func openWorkflowContextDB(t *testing.T) *DB {
 	t.Helper()
@@ -67,7 +70,7 @@ func TestRecentWorkflowDecisions_FiltersByWorkflowNewestFirstWithLimit(t *testin
 	saveCtxEvent(t, d, SaveEventInput{Type: "decision", Title: "unscoped", Text: "x"})
 	saveCtxEvent(t, d, SaveEventInput{Type: "discovery", Title: "not a decision", Text: "x", Refs: map[string]any{"workflow_id": "wf-a"}})
 
-	got, err := d.RecentWorkflowDecisions("wf-a", 10)
+	got, err := d.RecentWorkflowDecisions("wf-a", 10, time.Time{})
 	if err != nil {
 		t.Fatalf("RecentWorkflowDecisions: %v", err)
 	}
@@ -80,7 +83,7 @@ func TestRecentWorkflowDecisions_FiltersByWorkflowNewestFirstWithLimit(t *testin
 		t.Fatalf("ids = %v, want %v", ids, want)
 	}
 
-	got, err = d.RecentWorkflowDecisions("wf-a", 2)
+	got, err = d.RecentWorkflowDecisions("wf-a", 2, time.Time{})
 	if err != nil || len(got) != 2 {
 		t.Fatalf("limit: len=%d err=%v", len(got), err)
 	}
@@ -92,12 +95,40 @@ func TestRecentWorkflowDecisions_TagMatchIsExact(t *testing.T) {
 	saveCtxEvent(t, d, SaveEventInput{Type: "decision", Title: "ab by ref", Text: "x", Refs: map[string]any{"workflow_id": "spec-ab"}})
 	only := saveCtxEvent(t, d, SaveEventInput{Type: "decision", Title: "a", Text: "x", Tags: []string{"decision", "spec-a"}})
 
-	got, err := d.RecentWorkflowDecisions("spec-a", 10)
+	got, err := d.RecentWorkflowDecisions("spec-a", 10, time.Time{})
 	if err != nil {
 		t.Fatalf("RecentWorkflowDecisions: %v", err)
 	}
 	if len(got) != 1 || got[0].ID != only {
 		t.Fatalf("spec-a decisions = %+v, want only id %d", got, only)
+	}
+}
+
+func TestRecentWorkflowDecisions_SinceKeepsOnlyNewerDecisions(t *testing.T) {
+	d := openWorkflowContextDB(t)
+	old := saveCtxEvent(t, d, SaveEventInput{Type: "decision", Title: "old", Text: "x", Refs: map[string]any{"workflow_id": "wf-a"}})
+	boundary := saveCtxEvent(t, d, SaveEventInput{Type: "decision", Title: "boundary", Text: "x", Refs: map[string]any{"workflow_id": "wf-a"}})
+	fresh := saveCtxEvent(t, d, SaveEventInput{Type: "decision", Title: "fresh", Text: "x", Tags: []string{"decision", "wf-a"}})
+	for id, ms := range map[int64]int64{old: 1000, boundary: 2000, fresh: 3000} {
+		if _, err := d.sql.Exec(`UPDATE events SET created_ms = ? WHERE id = ?`, ms, id); err != nil {
+			t.Fatalf("set created_ms: %v", err)
+		}
+	}
+
+	got, err := d.RecentWorkflowDecisions("wf-a", 10, time.UnixMilli(2000))
+	if err != nil {
+		t.Fatalf("RecentWorkflowDecisions: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != fresh {
+		t.Fatalf("since 2000 = %+v, want only id %d (strictly newer)", got, fresh)
+	}
+	got, err = d.RecentWorkflowDecisions("wf-a", 10, time.Time{})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("zero since = %d decisions, err %v; want all 3", len(got), err)
+	}
+	got, err = d.RecentWorkflowDecisions("wf-a", 10, time.UnixMilli(5000))
+	if err != nil || len(got) != 0 {
+		t.Fatalf("future since = %d decisions, err %v; want none", len(got), err)
 	}
 }
 

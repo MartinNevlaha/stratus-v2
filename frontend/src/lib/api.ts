@@ -192,6 +192,8 @@ export const listMissions = () => get<SwarmMission[]>('/swarm/missions')
 export const getMission = (id: string) => get<SwarmMissionDetail>(`/swarm/missions/${id}`)
 export const getMissionHandoff = (id: string) =>
   get<MissionHandoff>(`/swarm/missions/${encodeURIComponent(id)}/handoff`)
+export const missionScreenshotUrl = (missionId: string, evidenceId: string) =>
+  `${BASE}/swarm/missions/${encodeURIComponent(missionId)}/screenshots/${encodeURIComponent(evidenceId)}`
 export const getMissionFiles = (id: string) => get<SwarmFileReservation[]>(`/swarm/missions/${id}/files`)
 export const deleteMission = (id: string) => del<{ deleted: boolean }>(`/swarm/missions/${id}`)
 
