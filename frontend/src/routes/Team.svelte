@@ -17,10 +17,30 @@
  const states:Record<string,string>={running:'Pracuje',working:'Pracuje',active:'Aktívny',ready:'Pripravený',idle:'Pripravený',queued:'Vo fronte',waiting:'Čaká na kolegu',waiting_colleague:'Čaká na kolegu',needs_user:'Potrebuje teba',paused:'Pozastavený',stopped:'Zastavený',done:'Hotovo',completed:'Hotovo',complete:'Hotovo',error:'Chyba',failed:'Chyba',cancelled:'Zrušené',stale:'Zmenený podklad',connected:'Pripojený',disconnected:'Spojenie prerušené',detached:'Odpojený',expired:'Spojenie vypršalo',unknown:'Spojenie sa overuje'}
  let team=$derived(teams.find(t=>t.id===selected)??null)
  let visibleTasks=$derived(team?.tasks.filter(task=>task.origin!=='external')??[])
+ const effortOrder:Record<string,number>={none:0,minimal:1,low:2,medium:3,high:4,xhigh:5,max:6}
+ function modelOptions(runtime:string) {
+  return preflight?.runtimes.find(rt=>rt.runtime===runtime)?.models??[]
+ }
+ function effortOptions(row:TeamChoice) {
+  const efforts=modelOptions(row.runtime).find(model=>model.id===row.model)?.efforts??[]
+  return [...efforts].sort((left,right)=>(effortOrder[left]??99)-(effortOrder[right]??99)||left.localeCompare(right))
+ }
+ let validChoices=$derived(choices.length>0&&choices.every(row=>{
+  const available=preflight?.runtimes.some(rt=>rt.runtime===row.runtime&&rt.available)
+  const efforts=effortOptions(row)
+  return available&&efforts.includes(row.effort)&&efforts.includes(row.complexEffort)
+ }))
  const status=(value:string)=>states[value]??value
  function chooseRuntime(index:number,runtime:string) {
   const role=choices[index].role,profile=preflight?.profiles[runtime]?.[role]
   choices[index]={role,runtime,model:profile?.model??'',effort:profile?.effort??'',complexEffort:runtime==='codex'&&profile?.model==='gpt-6-astra'?'xhigh':profile?.effort??''}
+ }
+ function chooseModel(index:number,model:string) {
+  const row={...choices[index],model}
+  const efforts=effortOptions(row)
+  if(!efforts.includes(row.effort))row.effort=''
+  if(!efforts.includes(row.complexEffort))row.complexEffort=''
+  choices[index]=row
  }
  async function refresh() {
   try {const data=await teamRequest<{teams:ManagedTeam[]}>('teams');teams=data.teams??[];if(!selected&&teams.length)selected=teams[0].id}
@@ -66,11 +86,39 @@
    {#each preflight.warnings as warning}<p class="warning">{warning}</p>{/each}
    <p class="muted">Roly sa spustia až pri potrebnej práci. Model aj oprávnenia sa overia pri otvorení relácie.</p>
    <div class="table-scroll"><table><thead><tr><th>Rola</th><th>Nástroj</th><th>Model</th><th>Uvažovanie</th><th>Zložitá úloha / spec-complex</th></tr></thead><tbody>
-    {#each choices as row,i}<tr><td>{roles[row.role]}</td><td><select aria-label={`Nástroj: ${roles[row.role]}`} value={row.runtime} onchange={e=>chooseRuntime(i,e.currentTarget.value)}>{#each preflight.runtimes as rt}<option value={rt.runtime} disabled={!rt.available}>{runtimes[rt.runtime]}</option>{/each}</select></td><td><input aria-label={`Model: ${roles[row.role]}`} bind:value={row.model} list={`models-${i}`} /><datalist id={`models-${i}`}>{#each preflight.runtimes.find(rt=>rt.runtime===row.runtime)?.models??[] as model}<option value={model.id}></option>{/each}</datalist></td><td><input aria-label={`Uvažovanie: ${roles[row.role]}`} bind:value={row.effort} /></td><td><input aria-label={`Zložitá úloha: ${roles[row.role]}`} bind:value={row.complexEffort}/></td></tr>{/each}
+    {#each choices as row,i}
+     {@const models=modelOptions(row.runtime)}
+     {@const efforts=effortOptions(row)}
+     <tr>
+      <td>{roles[row.role]}</td>
+      <td><select aria-label={`Nástroj: ${roles[row.role]}`} value={row.runtime} onchange={e=>chooseRuntime(i,e.currentTarget.value)} disabled={busy}>{#each preflight.runtimes as rt}<option value={rt.runtime} disabled={!rt.available}>{runtimes[rt.runtime]}</option>{/each}</select></td>
+      <td>
+       <select aria-label={`Model: ${roles[row.role]}`} value={row.model} onchange={e=>chooseModel(i,e.currentTarget.value)} disabled={busy||!models.length}>
+        {#if !row.model}<option value="" disabled>{models.length?'Vyber model':'Žiadne dostupné modely'}</option>
+        {:else if !models.some(model=>model.id===row.model)}<option value={row.model} disabled>{row.model} (nedostupný)</option>{/if}
+        {#each models as model}<option value={model.id}>{model.id}</option>{/each}
+       </select>
+      </td>
+      <td>
+       <select aria-label={`Uvažovanie: ${roles[row.role]}`} bind:value={row.effort} disabled={busy||!efforts.length}>
+        {#if !row.effort}<option value="" disabled>{efforts.length?'Vyber uvažovanie':'Uvažovanie nie je dostupné'}</option>
+        {:else if !efforts.includes(row.effort)}<option value={row.effort} disabled>{row.effort} (nedostupné)</option>{/if}
+        {#each efforts as effort}<option value={effort}>{effort}</option>{/each}
+       </select>
+      </td>
+      <td>
+       <select aria-label={`Zložitá úloha: ${roles[row.role]}`} bind:value={row.complexEffort} disabled={busy||!efforts.length}>
+        {#if !row.complexEffort}<option value="" disabled>{efforts.length?'Vyber uvažovanie':'Uvažovanie nie je dostupné'}</option>
+        {:else if !efforts.includes(row.complexEffort)}<option value={row.complexEffort} disabled>{row.complexEffort} (nedostupné)</option>{/if}
+        {#each efforts as effort}<option value={effort}>{effort}</option>{/each}
+       </select>
+      </td>
+     </tr>
+    {/each}
    </tbody></table></div>
    <div class="limits"><label>Súbežní agenti<input type="number" min="1" max="8" bind:value={limits.max_concurrent}/></label><label>Automatické kolá<input type="number" min="1" max="20" bind:value={limits.max_auto_rounds}/></label><label>Najviac tímových vstupov<input type="number" min="1" max="1000" bind:value={limits.max_turns}/></label><label>Limit známych tokenov (0 = bez limitu)<input type="number" min="0" step="1000" bind:value={limits.max_tokens}/></label></div>
    <p class="muted">Čakanie nevolá model. Keď nástroj neoznamuje spotrebu tokenov, platí limit tímových vstupov. Súčasné fázy a povinné kontroly workflow zostávajú zachované.</p>
-   <button class="primary" onclick={start} disabled={busy||!preflight.runtimes.some(rt=>rt.available)}>Spustiť tím</button>
+   <button class="primary" onclick={start} disabled={busy||!validChoices}>Spustiť tím</button>
   {/if}
  </section>
  {/if}
@@ -109,5 +157,5 @@
  {/if}
 </div>
 <style>
- .team-page{height:100%;overflow:auto;padding:4px 6px 28px;display:flex;flex-direction:column;gap:18px}.page-heading,.section-heading,.team-toolbar,.compose-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}.page-heading p,.muted,small{color:#8b949e}h1{font-size:24px}h2{font-size:17px}h3{font-size:15px}button,input,select,textarea{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px 10px;font:inherit}button{cursor:pointer;white-space:nowrap}button:hover:not(:disabled){border-color:#58a6ff}button:disabled{opacity:.45;cursor:default}.primary{background:#238636;color:white;border-color:#2ea043}.danger{color:#f85149}.setup,.compose,.member,.task-list article{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}.setup{display:flex;flex-direction:column;gap:14px}.setup>.primary{align-self:flex-start}.runtimes,.limits,.actions{display:flex;gap:12px;flex-wrap:wrap}.runtimes>div{display:flex;flex-direction:column;gap:4px;border-left:3px solid #3fb950;padding:8px 12px;flex:1}.runtimes>.unavailable{border-color:#8b949e}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:8px;border-bottom:1px solid #30363d}th{color:#8b949e;font-weight:500;font-size:12px}td input{width:100%;min-width:70px}td:nth-child(3){min-width:180px}.limits label{display:flex;flex-direction:column;gap:5px;font-size:12px}.limits input{max-width:180px}.team-toolbar{flex-wrap:wrap}.members{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.member p{margin:9px 0}.state{font-size:12px;color:#3fb950}.attention,.warning{color:#d29922}.warning,.error{padding:10px;border-radius:6px;background:#d2992210}.error{color:#ff7b72;background:#f8514910;white-space:pre-wrap}.compose{display:flex;flex-direction:column;gap:10px}textarea{resize:vertical;width:100%}.task-list{display:flex;flex-direction:column;gap:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:10px 0}details{margin-top:10px}summary{cursor:pointer;color:#58a6ff}.approval{margin-top:12px;border:1px solid #d29922;padding:12px;border-radius:6px}.approval button{margin-right:8px}.team-picker select{margin-left:8px}@media(max-width:650px){.page-heading{align-items:flex-start}.members{grid-template-columns:1fr}.team-toolbar{align-items:flex-start;flex-direction:column}.limits input{max-width:125px}}
+ .team-page{height:100%;overflow:auto;padding:4px 6px 28px;display:flex;flex-direction:column;gap:18px}.page-heading,.section-heading,.team-toolbar,.compose-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}.page-heading p,.muted,small{color:#8b949e}h1{font-size:24px}h2{font-size:17px}h3{font-size:15px}button,input,select,textarea{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px 10px;font:inherit}button{cursor:pointer;white-space:nowrap}button:hover:not(:disabled){border-color:#58a6ff}button:disabled{opacity:.45;cursor:default}.primary{background:#238636;color:white;border-color:#2ea043}.danger{color:#f85149}.setup,.compose,.member,.task-list article{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}.setup{display:flex;flex-direction:column;gap:14px}.setup>.primary{align-self:flex-start}.runtimes,.limits,.actions{display:flex;gap:12px;flex-wrap:wrap}.runtimes>div{display:flex;flex-direction:column;gap:4px;border-left:3px solid #3fb950;padding:8px 12px;flex:1}.runtimes>.unavailable{border-color:#8b949e}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:8px;border-bottom:1px solid #30363d}th{color:#8b949e;font-weight:500;font-size:12px}td select{width:100%;min-width:90px}td:nth-child(3){min-width:180px}.limits label{display:flex;flex-direction:column;gap:5px;font-size:12px}.limits input{max-width:180px}.team-toolbar{flex-wrap:wrap}.members{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.member p{margin:9px 0}.state{font-size:12px;color:#3fb950}.attention,.warning{color:#d29922}.warning,.error{padding:10px;border-radius:6px;background:#d2992210}.error{color:#ff7b72;background:#f8514910;white-space:pre-wrap}.compose{display:flex;flex-direction:column;gap:10px}textarea{resize:vertical;width:100%}.task-list{display:flex;flex-direction:column;gap:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:10px 0}details{margin-top:10px}summary{cursor:pointer;color:#58a6ff}.approval{margin-top:12px;border:1px solid #d29922;padding:12px;border-radius:6px}.approval button{margin-right:8px}.team-picker select{margin-left:8px}@media(max-width:650px){.page-heading{align-items:flex-start}.members{grid-template-columns:1fr}.team-toolbar{align-items:flex-start;flex-direction:column}.limits input{max-width:125px}}
 </style>
