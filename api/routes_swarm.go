@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -121,45 +122,79 @@ func (s *Server) handleUpdateMissionStatus(w http.ResponseWriter, r *http.Reques
 }
 
 // runQualityGates executes Stage A automated checks (build, vet, placeholder scan)
-// and records results as evidence on the mission's tickets.
+// and records results as evidence on the mission's tickets. The checks run in the
+// mission's integration worktree when it exists (that is where the merged work lives),
+// otherwise in the project root.
 func (s *Server) runQualityGates(missionID string) {
 	tickets, err := s.swarm.ListTickets(missionID)
 	if err != nil || len(tickets) == 0 {
 		return
 	}
+	mission, err := s.swarm.GetMission(missionID)
+	if err != nil {
+		log.Printf("warning: quality gates for mission %s: load mission: %v", missionID, err)
+		return
+	}
+	dir := s.projectRoot
+	if wt, ok := s.swarm.IntegrationWorktreePath(mission); ok {
+		dir = wt
+	}
 	// Use the first ticket as the evidence anchor for mission-level gates
 	ticketID := tickets[0].ID
 
 	// Gate 1: go build
-	if out, err := runGateCmd(s.projectRoot, "go", "build", "./..."); err != nil {
-		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go build FAILED:\n"+out, "quality-gate", "fail")
+	if out, err := runGateCmd(dir, "go", "build", "./..."); err != nil {
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, fmt.Sprintf("go build FAILED (in %s):\n%s", dir, out), "quality-gate", "fail")
 		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "build", "passed": false, "output": truncate(out, 500)})
 	} else {
-		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go build: OK", "quality-gate", "pass")
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go build: OK (in "+dir+")", "quality-gate", "pass")
 		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "build", "passed": true})
 	}
 
 	// Gate 2: go vet
-	if out, err := runGateCmd(s.projectRoot, "go", "vet", "./..."); err != nil {
-		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go vet FAILED:\n"+out, "quality-gate", "fail")
+	if out, err := runGateCmd(dir, "go", "vet", "./..."); err != nil {
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, fmt.Sprintf("go vet FAILED (in %s):\n%s", dir, out), "quality-gate", "fail")
 		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "vet", "passed": false, "output": truncate(out, 500)})
 	} else {
-		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go vet: OK", "quality-gate", "pass")
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "go vet: OK (in "+dir+")", "quality-gate", "pass")
 		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "vet", "passed": true})
 	}
 
-	// Gate 3: placeholder scan (TODO/FIXME/PLACEHOLDER in recently changed lines)
-	if out, _ := runGateCmd(s.projectRoot, "git", "diff", "--unified=0", "HEAD~5"); len(out) > 0 {
-		placeholders := scanPlaceholders(out)
-		if len(placeholders) > 0 {
-			content := fmt.Sprintf("Found %d placeholder markers in recent changes:\n%s", len(placeholders), strings.Join(placeholders, "\n"))
-			s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, content, "quality-gate", "fail")
-			s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "placeholder_scan", "passed": false, "count": len(placeholders)})
-		} else {
-			s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "Placeholder scan: clean", "quality-gate", "pass")
-			s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "placeholder_scan", "passed": true})
-		}
+	// Gate 3: placeholder scan (TODO/FIXME/PLACEHOLDER in lines changed since the base branch)
+	s.runPlaceholderGate(missionID, ticketID, dir, mission.BaseBranch)
+}
+
+// runPlaceholderGate scans the lines changed since baseBranch for placeholder markers.
+// When the diff cannot be produced (empty or unknown base ref) it records an info row
+// saying the scan was skipped: info rather than fail because the code was not found
+// wanting, and never pass because nothing was scanned.
+func (s *Server) runPlaceholderGate(missionID, ticketID, dir, baseBranch string) {
+	skip := func(reason string) {
+		content := fmt.Sprintf("Placeholder scan skipped (in %s): %s", dir, reason)
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, content, "quality-gate", "info")
+		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "placeholder_scan", "skipped": true, "output": truncate(reason, 500)})
 	}
+	if baseBranch == "" {
+		skip("mission has no base branch")
+		return
+	}
+	out, err := runGateCmd(dir, "git", "diff", "--unified=0", baseBranch+"...HEAD")
+	if err != nil {
+		skip(fmt.Sprintf("git diff %s...HEAD failed: %v: %s", baseBranch, err, strings.TrimSpace(out)))
+		return
+	}
+	if len(out) == 0 {
+		return
+	}
+	placeholders := scanPlaceholders(out)
+	if len(placeholders) > 0 {
+		content := fmt.Sprintf("Found %d placeholder markers in recent changes (in %s):\n%s", len(placeholders), dir, strings.Join(placeholders, "\n"))
+		s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, content, "quality-gate", "fail")
+		s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "placeholder_scan", "passed": false, "count": len(placeholders)})
+		return
+	}
+	s.swarm.RecordEvidence(ticketID, missionID, swarm.EvidenceGate, "Placeholder scan: clean (in "+dir+")", "quality-gate", "pass")
+	s.hub.BroadcastJSON("gate_result", map[string]any{"mission_id": missionID, "gate": "placeholder_scan", "passed": true})
 }
 
 func (s *Server) handleDeleteMission(w http.ResponseWriter, r *http.Request) {

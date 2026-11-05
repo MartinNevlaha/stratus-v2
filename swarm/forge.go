@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
@@ -214,14 +215,21 @@ func isDir(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// IntegrationWorktreePath returns where the mission's integration worktree lives and
+// whether that directory exists.
+func (s *Store) IntegrationWorktreePath(m *db.SwarmMission) (string, bool) {
+	if m.MergeBranch == "" {
+		return "", false
+	}
+	path := filepath.Join(s.worktree.worktreeDir, sanitizeBranchForDir(m.MergeBranch))
+	return path, isDir(path)
+}
+
 // ensureIntegrationWorktree returns the path to the integration worktree, creating
 // it if it doesn't already exist.
 func (s *Store) ensureIntegrationWorktree(mission *db.SwarmMission) (string, error) {
-	dirName := sanitizeBranchForDir(mission.MergeBranch)
-	wtPath := s.worktree.worktreeDir + "/" + dirName
-
-	// Check if the worktree directory already exists.
-	if isDir(wtPath) {
+	wtPath, exists := s.IntegrationWorktreePath(mission)
+	if exists {
 		return wtPath, nil
 	}
 

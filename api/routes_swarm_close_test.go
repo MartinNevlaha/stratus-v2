@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
@@ -64,34 +65,121 @@ func workerTranscript(t *testing.T, body string) string {
 	return p
 }
 
-func TestAgentStop_ClosesOpenTicketsOfIdentifiedWorker(t *testing.T) {
-	s, id := agentTestServer(t)
-	swarmCloseFixture(t, s, id)
-	tr := workerTranscript(t, "## Swarm Worker Protocol\\nSWARM_WORKER_ID: w1\\nWork in /wt")
+func checkTicket(t *testing.T, s *Server, ticket, status, resultContains string) {
+	t.Helper()
+	got, err := s.db.GetTicket(ticket)
+	if err != nil {
+		t.Fatalf("GetTicket %s: %v", ticket, err)
+	}
+	if got.Status != status || !strings.Contains(got.Result, resultContains) {
+		t.Errorf("%s = %s %q, want %s containing %q", ticket, got.Status, got.Result, status, resultContains)
+	}
+}
 
+func stopWorkerAgent(t *testing.T, s *Server) {
+	t.Helper()
+	tr := workerTranscript(t, "## Swarm Worker Protocol\\nSWARM_WORKER_ID: w1\\nWork in /wt")
 	w := postAgentEvent(t, s, `{"event":"stop","session_id":"sess-1","agent_id":"ag","agent_type":"delivery-backend-engineer","agent_transcript_path":"`+tr+`","last_assistant_message":"Patched the parser, CPU tests pass."}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("code = %d body=%s", w.Code, w.Body.String())
 	}
-	check := func(ticket, status string, resultContains string) {
-		t.Helper()
-		got, err := s.db.GetTicket(ticket)
-		if err != nil {
-			t.Fatalf("GetTicket %s: %v", ticket, err)
-		}
-		if got.Status != status || !strings.Contains(got.Result, resultContains) {
-			t.Errorf("%s = %s %q, want %s containing %q", ticket, got.Status, got.Result, status, resultContains)
+}
+
+func TestAgentStop_ClosesOpenTicketsOfIdentifiedWorker(t *testing.T) {
+	s, id := agentTestServer(t)
+	swarmCloseFixture(t, s, id)
+	for _, ticket := range []string{"t-open", "t-active"} {
+		if _, err := s.swarm.RecordEvidence(ticket, "m1", swarm.EvidenceTestResult, "go test ok", "w1", "pass"); err != nil {
+			t.Fatalf("RecordEvidence: %v", err)
 		}
 	}
-	check("t-open", "done", "auto-closed")
-	check("t-active", "done", "Patched the parser")
-	check("t-failed", "failed", "build broke") // an explicit failure is never overwritten
-	check("t-done", "done", "done by agent")   // an explicit report is never overwritten
+
+	stopWorkerAgent(t, s)
+
+	checkTicket(t, s, "t-open", "done", "auto-closed")
+	checkTicket(t, s, "t-active", "done", "Patched the parser")
+	checkTicket(t, s, "t-failed", "failed", "build broke") // an explicit failure is never overwritten
+	checkTicket(t, s, "t-done", "done", "done by agent")   // an explicit report is never overwritten
 
 	worker, _ := s.db.GetWorker("w1")
 	if worker.Status != "done" {
 		t.Errorf("worker status = %q, want done", worker.Status)
 	}
+}
+
+func TestAgentStop_WithoutEvidenceLeavesTicketsInProgress(t *testing.T) {
+	s, id := agentTestServer(t)
+	swarmCloseFixture(t, s, id)
+
+	stopWorkerAgent(t, s)
+
+	checkTicket(t, s, "t-open", "in_progress", "[agent stopped without evidence] Patched the parser")
+	checkTicket(t, s, "t-active", "in_progress", "[agent stopped without evidence] Patched the parser")
+	checkTicket(t, s, "t-failed", "failed", "build broke")
+	checkTicket(t, s, "t-done", "done", "done by agent")
+
+	ev, err := s.swarm.ListTicketEvidence("t-open")
+	if err != nil || len(ev) != 1 || ev[0].Type != swarm.EvidenceNote {
+		t.Errorf("t-open evidence = %+v, %v; want one note", ev, err)
+	}
+	worker, _ := s.db.GetWorker("w1")
+	if worker.Status != "done" {
+		t.Errorf("worker status = %q, want done even without ticket evidence", worker.Status)
+	}
+}
+
+func TestAgentStop_RejectedOrNonQualifyingEvidenceDoesNotCloseTicket(t *testing.T) {
+	s, id := agentTestServer(t)
+	swarmCloseFixture(t, s, id)
+	// A failed test run, and a note (not verifying evidence type) with a pass verdict.
+	_, _ = s.swarm.RecordEvidence("t-open", "m1", swarm.EvidenceTestResult, "FAIL", "w1", "fail")
+	_, _ = s.swarm.RecordEvidence("t-open", "m1", swarm.EvidenceNote, "looks fine", "w1", "pass")
+	_, _ = s.swarm.RecordEvidence("t-active", "m1", swarm.EvidenceReview, "nope", "rev", "rejected")
+
+	stopWorkerAgent(t, s)
+
+	checkTicket(t, s, "t-open", "in_progress", "[agent stopped without evidence]")
+	checkTicket(t, s, "t-active", "in_progress", "[agent stopped without evidence]")
+}
+
+// recordSpaced records evidence with a pause so created_at orders the rows as recorded.
+func recordSpaced(t *testing.T, s *Server, ticket, typ, verdict string) {
+	t.Helper()
+	time.Sleep(5 * time.Millisecond)
+	if _, err := s.swarm.RecordEvidence(ticket, "m1", typ, "content", "w1", verdict); err != nil {
+		t.Fatalf("RecordEvidence: %v", err)
+	}
+}
+
+func TestAgentStop_LatestVerifyingEvidenceDecides(t *testing.T) {
+	s, id := agentTestServer(t)
+	swarmCloseFixture(t, s, id)
+	// t-open: pass then a later fail. t-active: fail then a later pass.
+	recordSpaced(t, s, "t-open", swarm.EvidenceTestResult, "pass")
+	recordSpaced(t, s, "t-open", swarm.EvidenceBuild, "fail")
+	recordSpaced(t, s, "t-active", swarm.EvidenceTestResult, "fail")
+	recordSpaced(t, s, "t-active", swarm.EvidenceTestResult, "pass")
+	// A later non-verifying note must not change the decision for t-active.
+	recordSpaced(t, s, "t-active", swarm.EvidenceNote, "fail")
+
+	stopWorkerAgent(t, s)
+
+	checkTicket(t, s, "t-open", "in_progress", "[agent stopped without evidence]")
+	checkTicket(t, s, "t-active", "done", "auto-closed")
+}
+
+func TestAgentStop_RepeatedStopDoesNotDuplicateNote(t *testing.T) {
+	s, id := agentTestServer(t)
+	swarmCloseFixture(t, s, id)
+
+	stopWorkerAgent(t, s)
+	stopWorkerAgent(t, s)
+
+	ev, err := s.swarm.ListTicketEvidence("t-open")
+	if err != nil || len(ev) != 1 {
+		t.Errorf("t-open evidence = %+v, %v; want exactly one note after two stops", ev, err)
+	}
+	checkTicket(t, s, "t-open", "in_progress", "[agent stopped without evidence]")
 }
 
 func TestAgentStop_WithoutWorkerMarkerLeavesTicketsAlone(t *testing.T) {

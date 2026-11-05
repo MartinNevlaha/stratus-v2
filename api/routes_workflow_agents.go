@@ -14,6 +14,7 @@ import (
 
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
+	"github.com/MartinNevlaha/stratus-v2/swarm"
 )
 
 // defaultIdleWindow is the minimum gap between idle_prompt notifications of one workflow.
@@ -179,8 +180,11 @@ func workerIDFromTranscript(path string) string {
 // closeSwarmTickets makes sure a stopped swarm worker never leaves its tickets looking
 // unfinished. Delivery agents may be unable to call the swarm MCP tools, so when the agent
 // stops, its tickets that are still assigned or in progress are marked done with the
-// agent's final report as the result. A ticket the agent reported on itself (done, failed,
-// blocked) is never touched. Best-effort and silent when the agent is not a swarm worker.
+// agent's final report as the result, but only when the ticket has verifying evidence.
+// Without it the ticket stays in progress, flagged with a note, so an agent that merely
+// stopped is not counted as having finished. A ticket the agent reported on itself (done,
+// failed, blocked) is never touched. Best-effort and silent when the agent is not a swarm
+// worker.
 func (s *Server) closeSwarmTickets(in agentEventInput) {
 	if s.swarm == nil {
 		return
@@ -209,6 +213,10 @@ func (s *Server) closeSwarmTickets(in agentEventInput) {
 		if t.Status != "assigned" && t.Status != "in_progress" {
 			continue
 		}
+		if !s.ticketHasVerifyingEvidence(t.ID) {
+			s.leaveTicketUnverified(t, worker.MissionID, report)
+			continue
+		}
 		result := autoCloseNote + report
 		if err := s.swarm.UpdateTicketStatus(t.ID, "done", result); err != nil {
 			log.Printf("warning: auto-close ticket %s: %v", t.ID, err)
@@ -223,6 +231,59 @@ func (s *Server) closeSwarmTickets(in agentEventInput) {
 		if err := s.db.UpdateWorkerStatus(worker.ID, "done"); err == nil {
 			s.hub.BroadcastJSON("worker_status", map[string]any{"id": worker.ID, "status": "done", "auto_closed_tickets": closed})
 		}
+	}
+}
+
+// noEvidenceNote prefixes the result of a ticket whose agent stopped without producing evidence.
+const noEvidenceNote = "[agent stopped without evidence] "
+
+// verifyingEvidenceTypes are the evidence types that show a ticket's work was checked.
+var verifyingEvidenceTypes = map[string]bool{
+	swarm.EvidenceTestResult: true,
+	swarm.EvidenceBuild:      true,
+	swarm.EvidenceDiff:       true,
+	swarm.EvidenceReview:     true,
+}
+
+// ticketHasVerifyingEvidence reports whether the most recent test_result, build, diff or
+// review record of the ticket has a verdict other than fail or rejected: an earlier pass
+// followed by a later fail does not count, an earlier fail followed by a later pass does.
+// "rejected" is not a recorded verdict today (only pass|fail|info exist, mcp/tools.go:488).
+func (s *Server) ticketHasVerifyingEvidence(ticketID string) bool {
+	evidence, err := s.swarm.ListTicketEvidence(ticketID)
+	if err != nil {
+		log.Printf("warning: list evidence for ticket %s: %v", ticketID, err)
+		return false
+	}
+	// The list is ordered by created_at in SQL; sort explicitly (stable, so ties keep
+	// insertion order) rather than depend on that.
+	sort.SliceStable(evidence, func(i, j int) bool { return evidence[i].CreatedAt < evidence[j].CreatedAt })
+	for i := len(evidence) - 1; i >= 0; i-- {
+		if !verifyingEvidenceTypes[evidence[i].Type] {
+			continue
+		}
+		v := strings.ToLower(evidence[i].Verdict)
+		return v != "fail" && v != "rejected"
+	}
+	return false
+}
+
+// leaveTicketUnverified keeps a stopped agent's ticket in progress, with the agent's
+// report flagged as unverified, and records a note so reviewers can see why.
+func (s *Server) leaveTicketUnverified(t db.SwarmTicket, missionID, report string) {
+	if strings.HasPrefix(t.Result, noEvidenceNote) {
+		return // already flagged by an earlier stop; do not add another note
+	}
+	if err := s.swarm.UpdateTicketStatus(t.ID, "in_progress", noEvidenceNote+report); err != nil {
+		log.Printf("warning: leave ticket %s in progress: %v", t.ID, err)
+		return
+	}
+	note := "Agent stopped without test_result, build, diff or review evidence; ticket left in progress. Report: " + report
+	if _, err := s.swarm.RecordEvidence(t.ID, missionID, swarm.EvidenceNote, note, "stratus", "info"); err != nil {
+		log.Printf("warning: record note for ticket %s: %v", t.ID, err)
+	}
+	if updated, err := s.swarm.GetTicket(t.ID); err == nil {
+		s.hub.BroadcastJSON("ticket_status", updated)
 	}
 }
 
