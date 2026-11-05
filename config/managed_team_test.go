@@ -34,7 +34,8 @@ func TestConfigSave_ManagedTeamRoundTrips(t *testing.T) {
 
 func TestConfigSave_EmptyManagedTeamIsOmitted(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".stratus.json")
-	if err := Default().Save(path); err != nil {
+	cfg := Default()
+	if err := cfg.Save(path); err != nil {
 		t.Fatal(err)
 	}
 	saved, err := os.ReadFile(path)

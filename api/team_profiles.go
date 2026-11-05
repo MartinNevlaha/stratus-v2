@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
@@ -239,9 +238,6 @@ func teamCodeRevision(root string) (string, error) {
 	return "tree:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// teamProfilesMu serializes read-modify-write of managed_team in .stratus.json.
-var teamProfilesMu sync.Mutex
-
 // PUT /api/teams/profiles saves per-role choices as the project's team profile.
 // Body: {"<runtime>":{"<role>":{"model":"...","effort":"...","complex_effort":"..."}}}.
 // Running teams keep their frozen profiles; new teams read the saved layer
@@ -339,15 +335,33 @@ func containsString(list []string, v string) bool {
 
 // saveManagedTeamProfiles merges profiles into managed_team.profiles of
 // <root>/.stratus.json and leaves every other key untouched. It returns the
-// complete saved profile map. onSaved runs under the same lock right after the
-// write, so the in-memory config and the file change together.
-//
-// Known limit (pre-existing design): the other settings routes save the whole
-// in-memory Config without this lock, so a Config.Save running at the same
-// moment can still overwrite one of two near-simultaneous updates.
+// complete saved profile map. The whole read, merge, write and onSaved
+// sequence runs under the config write lock, so it is serialized against
+// Config.Save: a Save either lands before it (and is read back here) or after
+// it (and marshals the ManagedTeam that onSaved just set). onSaved updates the
+// in-memory config, which therefore changes together with the file.
 func saveManagedTeamProfiles(root string, update map[string]map[string]config.ManagedTeamProfile, onSaved func(map[string]map[string]config.ManagedTeamProfile)) (map[string]map[string]config.ManagedTeamProfile, error) {
-	teamProfilesMu.Lock()
-	defer teamProfilesMu.Unlock()
+	var saved map[string]map[string]config.ManagedTeamProfile
+	err := config.WithWriteLock(func() error {
+		var err error
+		saved, err = mergeManagedTeamProfiles(root, update)
+		if err != nil {
+			return err
+		}
+		if onSaved != nil {
+			onSaved(saved)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
+// mergeManagedTeamProfiles does the file work of saveManagedTeamProfiles; the
+// caller holds the config write lock.
+func mergeManagedTeamProfiles(root string, update map[string]map[string]config.ManagedTeamProfile) (map[string]map[string]config.ManagedTeamProfile, error) {
 	path := filepath.Join(root, ".stratus.json")
 	file := map[string]json.RawMessage{}
 	if raw, err := os.ReadFile(path); err == nil {
@@ -388,45 +402,8 @@ func saveManagedTeamProfiles(root string, update map[string]map[string]config.Ma
 	if err != nil {
 		return nil, fmt.Errorf("encode .stratus.json: %w", err)
 	}
-	if err := writeFileAtomic(path, data); err != nil {
-		return nil, err
-	}
-	if onSaved != nil {
-		onSaved(saved)
+	if err := config.WriteFileAtomic(path, data); err != nil {
+		return nil, fmt.Errorf("write .stratus.json: %w", err)
 	}
 	return saved, nil
-}
-
-// writeFileAtomic replaces path through a unique temp file in the same
-// directory (never the ".tmp" name Config.Save uses), keeping the existing
-// file mode; a new file is private (0600) because .stratus.json can hold keys.
-func writeFileAtomic(path string, data []byte) error {
-	mode := os.FileMode(0o600)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp file for .stratus.json: %w", err)
-	}
-	fail := func(step string, err error) error {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return fmt.Errorf("%s .stratus.json: %w", step, err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		return fail("write", err)
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		return fail("set mode of", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return fmt.Errorf("close temp file for .stratus.json: %w", err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		os.Remove(tmp.Name())
-		return fmt.Errorf("replace .stratus.json: %w", err)
-	}
-	return nil
 }

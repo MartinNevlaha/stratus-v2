@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/MartinNevlaha/stratus-v2/config"
@@ -168,5 +169,81 @@ func TestPutTeamProfiles_InvalidReturns400WithReason(t *testing.T) {
 				t.Fatal("invalid request must not write .stratus.json")
 			}
 		})
+	}
+}
+
+func TestPutTeamProfiles_ConcurrentWithConfigSaveKeepsBothChanges(t *testing.T) {
+	s := teamAPIServer(t)
+	cfg := config.Default()
+	s.cfg = &cfg
+	path := filepath.Join(teamProfilesRoot(t, s), ".stratus.json")
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	const rounds = 30
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			cfg.Language = []string{"en", "sk"}[i%2]
+			if err := cfg.Save(path); err != nil {
+				t.Errorf("save: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			body := `{"codex":{"lead":{"model":"gpt-6.1-sol","effort":"high"}}}`
+			if code, out := putTeamProfiles(t, s, body); code != 200 {
+				t.Errorf("put status %d %s", code, out)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Language    string                    `json:"language"`
+		ManagedTeam *config.ManagedTeamConfig `json:"managed_team"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("file is not valid JSON: %v\n%s", err, raw)
+	}
+	if file.Language != "sk" {
+		t.Fatalf("last settings change lost: language=%q", file.Language)
+	}
+	if file.ManagedTeam == nil || file.ManagedTeam.Profiles["codex"]["lead"].Model != "gpt-6.1-sol" {
+		t.Fatalf("saved profiles lost: %s", raw)
+	}
+}
+
+func TestPutTeamProfiles_ThenConfigSaveKeepsManagedTeam(t *testing.T) {
+	s := teamAPIServer(t)
+	cfg := config.Default()
+	s.cfg = &cfg
+	path := filepath.Join(teamProfilesRoot(t, s), ".stratus.json")
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := putTeamProfiles(t, s, `{"codex":{"lead":{"model":"gpt-6.1-sol","effort":"high"}}}`); code != 200 {
+		t.Fatalf("status %d %s", code, out)
+	}
+	s.cfg.Language = "sk"
+	if err := s.cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	var back config.Config
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Language != "sk" || back.ManagedTeam == nil || back.ManagedTeam.Profiles["codex"]["lead"].Model != "gpt-6.1-sol" {
+		t.Fatalf("Save after PUT lost managed_team or language: %s", raw)
 	}
 }

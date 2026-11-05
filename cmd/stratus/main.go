@@ -700,7 +700,6 @@ func cmdInit() {
 	}
 
 	allHashes := make(map[string]string)
-	initCfg := config.Load()
 	switch target {
 	case "opencode":
 		initOpenCode(wd, allHashes)
@@ -712,11 +711,12 @@ func cmdInit() {
 	}
 
 	// Record sync state so future refreshes can detect user customizations.
-	initCfg.SyncState = &config.SyncState{
-		SyncedVersion: Version,
-		AssetHashes:   allHashes,
-	}
-	if err := initCfg.Save(cfgPath); err != nil {
+	if err := saveSyncState(cfgPath, func(cfg *config.Config) {
+		cfg.SyncState = &config.SyncState{
+			SyncedVersion: Version,
+			AssetHashes:   allHashes,
+		}
+	}); err != nil {
 		log.Printf("warning: could not save sync state: %v", err)
 	}
 
@@ -1150,18 +1150,19 @@ func cmdRefresh() {
 	allSkipped = slices.Compact(allSkipped)
 
 	// Persist updated sync state.
-	if cfg.SyncState == nil {
-		cfg.SyncState = &config.SyncState{}
-	}
-	if cfg.SyncState.AssetHashes == nil {
-		cfg.SyncState.AssetHashes = make(map[string]string)
-	}
-	for k, v := range allHashes {
-		cfg.SyncState.AssetHashes[k] = v
-	}
-	cfg.SyncState.SyncedVersion = Version
-	cfg.SyncState.SkippedFiles = allSkipped
-	if err := cfg.Save(cfgPath); err != nil {
+	if err := saveSyncState(cfgPath, func(cfg *config.Config) {
+		if cfg.SyncState == nil {
+			cfg.SyncState = &config.SyncState{}
+		}
+		if cfg.SyncState.AssetHashes == nil {
+			cfg.SyncState.AssetHashes = make(map[string]string)
+		}
+		for k, v := range allHashes {
+			cfg.SyncState.AssetHashes[k] = v
+		}
+		cfg.SyncState.SyncedVersion = Version
+		cfg.SyncState.SkippedFiles = allSkipped
+	}); err != nil {
 		log.Printf("warning: could not save sync state: %v", err)
 	}
 
@@ -1174,6 +1175,16 @@ func cmdRefresh() {
 	} else {
 		fmt.Println("stratus refreshed — agents, skills, rules, mods, and hooks updated to latest version.")
 	}
+}
+
+// saveSyncState reloads the config from disk right before saving and applies
+// only the sync-state change. init and refresh copy assets for a while, and
+// the server (another process, outside config's in-process write lock) may
+// save settings in the meantime; saving the copy loaded at start would undo them.
+func saveSyncState(cfgPath string, apply func(*config.Config)) error {
+	cfg := config.Load()
+	apply(&cfg)
+	return cfg.Save(cfgPath)
 }
 
 // refreshClaudeCode refreshes Claude Code assets (skills, agents, rules, hooks).

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Sentinel errors for config validation.
@@ -194,6 +195,9 @@ type Config struct {
 	Learn            LearnConfig `json:"learn"`
 	// ManagedTeam holds project-level team settings saved from the dashboard.
 	ManagedTeam *ManagedTeamConfig `json:"managed_team,omitempty"`
+	// Checks are the project's own handoff checks (argv, no shell). They are read from the
+	// project root's .stratus.json at startup, never from a worktree. See ValidateChecks.
+	Checks []CheckConfig `json:"checks,omitempty"`
 }
 
 // ManagedTeamConfig is the "managed_team" section of .stratus.json.
@@ -310,16 +314,84 @@ func Default() Config {
 	}
 }
 
-func (c Config) Save(path string) error {
+// writeMu serializes every write of a project .stratus.json made by this
+// process. It is an in-process lock only: it does not cover other processes
+// (the `stratus init`/`refresh` CLI, an editor), which must reload the file
+// right before they save.
+var writeMu sync.Mutex
+
+// WithWriteLock runs fn while holding the process-wide .stratus.json write
+// lock. Use it around a read-modify-write of the file (and of the in-memory
+// Config that mirrors it) so no Save lands in between. The lock is in-process
+// only; it does not exclude other processes writing the file. Config.Save and SavePort
+// take the lock themselves: never call them from inside fn, use
+// Config.SaveLocked there.
+func WithWriteLock(fn func() error) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return fn()
+}
+
+// Save writes the config to path. It takes the write lock and marshals c while
+// holding it, so a concurrent WithWriteLock caller that updates c (for example
+// a profile save) is never overwritten by an older copy. Do not call it from
+// inside WithWriteLock; use SaveLocked. The lock is in-process only: another
+// process (stratus init/refresh) can still write the file concurrently.
+func (c *Config) Save(path string) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return c.SaveLocked(path)
+}
+
+// SaveLocked is Save for callers that already hold the write lock.
+func (c *Config) SaveLocked(path string) error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encode config: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
+	return WriteFileAtomic(path, data)
+}
+
+// WriteFileAtomic replaces path through a unique temp file in the same
+// directory. It keeps the mode of an existing file; a new file is private
+// (0600) because .stratus.json can hold API keys. If path is a symlink the
+// link target is replaced and the link stays (dotfile managers). Callers must
+// hold the write lock (WithWriteLock, Save and SavePort do).
+func WriteFileAtomic(path string, data []byte) error {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
 	}
-	return os.Rename(tmp, path)
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file for %s: %w", path, err)
+	}
+	fail := func(step string, err error) error {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("%s %s: %w", step, path, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fail("write", err)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		return fail("set mode of", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fail("sync", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("close temp file for %s: %w", path, err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	return nil
 }
 
 // SavePort updates the "port" field in an existing .stratus.json file
@@ -327,26 +399,24 @@ func (c Config) Save(path string) error {
 // If the file doesn't exist or has no port field, it falls back to a full
 // Load+Save cycle.
 func SavePort(path string, port int) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		cfg := Default()
 		cfg.Port = port
-		return cfg.Save(path)
+		return cfg.SaveLocked(path)
 	}
 	// Try targeted replacement of the existing port value.
 	re := regexp.MustCompile(`("port"\s*:\s*)\d+`)
 	if re.Match(data) {
 		updated := re.ReplaceAll(data, []byte(fmt.Sprintf("${1}%d", port)))
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, updated, 0o644); err != nil {
-			return err
-		}
-		return os.Rename(tmp, path)
+		return WriteFileAtomic(path, updated)
 	}
 	// No port field found — load, set, and save.
 	cfg := Load()
 	cfg.Port = port
-	return cfg.Save(path)
+	return cfg.SaveLocked(path)
 }
 
 func (c Config) ProjectDataDir() string {
