@@ -1,6 +1,9 @@
 {
   "statusLine": {
-    "command": "bash -c 'input=$(cat); echo \"$input\" | stratus statusline'",
-    "type": "command"
+    "type": "command",
+    "command": "bash -c 'input=$(cat); echo \"$input\" | stratus statusline'"
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
   }
 }
