@@ -342,7 +342,7 @@ Stratus can launch new managed sessions in Codex, Claude Code, and OpenCode. Att
 ### Memory
 ```
 POST   /api/events                       Save memory event (with deduplication)
-GET    /api/events/search                FTS5 full-text search
+GET    /api/events/search                FTS5 full-text search (&compact=true: index only)
 GET    /api/events/{id}/timeline         Chronological context around an event
 POST   /api/events/batch                 Batch fetch events by IDs
 ```

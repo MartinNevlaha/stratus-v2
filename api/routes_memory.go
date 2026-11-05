@@ -22,6 +22,37 @@ func (s *Server) handleSaveEvent(w http.ResponseWriter, r *http.Request) {
 	json200(w, map[string]any{"id": id})
 }
 
+// compactSnippetRunes is the longest text excerpt a compact search result carries.
+const compactSnippetRunes = 200
+
+// compactEvent is the index form of an event: enough to pick which IDs to fetch in full.
+type compactEvent struct {
+	ID         int64    `json:"id"`
+	Ts         string   `json:"ts"`
+	Scope      string   `json:"scope"`
+	Type       string   `json:"type"`
+	Title      string   `json:"title"`
+	Snippet    string   `json:"snippet"`
+	Tags       []string `json:"tags"`
+	Importance float64  `json:"importance"`
+	Project    *string  `json:"project,omitempty"`
+}
+
+func compactEvents(events []db.Event) []compactEvent {
+	out := make([]compactEvent, len(events))
+	for i, e := range events {
+		snippet := e.Text
+		if r := []rune(snippet); len(r) > compactSnippetRunes {
+			snippet = string(r[:compactSnippetRunes]) + "…"
+		}
+		out[i] = compactEvent{
+			ID: e.ID, Ts: e.Ts, Scope: e.Scope, Type: e.Type, Title: e.Title,
+			Snippet: snippet, Tags: e.Tags, Importance: e.Importance, Project: e.Project,
+		}
+	}
+	return out
+}
+
 func (s *Server) handleSearchEvents(w http.ResponseWriter, r *http.Request) {
 	in := db.SearchEventsInput{
 		Query:     queryStr(r, "q"),
@@ -40,6 +71,10 @@ func (s *Server) handleSearchEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	if events == nil {
 		events = []db.Event{}
+	}
+	if queryStr(r, "compact") == "true" {
+		json200(w, map[string]any{"results": compactEvents(events), "count": len(events)})
+		return
 	}
 	json200(w, map[string]any{"results": events, "count": len(events)})
 }

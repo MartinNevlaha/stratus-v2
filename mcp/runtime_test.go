@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"strings"
 	"testing"
 )
@@ -227,5 +228,20 @@ func TestRuntimeMCP_BindNativeAgentRole(t *testing.T) {
 	_, err := tool.Handler(map[string]any{"workflow_id": "spec-codex", "session_id": "s1", "agent_id": "native-worker", "delivery_role": "delivery-code-reviewer"})
 	if err != nil || body["session_id"] != "s1" || body["event"] != "agent_role" || body["agent_id"] != "native-worker" {
 		t.Fatal(body, err)
+	}
+}
+
+func TestSearchTool_RequestsCompactResults(t *testing.T) {
+	var got string
+	s := runtimeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.RawQuery
+		w.Write([]byte(`{"results":[],"count":0}`))
+	})
+	if _, err := s.tools["search"].Handler(map[string]any{"query": "needle", "limit": float64(5)}); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := neturl.ParseQuery(got)
+	if q.Get("compact") != "true" || q.Get("q") != "needle" || q.Get("limit") != "5" {
+		t.Errorf("query = %q", got)
 	}
 }

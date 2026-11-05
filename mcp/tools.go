@@ -21,7 +21,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 	s.Register(Tool{
 		Name:        "search",
 		ReadOnly:    true,
-		Description: "Search memory events using full-text search. Returns index with IDs (~50-100 tokens/result).",
+		Description: "Search memory events using full-text search. Returns a compact index (id, type, title, short snippet, tags; ~50-100 tokens/result), not full text. Use get_observations with the IDs for full details.",
 		InputSchema: obj(
 			req("query", "string", "Full-text search query"),
 			opt("limit", "integer", "Max results (default: 20)"),
@@ -33,7 +33,7 @@ func RegisterTools(s *Server, apiBase string, httpClient *http.Client) {
 			opt("offset", "integer", "Pagination offset"),
 		),
 		Handler: func(args map[string]any) (any, error) {
-			params := neturl.Values{}
+			params := neturl.Values{"compact": {"true"}}
 			if q, ok := args["query"].(string); ok {
 				params.Set("q", q)
 			}
