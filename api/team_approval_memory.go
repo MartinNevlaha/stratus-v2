@@ -42,6 +42,18 @@ func pendingApproval(t *teams.Team, memberID, approvalID string) (approval teams
 	return teams.Event{}, "", false
 }
 
+// approvalToolName shortens a method such as "item/fileChange/requestApproval"
+// to "fileChange": the last path segment, or the one before it when the last is
+// only the approval verb ("requestApproval", "...Approval"), which says nothing.
+func approvalToolName(method string) string {
+	segments := strings.Split(method, "/")
+	last := segments[len(segments)-1]
+	if len(segments) > 1 && strings.HasSuffix(last, "Approval") && segments[len(segments)-2] != "" {
+		return segments[len(segments)-2]
+	}
+	return last
+}
+
 // parseApprovalRequest splits an approval text into the tool and what the agent
 // asked to do. Payloads it cannot read fall back to the raw text, so the
 // request is never empty for a non-empty text. Nothing is redacted here.
@@ -52,10 +64,7 @@ func parseApprovalRequest(text string) (tool, request string) {
 	if m == nil {
 		return tool, text
 	}
-	tool = m[1]
-	if i := strings.LastIndex(tool, "/"); i >= 0 && i < len(tool)-1 {
-		tool = tool[i+1:]
-	}
+	tool = approvalToolName(m[1])
 	var payload map[string]any
 	if json.Unmarshal([]byte(text[len(m[0]):]), &payload) != nil {
 		return tool, text

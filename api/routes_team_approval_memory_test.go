@@ -265,13 +265,28 @@ func TestRecordApprovalDenial_ParsesToolAndRequest(t *testing.T) {
 	}{
 		{"codex command",
 			`item/commandExecution/requestApproval: {"threadId":"th_1","turnId":"tu_1","itemId":"it_1","cwd":"/work","command":"npm test -- --run","reason":"needs network"}`,
-			"Rejected by user: requestApproval", `Agent's request: "npm test -- --run"`},
+			"Rejected by user: commandExecution", `Agent's request: "npm test -- --run"`},
 		{"codex command array",
 			`item/commandExecution/requestApproval: {"threadId":"th_1","command":["bash","-lc","go test ./..."]}`,
-			"Rejected by user: requestApproval", `Agent's request: "bash -lc go test ./..."`},
+			"Rejected by user: commandExecution", `Agent's request: "bash -lc go test ./..."`},
 		{"codex reason only",
 			`item/fileChange/requestApproval: {"threadId":"th_1","turnId":"tu_1","reason":"write outside workspace"}`,
-			"Rejected by user: requestApproval", `Agent's request: "write outside workspace"`},
+			"Rejected by user: fileChange", `Agent's request: "write outside workspace"`},
+		{"codex real file change",
+			`item/fileChange/requestApproval: {"grantRoot":null,"itemId":"exec-bf7dc6aa","reason":"command failed; retry without sandbox?","threadId":"th_9","turnId":"tu_9"}`,
+			"Rejected by user: fileChange", `Agent's request: "command failed; retry without sandbox?"`},
+		{"codex real command execution",
+			`item/commandExecution/requestApproval: {"availableDecisions":["accept","decline","cancel"],"command":"/bin/bash -lc \"pwd && git status\"","cwd":"/work","itemId":"exec-1","threadId":"th_9","turnId":"tu_9"}`,
+			"Rejected by user: commandExecution", `Agent's request: "/bin/bash -lc "pwd && git status""`},
+		{"codex permissions",
+			`item/permissions/requestApproval: {"itemId":"i","reason":"needs network","threadId":"t","turnId":"u"}`,
+			"Rejected by user: permissions", `Agent's request: "needs network"`},
+		{"method without approval suffix keeps last segment",
+			`item/tool/call: {"reason":"x"}`,
+			"Rejected by user: call", `Agent's request: "x"`},
+		{"bare requestApproval keeps its only segment",
+			`requestApproval: {"reason":"x"}`,
+			"Rejected by user: requestApproval", `Agent's request: "x"`},
 		{"claude bash",
 			`Bash: {"command":"rm -rf build","description":"clean"}`,
 			"Rejected by user: Bash", `Agent's request: "rm -rf build"`},
@@ -331,7 +346,7 @@ func TestTeamApproval_BriefAttributesAgentRequest(t *testing.T) {
 	if code := postDenial(t, s, tm, "ap-1", false); code != 200 {
 		t.Fatalf("deny status %d", code)
 	}
-	want := `Rejected - do not revisit: Rejected by user: requestApproval - Agent's request: "npm publish"`
+	want := `Rejected - do not revisit: Rejected by user: commandExecution - Agent's request: "npm publish"`
 	if got := s.buildBrief("spec-x", "", time.Time{}); !strings.Contains(got, want) {
 		t.Fatalf("brief missing %q:\n%s", want, got)
 	}
