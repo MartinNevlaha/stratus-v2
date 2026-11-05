@@ -305,19 +305,20 @@ func (d *DB) DeleteWikiPage(id string) error {
 }
 
 // UpdateWikiPageStaleness updates the staleness score and sets status to "stale"
-// when the score exceeds wikiStalenessThreshold.
+// when the score exceeds wikiStalenessThreshold. It deliberately leaves
+// updated_at alone: that column records the last content change and is what
+// freshness is judged against.
 func (d *DB) UpdateWikiPageStaleness(id string, score float64) error {
 	status := "published"
 	if score > wikiStalenessThreshold {
 		status = "stale"
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	_, err := d.sql.Exec(`
 		UPDATE wiki_pages
-		SET staleness_score = ?, status = ?, updated_at = ?
+		SET staleness_score = ?, status = ?
 		WHERE id = ?
-	`, score, status, now, id)
+	`, score, status, id)
 	if err != nil {
 		return fmt.Errorf("update wiki page staleness: %w", err)
 	}

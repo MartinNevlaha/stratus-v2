@@ -435,6 +435,63 @@ func TestUpdateWikiPageStaleness_AboveThreshold_SetsStale(t *testing.T) {
 	}
 }
 
+func TestUpdateWikiPageStaleness_PreservesUpdatedAt(t *testing.T) {
+	database := openTestDB(t)
+
+	page := &WikiPage{PageType: "summary", Title: "Aged", Status: "published", GeneratedBy: "ingest"}
+	if err := database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+	const old = "2020-01-02T03:04:05Z"
+	if _, err := database.sql.Exec(`UPDATE wiki_pages SET updated_at = ? WHERE id = ?`, old, page.ID); err != nil {
+		t.Fatalf("set old updated_at: %v", err)
+	}
+
+	if err := database.UpdateWikiPageStaleness(page.ID, 0.9); err != nil {
+		t.Fatalf("UpdateWikiPageStaleness: %v", err)
+	}
+
+	got, err := database.GetWikiPage(page.ID)
+	if err != nil {
+		t.Fatalf("GetWikiPage: %v", err)
+	}
+	if got.UpdatedAt != old {
+		t.Errorf("UpdatedAt: got %q, want %q (staleness update must not touch it)", got.UpdatedAt, old)
+	}
+	if got.StalenessScore != 0.9 {
+		t.Errorf("StalenessScore: got %f, want 0.9", got.StalenessScore)
+	}
+	if got.Status != "stale" {
+		t.Errorf("Status: got %q, want stale", got.Status)
+	}
+}
+
+func TestUpdateWikiPage_BumpsUpdatedAt(t *testing.T) {
+	database := openTestDB(t)
+
+	page := &WikiPage{PageType: "summary", Title: "Aged", Status: "published", GeneratedBy: "ingest"}
+	if err := database.SaveWikiPage(page); err != nil {
+		t.Fatalf("SaveWikiPage: %v", err)
+	}
+	const old = "2020-01-02T03:04:05Z"
+	if _, err := database.sql.Exec(`UPDATE wiki_pages SET updated_at = ? WHERE id = ?`, old, page.ID); err != nil {
+		t.Fatalf("set old updated_at: %v", err)
+	}
+
+	page.Content = "new content"
+	if err := database.UpdateWikiPage(page); err != nil {
+		t.Fatalf("UpdateWikiPage: %v", err)
+	}
+
+	got, err := database.GetWikiPage(page.ID)
+	if err != nil {
+		t.Fatalf("GetWikiPage: %v", err)
+	}
+	if got.UpdatedAt == old {
+		t.Errorf("UpdatedAt still %q after a content update, want it bumped", old)
+	}
+}
+
 // --- SaveWikiLink / ListWikiLinksFrom / ListWikiLinksTo ---
 
 func TestSaveWikiLink_AndListFromTo(t *testing.T) {
