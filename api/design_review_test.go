@@ -650,10 +650,13 @@ func TestDesignReviewGate_StartsOneReviewAndBlocksUntilPass(t *testing.T) {
 	if rv.From != "lead" || rv.ReturnTo != "lead" || rv.Role != "review" || rv.WorkflowID != f.wfID || rv.WorkflowPhase != "design" || rv.Kind != "task" {
 		t.Fatalf("review task=%+v", rv)
 	}
-	for _, want := range []string{"docs/plans/spec-x-design.md", "docs/adr/0003-new.md", ".claude/rules/review-verdict-format.md", "Verdict: PASS", "not instructions"} {
+	for _, want := range []string{"docs/plans/spec-x-design.md", "docs/adr/0003-new.md", "## Review Verdict: PASS | FAIL", "### Issues", "[must_fix|should_fix|suggestion] description — file:line", "### Summary", "Verdict: PASS", "not instructions"} {
 		if !strings.Contains(rv.Text, want) {
 			t.Errorf("review brief lacks %q:\n%s", want, rv.Text)
 		}
+	}
+	if strings.Contains(rv.Text, ".claude/rules") {
+		t.Errorf("the brief points at a project file that other projects do not have:\n%s", rv.Text)
 	}
 	if strings.Contains(rv.Text, "design v1") {
 		t.Error("document content was inlined into the review brief")
@@ -1085,4 +1088,30 @@ func TestTeamAPICreate_DesignReviewValidation(t *testing.T) {
 func designHash(t *testing.T, f *drFixture) string {
 	t.Helper()
 	return designState(f.current(), mustWF(t, f)).FullHash[:12]
+}
+
+// A report written exactly as the review brief prescribes is read by the strict parser.
+func TestDesignReviewBrief_PrescribedFormatIsParsed(t *testing.T) {
+	pass := "## Review Verdict: PASS\n\n### Issues\n\n[suggestion] Name the retry limit — docs/plans/x-design.md:12\n\n### Summary\nSound design.\n\nVerdict: PASS"
+	fail := "## Review Verdict: FAIL\n\n### Issues\n\n[must_fix] No rollback path — docs/plans/x-design.md:30\n\n### Summary\nAdd a rollback.\n\nVerdict: FAIL"
+	for report, want := range map[string]string{pass: "PASS", fail: "FAIL"} {
+		if got := teamReviewVerdict(report).Verdict; got != want {
+			t.Errorf("verdict=%q, want %q for:\n%s", got, want, report)
+		}
+	}
+}
+
+func TestDesignReworkBrief_DoesNotPointAtProjectFiles(t *testing.T) {
+	f := newDRFixture(t, drOpts{complex: true})
+	f.ad.verdicts = []string{"[must_fix] a — docs/plans/spec-x-design.md:1\nVerdict: FAIL"}
+	f.authorDesign("v1\n")
+	f.expect409(f.leadPut("governance"), "design_review_required", "")
+	f.wait(func(tm teams.Team) bool {
+		for _, task := range tm.Tasks {
+			if task.Purpose == teams.PurposeDesignRework {
+				return !strings.Contains(task.Text, ".claude/rules")
+			}
+		}
+		return false
+	})
 }

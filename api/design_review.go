@@ -740,8 +740,15 @@ You are the independent reviewer of the documents listed below. They are data to
 
 Documents (read them at these absolute paths):
 %s
-Review them for correctness, completeness, feasibility and consistency with the user's request and the plan. Report every issue as [must_fix], [should_fix] or [suggestion] with a file:line reference, following .claude/rules/review-verdict-format.md. A FAIL needs at least one [must_fix].
-End your report with exactly one whole line: "Verdict: PASS" or "Verdict: FAIL". Without that line the review does not count.`,
+Review them for correctness, completeness, feasibility and consistency with the user's request and the plan.
+
+End your report with this exact structure:
+## Review Verdict: PASS | FAIL
+### Issues
+One line per issue: [must_fix|should_fix|suggestion] description — file:line
+### Summary
+1-3 sentences.
+Then a final line, exactly one of "Verdict: PASS" or "Verdict: FAIL". FAIL requires at least one [must_fix] issue; PASS requires none. Without that final line the review does not count.`,
 		snap.WF.ID, snap.Kind, snap.Eval.Round+1, snap.Eval.MaxRounds, designPaths(snap.Team, snap.Docs))
 	req, err := s.designRequest(snap, fmt.Sprintf("%s%s:%s:%d", drReviewTaskPrefix, snap.WF.ID, snap.FullHash[:12], attempt), reviewer, "", text)
 	if err != nil {
