@@ -512,6 +512,23 @@ func TestGitHubCIFailure_LogReadFailureWarnsAndOffersNoDraft(t *testing.T) {
 	}
 }
 
+// Real gh answers "failed to get run log: log not found" when the run's log expired, is
+// still being written or is not accessible; the warning must say that, not blame the run list.
+func TestGitHubCIFailure_LogNotFoundGivesSpecificReason(t *testing.T) {
+	h := happyHandler("abc123", "", "", runsJSON(failedRun()))
+	stub := &ciStub{handler: func(n string, a []string) ([]byte, error) {
+		if n == "gh" && a[1] == "view" {
+			return nil, errors.New("exit status 1: failed to get run log: log not found")
+		}
+		return h(n, a)
+	}}
+	_, out := ciGet(t, newCIServer(stub), "")
+	w := fmt.Sprint(out["warnings"])
+	if !strings.Contains(w, "log of this run is not available") || strings.Contains(w, "could not read workflow runs") {
+		t.Fatalf("warnings=%v", w)
+	}
+}
+
 func TestGitHubCIFailure_HugeLogStaysBoundedAndRedacted(t *testing.T) {
 	secret := "ghp_" + strings.Repeat("a1B2", 9)
 	huge := strings.Repeat("line of output with `` ``` backticks\n", 200000) + "token=" + secret + "\n" + "\x1b[31mred\x1b[0m\n"

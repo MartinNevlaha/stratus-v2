@@ -359,6 +359,11 @@ func ciGhReason(err error) string {
 			return "gh is not authenticated (run `gh auth login`)"
 		}
 	}
+	// gh prints "log not found" (HTTP 404) when the run's log expired, is still being
+	// written or is not accessible to this account; that is not a run-list failure.
+	if strings.Contains(msg, "log not found") {
+		return "the log of this run is not available (it may have expired, still be running, or be inaccessible to this account)"
+	}
 	return "gh could not read workflow runs for this repository"
 }
 
