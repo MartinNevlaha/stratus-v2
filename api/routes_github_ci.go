@@ -85,7 +85,8 @@ var (
 	ciNameRe   = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
 	ciShaRe    = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
 
-	ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+	// Also matches the caret form "^[[36;1m" that GitHub prints for ESC in some log lines.
+	ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\^\[\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 	// All patterns are RE2 (linear time). Horizontal-space classes avoid spanning lines.
 	redactPrivateKeyRe = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----(?:.*?-----END [A-Z ]*PRIVATE KEY-----|.*)`)

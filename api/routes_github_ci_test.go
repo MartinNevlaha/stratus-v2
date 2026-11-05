@@ -190,6 +190,9 @@ func TestSanitizeCIText(t *testing.T) {
 		"nul\x00bell\x07ok\ttab":       "nulbellok\ttab",
 		"zero​width‮bidi\U000E0041tag": "zerowidthbiditag",
 		"bad\xffutf8":                  "badutf8",
+		// GitHub's own log renders the ESC byte as the two characters "^[" in some steps.
+		"^[[36;1mgo test ./...^[[0m": "go test ./...",
+		"keep a^[b and x[[1m":        "keep a^[b and x[[1m",
 	}
 	for in, want := range cases {
 		if got := sanitizeCIText(in); got != want {
