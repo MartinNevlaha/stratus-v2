@@ -61,8 +61,9 @@ type handoffResp struct {
 		Revision string `json:"revision"`
 		Current  bool   `json:"current"`
 	} `json:"gates"`
-	ChecksOK bool `json:"checks_ok"`
-	Review   *struct {
+	ChecksOK      bool     `json:"checks_ok"`
+	ExpectedGates []string `json:"expected_gates"`
+	Review        *struct {
 		Verdict  string `json:"verdict"`
 		Revision string `json:"revision"`
 		Current  bool   `json:"current"`

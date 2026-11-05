@@ -8,7 +8,6 @@ import type {
   AgentTranscript,
   WorkflowDenial,
   MissionAgent,
-  AttentionItem,
   DecisionItem,
   DecisionSummary,
   RunComparison,
@@ -132,7 +131,6 @@ export const getWorkflowAgents = (id: string) =>
   get<WorkflowAgentsResponse>(`/workflows/${encodeURIComponent(id)}/agents`)
 export const getWorkflowDenials = (id: string) =>
   get<{ denials: WorkflowDenial[] }>(`/workflows/${encodeURIComponent(id)}/denials`)
-export const getAttention = () => get<{ items: AttentionItem[] }>('/workflow-agents/attention')
 export const getCiFailure = (branch?: string) =>
   get<CiFailureResponse>('/integrations/github/ci/failure', branch ? { branch } : undefined)
 export const getDecisions = (since?: string) =>

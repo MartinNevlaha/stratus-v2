@@ -41,6 +41,7 @@ type Server struct {
 	teamAdapters map[string]teams.Adapter
 	teamsErr     error
 	teamChecks   teamChecksCache
+	gateRuns     teamChecksCache // swarm missions whose quality gates are running, keyed by mission id
 
 	// ciExec runs git/gh for the GitHub CI endpoint; nil means real exec (tests inject a stub).
 	ciExec  ciExecFunc

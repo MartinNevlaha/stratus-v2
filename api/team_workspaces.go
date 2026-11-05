@@ -469,53 +469,50 @@ func (g *gitWorkspaces) blockers(ctx context.Context, root string, tg workspaceT
 	return append(out, fmt.Sprintf("%s has commits that are not merged", tg.name))
 }
 
-// runCodeGates runs the build, vet and placeholder gates in rev.Dir, the checks a swarm
+// runCodeGates runs the given gates and the placeholder scan in rev.Dir, the checks a swarm
 // mission and an isolated team both run on their integration tree. The placeholder scan
 // looks at the lines changed since baseRef.
-func runCodeGates(rev missionRevision, baseRef string) []gateOutcome {
+func runCodeGates(rev missionRevision, baseRef string, gates []gateSpec) []gateOutcome {
 	dir, where := rev.Dir, rev.where()
 	var outcomes []gateOutcome
+	run, cancel := context.WithTimeout(context.Background(), gateRunDeadline(gates))
+	defer cancel()
 
-	if noGoModule(dir) {
-		// Not a Go project: report that nothing was checked rather than a build failure
-		// or a pass. The "go build"/"go vet" prefixes keep gateName classifying the rows.
-		for _, gate := range []string{"build", "vet"} {
-			content := fmt.Sprintf("go %s: not applicable (no go.mod in %s)", gate, dir)
-			outcomes = append(outcomes, gateOutcome{content, "info", map[string]any{"gate": gate, "skipped": true, "output": truncate(content, 500)}})
+	for _, g := range gates {
+		switch g.Kind {
+		case gateNone:
+			// Nothing to run: report that nothing was checked rather than a failure or a pass.
+			content := fmt.Sprintf("checks: none configured (no go.mod in %s); add a \"checks\" list to .stratus.json", dir)
+			outcomes = append(outcomes, gateOutcome{name: g.Name, content: content, verdict: "info",
+				event: map[string]any{"gate": g.Name, "skipped": true, "output": truncate(content, 500)}})
+		case gateGoBuild:
+			// -o /dev/null: a lone main package would otherwise leave its binary in the tree, dirtying it.
+			if out, err := runGateCmd(dir, "go", "build", "-o", "/dev/null", "./..."); err != nil {
+				outcomes = append(outcomes, gateOutcome{name: g.Name, content: fmt.Sprintf("go build FAILED (in %s):\n%s", where, out), verdict: "fail",
+					event: map[string]any{"gate": g.Name, "passed": false, "output": truncate(out, 500)}})
+			} else {
+				outcomes = append(outcomes, gateOutcome{name: g.Name, content: "go build: OK (in " + where + ")", verdict: "pass",
+					event: map[string]any{"gate": g.Name, "passed": true}})
+			}
+		case gateGoVet:
+			if out, err := runGateCmd(dir, "go", "vet", "./..."); err != nil {
+				outcomes = append(outcomes, gateOutcome{name: g.Name, content: fmt.Sprintf("go vet FAILED (in %s):\n%s", where, out), verdict: "fail",
+					event: map[string]any{"gate": g.Name, "passed": false, "output": truncate(out, 500)}})
+			} else {
+				outcomes = append(outcomes, gateOutcome{name: g.Name, content: "go vet: OK (in " + where + ")", verdict: "pass",
+					event: map[string]any{"gate": g.Name, "passed": true}})
+			}
+		default:
+			outcomes = append(outcomes, runConfiguredCheck(run, rev, g))
 		}
-		if o := runPlaceholderGate(rev, baseRef); o != nil {
-			outcomes = append(outcomes, *o)
-		}
-		return outcomes
 	}
 
-	// Gate 1: go build. -o /dev/null: a lone main package would otherwise leave its binary in the tree, dirtying it.
-	if out, err := runGateCmd(dir, "go", "build", "-o", "/dev/null", "./..."); err != nil {
-		outcomes = append(outcomes, gateOutcome{fmt.Sprintf("go build FAILED (in %s):\n%s", where, out), "fail",
-			map[string]any{"gate": "build", "passed": false, "output": truncate(out, 500)}})
-	} else {
-		outcomes = append(outcomes, gateOutcome{"go build: OK (in " + where + ")", "pass",
-			map[string]any{"gate": "build", "passed": true}})
-	}
-
-	// Gate 2: go vet
-	if out, err := runGateCmd(dir, "go", "vet", "./..."); err != nil {
-		outcomes = append(outcomes, gateOutcome{fmt.Sprintf("go vet FAILED (in %s):\n%s", where, out), "fail",
-			map[string]any{"gate": "vet", "passed": false, "output": truncate(out, 500)}})
-	} else {
-		outcomes = append(outcomes, gateOutcome{"go vet: OK (in " + where + ")", "pass",
-			map[string]any{"gate": "vet", "passed": true}})
-	}
-
-	// Gate 3: placeholder scan (TODO/FIXME/PLACEHOLDER in lines changed since the base)
+	// Placeholder scan (TODO/FIXME/PLACEHOLDER in lines changed since the base)
 	if o := runPlaceholderGate(rev, baseRef); o != nil {
 		outcomes = append(outcomes, *o)
 	}
 	return outcomes
 }
-
-// noChecksWarning is shown with a handoff whose tree has no automated build/vet checks.
-const noChecksWarning = "no applicable automated build/vet checks for this project type; verify manually"
 
 // noGoModule reports whether dir holds no Go module, so go build and go vet cannot apply.
 func noGoModule(dir string) bool {

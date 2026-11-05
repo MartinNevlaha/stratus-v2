@@ -423,7 +423,36 @@ POST   /api/swarm/files/check                       Check for conflicts without 
 
 POST   /api/swarm/missions/{id}/checkpoint          Save coordinator checkpoint
 GET    /api/swarm/missions/{id}/checkpoint/latest   Get latest checkpoint (for recovery)
+
+POST   /api/swarm/tickets/{id}/evidence             Record evidence (diff, test_result, review, build, gate, note, screenshot; optional revision)
+GET    /api/swarm/missions/{id}/evidence            List mission evidence
+GET    /api/swarm/missions/{id}/handoff             Handoff record: exact revision, gate results, review validity, diff stat, screenshots
+GET    /api/swarm/missions/{id}/screenshots/{eid}   Serve a screenshot evidence image (same-origin only)
 ```
+
+### Teams
+```
+GET    /api/teams/preflight                 Ready runtimes, models, efforts, profiles and where each profile comes from
+PUT    /api/teams/profiles                  Save the project's default model/effort per role (.stratus.json managed_team)
+POST   /api/teams                           Create a team (optionally isolated_workspaces: own git worktree per implementer)
+GET    /api/teams, /api/teams/{id}          List / read teams of this project
+POST   /api/teams/{id}/tasks                Send a task (to the lead or a member)
+POST   /api/teams/{id}/approvals            Allow or deny a pending tool approval
+POST   /api/teams/{id}/recover              Recover a member after a restart
+POST   /api/teams/{id}/integrate            Isolated teams: merge committed member branches into the integration worktree
+POST   /api/teams/{id}/verify               Isolated teams: run the project checks on the integration revision
+GET    /api/teams/{id}/handoff              Isolated teams: revision, members, checks, review validity, diff stat
+DELETE /api/teams/{id}/workspaces           Isolated teams: remove worktrees (409 with blockers; ?force=true needs a same-origin request)
+```
+
+### Decisions, briefs and integrations
+```
+GET    /api/decisions                       "Needs your decision": team approvals, workflow attention, Guardian alerts (&since=)
+GET    /api/workflows/{id}/brief            Compact, capped brief for a worker (also returned by /dispatch as `brief`)
+GET    /api/integrations/github/ci/failure  Latest failed GitHub Actions run via `gh` -> redacted log + repair task draft (read-only)
+```
+
+The brief also includes, automatically and without agents saving anything, the latest review verdict (PASS/FAIL with must_fix/should_fix counts, the phase it happened in, and a note when later work or a running re-review has outdated it; Codex workflows use the review of the current phase) and the approvals you denied for the workflow's team tasks, quoted as the agent's request and shown as "do not revisit".
 
 ### System
 ```

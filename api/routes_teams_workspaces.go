@@ -24,7 +24,10 @@ type teamCheckResult struct {
 	Revision string // recorded revision: the SHA, "+dirty" or "+moved" suffixed when it never matches a HEAD
 	SHA      string
 	Gates    []handoffGate
-	ChecksOK bool
+	Expected []string // the gate names checks_ok needed
+	// Artifacts is the warning about files the checks left in the working tree, if any.
+	Artifacts string
+	ChecksOK  bool
 }
 
 // teamChecksCache keeps the latest gate result per team and which teams are mid-run, in
@@ -192,7 +195,8 @@ func (s *Server) handleTeamVerify(w http.ResponseWriter, r *http.Request) {
 	done := make(chan teamCheckResult, 1)
 	go func() {
 		defer s.teamChecks.end(t.ID)
-		result := runTeamChecks(rev, t.IntegrationBase)
+		gates, _ := resolveGateSet(s.cfg, rev.Dir)
+		result := runTeamChecks(rev, t.IntegrationBase, gates)
 		// Only a clean tree that stayed put is worth remembering: a dirty or moved
 		// run says nothing about a later checkout of the same commit.
 		if result.SHA != "" && result.Revision == result.SHA {
@@ -212,27 +216,20 @@ func (s *Server) handleTeamVerify(w http.ResponseWriter, r *http.Request) {
 
 // runTeamChecks runs the code gates on rev and tags the result with the revision it
 // describes. When the tree moved while the gates ran, the result is tagged "+moved".
-func runTeamChecks(rev missionRevision, base string) teamCheckResult {
-	outcomes := runCodeGates(rev, base)
-	recorded := rev.recorded()
-	if sha, dirty, err := gitRevision(rev.Dir); err != nil || sha != rev.SHA || dirty != rev.Dirty {
+func runTeamChecks(rev missionRevision, base string, gates []gateSpec) teamCheckResult {
+	run := runObservedGates(rev, base, gates)
+	recorded := run.Recorded
+	if run.ReadErr != nil {
 		recorded = rev.SHA + "+moved"
 	}
-	result := teamCheckResult{Revision: recorded, SHA: rev.SHA, ChecksOK: !rev.Dirty && !strings.HasSuffix(recorded, "+moved")}
-	seen := map[string]bool{}
-	for _, o := range outcomes {
-		name, _ := o.event["gate"].(string)
-		seen[name] = true
-		result.Gates = append(result.Gates, handoffGate{Name: name, Verdict: o.verdict, Content: truncate(o.content, teamGateTextLimit), Revision: recorded})
-		if o.verdict != "pass" {
-			result.ChecksOK = false
-		}
+	expected := expectedGateNames(gates)
+	result := teamCheckResult{Revision: recorded, SHA: rev.SHA, Expected: expected, Artifacts: run.Artifacts}
+	passed := map[string]bool{}
+	for _, o := range run.Outcomes {
+		passed[o.name] = o.verdict == "pass"
+		result.Gates = append(result.Gates, handoffGate{Name: o.name, Verdict: o.verdict, Content: truncate(o.content, teamGateTextLimit), Revision: recorded})
 	}
-	for _, name := range []string{"build", "vet", "placeholder_scan"} {
-		if !seen[name] {
-			result.ChecksOK = false
-		}
-	}
+	result.ChecksOK = !rev.Dirty && !strings.HasSuffix(recorded, "+moved") && allGatesPassed(expected, func(name string) bool { return passed[name] })
 	return result
 }
 
@@ -245,7 +242,7 @@ func (s *Server) currentChecks(r teamCheckResult, now missionRevision) map[strin
 	for i := range gates {
 		gates[i].Current = current
 	}
-	return map[string]any{"gates": gates, "checks_ok": r.ChecksOK && current, "revision": r.Revision, "current": current}
+	return map[string]any{"gates": gates, "expected_gates": r.Expected, "checks_ok": r.ChecksOK && current, "revision": r.Revision, "current": current}
 }
 
 type handoffMember struct {
@@ -276,7 +273,7 @@ func (s *Server) handleTeamHandoff(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"isolated": true, "members": []handoffMember{}, "merged": []string{}, "conflicts": []teams.IntegrationConflict{}}
 	if t.IntegrationDir == "" {
 		warnings = append(warnings, "the members' work has not been integrated yet")
-		resp["checks"] = map[string]any{"gates": []handoffGate{}, "checks_ok": false, "revision": "", "current": false}
+		resp["checks"] = map[string]any{"gates": []handoffGate{}, "expected_gates": []string{}, "checks_ok": false, "revision": "", "current": false}
 		resp["members"] = s.handoffMembers(t, "", &warnings)
 		resp["warnings"] = warnings
 		json200(w, resp)
@@ -289,9 +286,8 @@ func (s *Server) handleTeamHandoff(w http.ResponseWriter, r *http.Request) {
 	} else if rev.Dirty {
 		warnings = append(warnings, "the integration worktree has uncommitted changes")
 	}
-	if t.IntegrationDir != "" && noGoModule(t.IntegrationDir) {
-		warnings = append(warnings, noChecksWarning)
-	}
+	gates, gateWarnings := resolveGateSet(s.cfg, t.IntegrationDir)
+	warnings = append(warnings, gateWarnings...)
 	resp["integration"] = map[string]any{"dir_kind": rev.Kind, "branch": t.IntegrationBranch, "revision": rev.SHA, "dirty": rev.Dirty}
 
 	members := s.handoffMembers(t, t.IntegrationBranch, &warnings)
@@ -321,8 +317,11 @@ func (s *Server) handleTeamHandoff(w http.ResponseWriter, r *http.Request) {
 
 	if cached, ok := s.teamChecks.result(t.ID); ok {
 		resp["checks"] = s.currentChecks(cached, rev)
+		if cached.Artifacts != "" && rev.Dirty && cached.SHA == rev.SHA {
+			warnings = append(warnings, cached.Artifacts)
+		}
 	} else {
-		resp["checks"] = map[string]any{"gates": []handoffGate{}, "checks_ok": false, "revision": "", "current": false}
+		resp["checks"] = map[string]any{"gates": []handoffGate{}, "expected_gates": expectedGateNames(gates), "checks_ok": false, "revision": "", "current": false}
 	}
 	resp["review"] = s.teamReview(t, rev)
 	if stat, reason := computeDiffStat(rev, t.IntegrationBase); stat != nil {

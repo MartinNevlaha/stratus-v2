@@ -4,6 +4,8 @@
   import SwarmDetail from './SwarmDetail.svelte'
   import WorkflowActivity from './WorkflowActivity.svelte'
   import AgentTimeline from './AgentTimeline.svelte'
+  import WorkflowTeamLink from './WorkflowTeamLink.svelte'
+  import type { ManagedTeam } from '$lib/teams'
   import { onMount } from 'svelte'
   import { appState } from '$lib/store'
   import { abortWorkflow, getWorkflowAgents, getRunSummary, getRunComparison, searchEvents } from '$lib/api'
@@ -16,9 +18,10 @@
     wf: WorkflowState
     missions: SwarmMission[]
     isSwarm: boolean
+    team?: ManagedTeam
   }
 
-  let { wf, missions, isSwarm }: Props = $props()
+  let { wf, missions, isSwarm, team }: Props = $props()
 
   let planHtml = $derived(renderMarkdown(wf.plan_content))
   let designHtml = $derived(renderMarkdown(wf.design_content))
@@ -109,6 +112,7 @@
     <span class="id">{wf.id}</span>
     {#if wf.runtime === 'codex'}<span class="phase">Codex</span>{/if}
     <span class="phase">{wf.aborted ? 'aborted' : wf.phase}</span>
+    {#if team}<WorkflowTeamLink {team} />{/if}
     {#if wf.runtime === 'codex' && agents.every(a => a.usage_available !== true)}
       <span class="tokens">Usage unavailable</span>
     {:else if tokensIn + tokensOut > 0}

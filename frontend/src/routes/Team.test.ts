@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushSync, mount, unmount } from 'svelte'
 import Team from './Team.svelte'
 import type { ManagedTeam, TeamPreflight } from '$lib/teams'
-import { appState } from '$lib/store'
+import { appState, setActiveTab } from '$lib/store'
 
 vi.mock('$lib/ws', () => ({ wsClient: { on: () => () => {} } }))
 let app: ReturnType<typeof mount> | undefined
@@ -297,4 +297,38 @@ it('shows the handoff card only for a team with isolated workspaces', async () =
  await show()
  await vi.waitFor(() => expect(document.querySelector('.team-handoff')).not.toBeNull())
  expect(handoffGets).toEqual(['/api/teams/team-test/handoff'])
+})
+
+function secondTeam(): ManagedTeam {
+ return { ...team, id: 'team-second', tasks: [{ id: 'k1', from: 'user', to: 'chat', role: 'lead', text: 'Hotovo', workflow_id: 'spec-demo', state: 'complete', kind: 'task', created_at: '2026-11-05T10:00:00Z' }] }
+}
+async function showWithTeams(list: ManagedTeam[]) {
+ vi.stubGlobal('fetch', async () => Response.json({ teams: list }))
+ await show()
+}
+
+it('preselects the team requested by the Overview and clears the request', async () => {
+ appState.pendingTeamSelect = 'team-second'
+ await showWithTeams([team, secondTeam()])
+ await vi.waitFor(() => expect((document.querySelector('.team-picker select') as HTMLSelectElement).value).toBe('team-second'))
+ expect(appState.pendingTeamSelect).toBeNull()
+})
+
+it('falls back to the first team when the requested team no longer exists', async () => {
+ appState.pendingTeamSelect = 'gone'
+ await showWithTeams([team, secondTeam()])
+ await vi.waitFor(() => expect((document.querySelector('.team-picker select') as HTMLSelectElement).value).toBe('team-test'))
+ expect(appState.pendingTeamSelect).toBeNull()
+})
+
+it('opens the workflow of a task in the Overview', async () => {
+ window.location.hash = ''
+ setActiveTab('team')
+ await showWithTeams([secondTeam()])
+ const link = document.querySelector('[aria-label="Otvoriť workflow spec-demo v Overview"]') as HTMLButtonElement
+ expect(link).not.toBeNull()
+ expect(link.textContent).toContain('Workflow: spec-demo · Otvoriť v Overview')
+ link.click()
+ expect(window.location.hash).toBe('#/workflow/spec-demo')
+ expect(appState.activeTab).toBe('overview')
 })

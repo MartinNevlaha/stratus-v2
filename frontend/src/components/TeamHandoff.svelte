@@ -3,7 +3,8 @@
   import { wsClient } from '$lib/ws'
   import { debounce } from '$lib/comms'
   import { teamRequest, TeamRequestError, TeamTimeoutError } from '$lib/teams'
-  import type { MissionHandoffGate, TeamChecks, TeamHandoff, TeamIntegrationResult } from '$lib/types'
+  import { expectedGateNames, gateChip, gateLabel, noChecksConfigured, noChecksHint } from '$lib/gates'
+  import type { TeamChecks, TeamHandoff, TeamIntegrationResult } from '$lib/types'
 
   let { teamId, onremoved }: { teamId: string; onremoved?: () => void } = $props()
 
@@ -80,18 +81,13 @@
     return () => { off(); d.cancel() }
   })
 
-  const gateLabels: Record<string, string> = { build: 'build', vet: 'vet', placeholder_scan: 'placeholder' }
   // The first line carries the absolute path and revision, the rest is the tool output; keep it whole but bounded.
   const clip = (text: string) => (text.length > 4000 ? text.slice(0, 4000) + '…' : text)
   let failedGates = $derived((data?.checks?.gates ?? []).filter(g => g.verdict === 'fail'))
-  let gates = $derived(Object.keys(gateLabels).map(name => ({ name, gate: data?.checks?.gates.find(g => g.name === name) })))
+  let gates = $derived(expectedGateNames(data?.checks?.expected_gates).map(name => ({ name, gate: data?.checks?.gates.find(g => g.name === name) })))
+  let hasNoChecksRow = $derived((data?.checks?.gates ?? []).some(noChecksConfigured))
 
-  function gateState(g: MissionHandoffGate): 'pass' | 'fail' | 'info' {
-    return g.verdict === 'pass' ? 'pass' : g.verdict === 'fail' ? 'fail' : 'info'
-  }
 
-  // The server reports build/vet as info 'not applicable' for projects without Go code.
-  const notApplicable = (name: string, g: MissionHandoffGate) => g.verdict === 'info' && (name === 'build' || name === 'vet')
 
   function reviewState(r: NonNullable<TeamHandoff['review']>): { label: string; cls: string } {
     if (!r.current) return { label: 'Zastaralé', cls: 'stale' }
@@ -163,22 +159,20 @@
       <div class="row">
         {#each gates as { name, gate: g }}
           {#if g}
-            {@const state = gateState(g)}
-            <span class="gate-chip {state}" class:outdated={!g.current} title={g.content}>
-              {gateLabels[name]}
-              {#if !g.current}zastaralé{:else if notApplicable(name, g)}nepoužiteľné{:else if state === 'pass'}✓{:else if state === 'fail'}✕{:else}·{/if}
-            </span>
+            {@const chip = gateChip(g)}
+            <span class="gate-chip {chip.cls}" class:outdated={chip.outdated} title={g.content}>{gateLabel(name)} {chip.text}</span>
           {:else}
-            <span class="gate-chip missing">{gateLabels[name]} chýba</span>
+            <span class="gate-chip missing">{gateLabel(name)} chýba</span>
           {/if}
         {/each}
         <span class="checks" class:ok={data.checks?.checks_ok}>{data.checks?.checks_ok ? 'Kontroly OK' : 'Kontroly neúplné'}</span>
       </div>
+      {#if hasNoChecksRow}<div class="hint">{noChecksHint}</div>{/if}
       {#if failedGates.length}
         <details class="gate-detail" open={failedGates.length === 1}>
           <summary>Detail zlyhaných kontrol</summary>
           {#each failedGates as g (g.name)}
-            <div class="gate-name">{gateLabels[g.name] ?? g.name}</div>
+            <div class="gate-name">{gateLabel(g.name)}</div>
             <pre>{clip(g.content)}</pre>
           {/each}
         </details>
@@ -227,6 +221,7 @@
   .gate-chip.fail { color: #f85149; border-color: #f8514955; }
   .gate-chip.outdated { color: #e3b341; border-color: #e3b34155; }
   .gate-chip.missing { color: #484f58; border-style: dashed; }
+  .hint { font-size: 11px; color: #8b949e; }
   .checks { font-size: 11px; color: #e3b341; }
   .checks.ok { color: #3fb950; }
   .review-state { font-size: 11px; font-weight: 600; }

@@ -117,7 +117,14 @@ func (s *Server) handleUpdateMissionStatus(w http.ResponseWriter, r *http.Reques
 
 	// Run automated quality gates when transitioning to verifying
 	if body.Status == swarm.MissionVerifying {
-		go s.runQualityGates(id)
+		if s.gateRuns.begin(id) {
+			go func() {
+				defer s.gateRuns.end(id)
+				s.runQualityGates(id)
+			}()
+		} else {
+			log.Printf("quality gates for mission %s: already running; not starting a second run", id)
+		}
 	}
 
 	mission, _ := s.swarm.GetMission(id)
@@ -128,6 +135,7 @@ func (s *Server) handleUpdateMissionStatus(w http.ResponseWriter, r *http.Reques
 // gateOutcome is one finished gate, held back until every gate has run so that all rows
 // can be tied to the same (or deliberately no) revision.
 type gateOutcome struct {
+	name    string
 	content string
 	verdict string
 	event   map[string]any
@@ -159,28 +167,25 @@ func (s *Server) runQualityGates(missionID string) {
 	// Use the first ticket as the evidence anchor for mission-level gates
 	ticketID := tickets[0].ID
 
-	outcomes := runCodeGates(rev, mission.BaseBranch)
-
-	recorded := rev.recorded()
-	var moved string
-	if rev.SHA != "" {
-		if sha, dirty, err := gitRevision(dir); err != nil {
-			log.Printf("warning: quality gates for mission %s: re-read revision: %v", missionID, err)
-		} else if sha != rev.SHA || dirty != rev.Dirty {
-			recorded = rev.SHA + "+moved"
-			after := missionRevision{Dir: dir, Kind: rev.Kind, SHA: sha, Dirty: dirty, ShortSHA: shortSHA(sha)}
-			moved = fmt.Sprintf("revision changed while gates ran: %s -> %s", rev.where(), after.where())
-		}
+	gates, _ := resolveGateSet(s.cfg, dir) // the handoff reports the warnings
+	run := runObservedGates(rev, mission.BaseBranch, gates)
+	if run.ReadErr != nil {
+		log.Printf("warning: quality gates for mission %s: re-read revision: %v", missionID, run.ReadErr)
 	}
-	for _, o := range outcomes {
-		if _, err := s.swarm.RecordEvidenceAt(ticketID, missionID, swarm.EvidenceGate, o.content, "quality-gate", o.verdict, recorded); err != nil {
+	for _, o := range run.Outcomes {
+		if _, err := s.swarm.RecordEvidenceAt(ticketID, missionID, swarm.EvidenceGate, o.content, qualityGateAgent+"/"+o.name, o.verdict, run.Recorded); err != nil {
 			log.Printf("warning: quality gates for mission %s: record evidence: %v", missionID, err)
 		}
 		o.event["mission_id"] = missionID
 		s.hub.BroadcastJSON("gate_result", o.event)
 	}
-	if moved != "" {
-		if _, err := s.swarm.RecordEvidenceAt(ticketID, missionID, swarm.EvidenceGate, moved, "quality-gate", "info", ""); err != nil {
+	if run.Moved != "" {
+		if _, err := s.swarm.RecordEvidenceAt(ticketID, missionID, swarm.EvidenceGate, run.Moved, qualityGateAgent, "info", ""); err != nil {
+			log.Printf("warning: quality gates for mission %s: record evidence: %v", missionID, err)
+		}
+	}
+	if run.Artifacts != "" {
+		if _, err := s.swarm.RecordEvidenceAt(ticketID, missionID, swarm.EvidenceGate, run.Artifacts, qualityGateAgent+"/"+artifactsGate, "info", run.Recorded); err != nil {
 			log.Printf("warning: quality gates for mission %s: record evidence: %v", missionID, err)
 		}
 	}
@@ -193,8 +198,8 @@ func (s *Server) runQualityGates(missionID string) {
 func runPlaceholderGate(rev missionRevision, baseBranch string) *gateOutcome {
 	dir, where := rev.Dir, rev.where()
 	skip := func(reason string) *gateOutcome {
-		return &gateOutcome{fmt.Sprintf("Placeholder scan skipped (in %s): %s", where, reason), "info",
-			map[string]any{"gate": "placeholder_scan", "skipped": true, "output": truncate(reason, 500)}}
+		return &gateOutcome{name: placeholderGate, content: fmt.Sprintf("Placeholder scan skipped (in %s): %s", where, reason), verdict: "info",
+			event: map[string]any{"gate": placeholderGate, "skipped": true, "output": truncate(reason, 500)}}
 	}
 	if baseBranch == "" {
 		return skip("mission has no base branch")
@@ -209,11 +214,11 @@ func runPlaceholderGate(rev missionRevision, baseBranch string) *gateOutcome {
 	}
 	placeholders := scanPlaceholders(out)
 	if len(placeholders) > 0 {
-		return &gateOutcome{fmt.Sprintf("Found %d placeholder markers in recent changes (in %s):\n%s", len(placeholders), where, strings.Join(placeholders, "\n")), "fail",
-			map[string]any{"gate": "placeholder_scan", "passed": false, "count": len(placeholders)}}
+		return &gateOutcome{name: placeholderGate, content: fmt.Sprintf("Found %d placeholder markers in recent changes (in %s):\n%s", len(placeholders), where, strings.Join(placeholders, "\n")), verdict: "fail",
+			event: map[string]any{"gate": placeholderGate, "passed": false, "count": len(placeholders)}}
 	}
-	return &gateOutcome{"Placeholder scan: clean (in " + where + ")", "pass",
-		map[string]any{"gate": "placeholder_scan", "passed": true}}
+	return &gateOutcome{name: placeholderGate, content: "Placeholder scan: clean (in " + where + ")", verdict: "pass",
+		event: map[string]any{"gate": placeholderGate, "passed": true}}
 }
 
 func (s *Server) handleDeleteMission(w http.ResponseWriter, r *http.Request) {
@@ -758,6 +763,10 @@ func (s *Server) handleRecordEvidence(w http.ResponseWriter, r *http.Request) {
 	revision, err := validateRevision(body.Revision)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.Agent == qualityGateAgent || strings.HasPrefix(body.Agent, qualityGateAgent+"/") {
+		jsonErr(w, http.StatusForbidden, "the agent name "+qualityGateAgent+" is reserved for the server's own gates")
 		return
 	}
 	if !swarm.ValidEvidenceTypes[body.Type] {

@@ -112,3 +112,78 @@ správne vybavil značku z predchádzajúceho kontextu. Tento test overuje natí
 doručenie; celé prepojenie API, MCP, potvrdení a výsledkov overujú integračné
 testy. Podrobnosti a hranice podpory sú v
 [zázname overenia pripojení](../testing/existing-chat-attachments.md).
+
+## Projektové kontroly
+
+Odovzdanie (swarm handoff aj odovzdanie izolovaného tímu) hodnotí `checks_ok`
+podľa kontrol projektu. Pre projekt s `go.mod` Stratus automaticky spustí
+`go build` a `go vet` (záznamy `build` a `vet`). Pre iný projekt si kontroly
+pridáte do `.stratus.json` v koreni projektu:
+
+```json
+{
+  "checks": [
+    { "name": "test", "cmd": ["npm", "test"] },
+    { "name": "lint", "cmd": ["npm", "run", "lint"], "timeout_sec": 300 }
+  ]
+}
+```
+
+Pravidlá (pri porušení sa kontroly ignorujú, odovzdanie ukáže upozornenie
+`invalid checks configuration: …` a použije sa automatická detekcia):
+
+- najviac 8 kontrol; `name` zodpovedá `^[a-z][a-z0-9_-]{0,31}$`, je jedinečný a nie je
+  `placeholder_scan` (vyhradený názov);
+- `cmd` je argv bez shellu: 1 až 16 prvkov, každý 1 až 256 znakov, bez NUL a nového
+  riadku (shell potrebujete len vtedy, keď ho zapíšete sami: `["sh", "-c", "…"]`);
+- `timeout_sec` je 0 alebo vynechané (predvolene 120 s) až 900 s; súčet všetkých
+  časových limitov (nenastavený sa počíta ako 120 s) je najviac 3600 s;
+- `checks_artifacts` je vyhradený názov (rovnako ako `placeholder_scan`).
+
+Príkaz beží v adresári odovzdávaného stromu (integračný worktree, inak koreň
+projektu), dedí prostredie servera a po prekročení limitu sa ukončí celá skupina
+procesov kontroly, nielen priamy potomok (záznam `<name> TIMED OUT after <n>s`).
+Celý beh má vlastný strop: súčet limitov + 30 s; kontroly, ktoré by ho prekročili,
+sa zapíšu ako `TIMED OUT (run deadline)`. Príkaz, ktorý skončí, ale nechá bežať proces
+na pozadí držiaci jeho výstup, sa zapíše ako zlyhanie (a proces sa ukončí). Do záznamu sa ukladá posledných 16 KiB výstupu bez
+riadiacich znakov a so zakrytými tajomstvami. Kontroly sa spúšťajú v uvedenom
+poradí; `placeholder_scan` beží vždy.
+
+`checks_ok` platí, len keď každá očakávaná kontrola (`expected_gates` v odpovedi)
+prešla na aktuálnej čistej revízii a prešla aspoň jedna kontrola okrem
+`placeholder_scan`. Ak nič nie je nastavené a nie je `go.mod`, odovzdanie ukáže
+upozornenie a riadok `checks: none configured`, čo nikdy nie je „OK“.
+
+Konfigurácia pochádza z projektového `.stratus.json`, ktorý server načítal pri
+štarte, nie zo súboru `.stratus.json` vo worktrees: agenti tam môžu súbory meniť,
+preto sa tam nastavené kontroly ignorujú. Po zmene súboru reštartujte server
+(konfigurácia sa nenačíta znova za behu). Príkaz s relatívnou cestou
+(`./scripts/test.sh`) sa hľadá v odovzdávanom strome, teda spúšťa kód z neho.
+
+**Bezpečnosť.** Každá kontrola spúšťa kód, ktorý napísal agent (testy, skripty,
+`package.json`, `Makefile` z odovzdávaného stromu), s plným prostredím servera a
+oprávneniami jeho používateľa. Tajomstvá v prostredí servera (kľúče, tokeny) sú
+tomuto kódu viditeľné. Nastavujte len kontroly, ktoré chcete spustiť nad kódom
+agentov, a nespúšťajte server s oprávneniami či tajomstvami, ktoré tak nechcete
+zdieľať.
+
+**Kontrola nesmie zanechať zmeny v pracovnom strome.** Reporty, `dist/` a podobné
+výstupy musia byť v `.gitignore`. Ak kontrola po sebe nechá nové alebo zmenené
+súbory (HEAD sa nezmení), riadky kontrol ostanú viazané na pôvodnú čistú revíziu,
+zapíše sa info riadok `checks_artifacts` (nie je v `expected_gates`) a odovzdanie
+ukáže upozornenie `check(s) left files in the working tree: <až 5 ciest>; add them to
+.gitignore or make the check clean up`. Strom je potom „špinavý“, a `checks_ok` zostane
+`false`, kým súbory nepridáte do `.gitignore` alebo ich neodstránite; Stratus súbory
+nikdy nemaže. Ak kontrola posunie HEAD (napr. urobí commit), riadky dostanú revíziu
+`+moved` a platiť nebudú.
+
+**Zmeny `.stratus.json` v projekte.** Súbor `.stratus.json`, ktorý sa zlúči do
+koreňa projektu, začne platiť až po reštarte servera a treba ho posudzovať ako kód:
+`cmd` v ňom sa spustí s vyššie uvedenými oprávneniami.
+
+**Úprava súboru počas behu servera.** Súbor `.stratus.json` upravujte, keď server
+nebeží, alebo server hneď po úprave reštartujte: uloženie nastavení z dashboardu
+prepíše súbor z konfigurácie v pamäti a môže zahodiť ručné úpravy urobené počas behu.
+
+Spustenie kontrol pre misiu beží najviac raz naraz: ďalšie nastavenie stavu
+`verifying`, kým beh trvá, nový beh nespustí (stav sa zmení, beh sa len zaloguje).

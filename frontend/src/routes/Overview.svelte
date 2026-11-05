@@ -1,5 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { wsClient } from '$lib/ws'
+  import { debounce } from '$lib/comms'
+  import { teamRequest, teamsByWorkflow } from '$lib/teams'
+  import type { ManagedTeam } from '$lib/teams'
   import { continuationText, continuationForID } from '$lib/runtime'
   import { appState, dismissUpdate } from '$lib/store'
   import { listWorkflows, deleteWorkflow, listMissions, listPastItems, listGuardianAlerts, dismissGuardianAlert, dismissAllGuardianAlerts, deleteGuardianAlert, killSwarmWorker, setWorkflowAgentStatus, runGuardianScan, startWorkflow, recordDelegation, listAgents } from '$lib/api'
@@ -8,6 +12,7 @@
   import SwarmDetail from '../components/SwarmDetail.svelte'
   import WorkflowActivity from '../components/WorkflowActivity.svelte'
   import WorkflowDetail from '../components/WorkflowDetail.svelte'
+  import WorkflowTeamLink from '../components/WorkflowTeamLink.svelte'
   import DecisionQueue from '../components/DecisionQueue.svelte'
   import MissionControl from '../components/MissionControl.svelte'
   import CiFailurePanel from '../components/CiFailurePanel.svelte'
@@ -15,6 +20,17 @@
   import type { WorkflowState, SwarmMission, PastItem, GuardianAlert, AgentDef } from '$lib/types'
 
   let allWorkflows = $state<WorkflowState[]>([])
+  // Teams are optional context: a failing request just leaves the workflows without a team link.
+  let teamForWorkflow = $state<Map<string, ManagedTeam>>(new Map())
+
+  async function loadTeams() {
+    try {
+      teamForWorkflow = teamsByWorkflow((await teamRequest<{ teams?: ManagedTeam[] }>('teams')).teams ?? [])
+    } catch (e) {
+      console.error('[overview] load teams failed', e)
+      teamForWorkflow = new Map()
+    }
+  }
   let missions = $state<SwarmMission[]>([])
   let confirmDelete = $state<string | null>(null)
   let copiedId = $state<string | null>(null)
@@ -238,9 +254,12 @@
     loadWorkflows()
     loadPastItems()
     loadGuardianAlerts()
+    loadTeams()
     const onHash = () => { focusId = readFocusId() }
     window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+    const teamsReload = debounce(loadTeams, 150)
+    const offTeams = wsClient.on('team_updated', teamsReload.call)
+    return () => { window.removeEventListener('hashchange', onHash); offTeams(); teamsReload.cancel() }
   })
 
   $effect(() => {
@@ -411,7 +430,7 @@
     <a class="focus-back" href="#/" onclick={() => { focusId = null }}>← All workflows</a>
   {/if}
   {#if focusId && visibleWfs.length === 1}
-    <WorkflowDetail wf={visibleWfs[0]} {missions} isSwarm={displayType(visibleWfs[0]) === 'swarm'} />
+    <WorkflowDetail wf={visibleWfs[0]} {missions} team={teamForWorkflow.get(visibleWfs[0].id)} isSwarm={displayType(visibleWfs[0]) === 'swarm'} />
   {:else if visibleWfs.length === 0}
     <div class="empty">
       {#if focusId}Workflow <code>{focusId}</code> was not found.{:else}No active workflows. Use <code>/spec</code>, <code>/bug</code>, or <code>/swarm</code> to start one.{/if}
@@ -423,6 +442,7 @@
           <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
           <a class="wf-id" href="{WF_HASH}{encodeURIComponent(wf.id)}" onclick={() => { focusId = wf.id }} title="Open this workflow only">{wf.id}</a>
           <span class="wf-phase">{wf.phase}</span>
+          {#if teamForWorkflow.get(wf.id)}<WorkflowTeamLink team={teamForWorkflow.get(wf.id)!} />{/if}
           <div class="wf-actions">
             {#if confirmDelete === wf.id}
               <span class="confirm-label">Delete?</span>
@@ -636,6 +656,7 @@
             <span class="wf-type" class:swarm={displayType(wf) === 'swarm'} class:bug={wf.type === 'bug'} class:e2e={wf.type === 'e2e'}>{displayType(wf)}</span>
             <a class="wf-id" href="{WF_HASH}{encodeURIComponent(wf.id)}" onclick={() => { focusId = wf.id }} title="Open agents and tasks of this run">{wf.id}</a>
             <span class="wf-phase" class:aborted={wf.aborted}>{wf.aborted ? 'aborted' : wf.phase}</span>
+            {#if teamForWorkflow.get(wf.id)}<WorkflowTeamLink team={teamForWorkflow.get(wf.id)!} />{/if}
             <span class="wf-ts">{new Date(wf.updated_at).toLocaleDateString()}</span>
             <div class="wf-actions">
               {#if confirmDelete === wf.id}

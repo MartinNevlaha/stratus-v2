@@ -2,8 +2,8 @@
  import { onMount } from 'svelte'
  import { wsClient } from '$lib/ws'
  import { debounce } from '$lib/comms'
- import { appState } from '$lib/store'
- import { applySavedProfiles, defaultComplexEffort, launchMembers, saveProjectProfile, sourceLabel, teamRequest, usageLabel } from '$lib/teams'
+ import { appState, requestWorkflowFocus } from '$lib/store'
+ import { applySavedProfiles, defaultComplexEffort, launchMembers, saveProjectProfile, sourceLabel, teamRequest, teamStateLabel, usageLabel } from '$lib/teams'
  import TeamHandoff from '../components/TeamHandoff.svelte'
  import type { ManagedTeam, TeamChoice, TeamLimits, TeamPreflight } from '$lib/teams'
  let preflight=$state<TeamPreflight|null>(null)
@@ -16,7 +16,6 @@
  let pendingRequest:{id:string;text:string;to:string}|null=null
  const roles:Record<string,string>={lead:'Vedenie postupu',implementation:'Implementácia',design:'Návrh a plán',review:'Nezávislá kontrola',diagnosis:'Diagnostika',mechanical:'Jednoduché úpravy'}
  const runtimes:Record<string,string>={codex:'Codex','claude-code':'Claude Code',opencode:'OpenCode'}
- const states:Record<string,string>={running:'Pracuje',working:'Pracuje',active:'Aktívny',ready:'Pripravený',idle:'Pripravený',queued:'Vo fronte',waiting:'Čaká na kolegu',waiting_colleague:'Čaká na kolegu',needs_user:'Potrebuje teba',paused:'Pozastavený',stopped:'Zastavený',done:'Hotovo',completed:'Hotovo',complete:'Hotovo',error:'Chyba',failed:'Chyba',cancelled:'Zrušené',stale:'Zmenený podklad',connected:'Pripojený',disconnected:'Spojenie prerušené',detached:'Odpojený',expired:'Spojenie vypršalo',unknown:'Spojenie sa overuje'}
  let team=$derived(teams.find(t=>t.id===selected)??null)
  let visibleTasks=$derived(team?.tasks.filter(task=>task.origin!=='external')??[])
  const effortOrder:Record<string,number>={none:0,minimal:1,low:2,medium:3,high:4,xhigh:5,max:6}
@@ -32,7 +31,7 @@
   const efforts=effortOptions(row)
   return available&&efforts.includes(row.effort)&&efforts.includes(row.complexEffort)
  }))
- const status=(value:string)=>states[value]??value
+ const status=teamStateLabel
  function chooseRuntime(index:number,runtime:string) {
   const role=choices[index].role,profile=preflight?.profiles[runtime]?.[role]
   choices[index]={role,runtime,model:profile?.model??'',effort:profile?.effort??'',complexEffort:preflight?defaultComplexEffort(preflight,runtime,role):''}
@@ -45,7 +44,7 @@
   choices[index]=row
  }
  async function refresh() {
-  try {const data=await teamRequest<{teams:ManagedTeam[]}>('teams');teams=data.teams??[];if(!selected&&teams.length)selected=teams[0].id}
+  try {const data=await teamRequest<{teams:ManagedTeam[]}>('teams');teams=data.teams??[];if((!selected||!teams.some(t=>t.id===selected))&&teams.length)selected=teams[0].id}
   catch(e){error=e instanceof Error?e.message:String(e)}
  }
  async function readiness() {
@@ -75,6 +74,7 @@
  onMount(()=>{
   const pending=appState.pendingTeamTask
   if(pending){text=pending.text;appState.pendingTeamTask=null}
+  if(appState.pendingTeamSelect){selected=appState.pendingTeamSelect;appState.pendingTeamSelect=null}
   refresh().finally(()=>{loading=false;if(!teams.length){showSetup=true;readiness()}})
   const d=debounce(refresh,150),offs=[wsClient.on('team_updated',d.call),wsClient.on('connected',d.call)]
   return()=>{offs.forEach(off=>off());d.cancel()}
@@ -167,9 +167,9 @@
   {/each}
  </div>
  <form class="compose" onsubmit={e=>{e.preventDefault();send()}}><label for="team-input">Zadanie alebo doplnenie</label><textarea id="team-input" bind:value={text} placeholder="Napríklad: Priprav návrh funkcie, implementuj ju a nechaj nezávisle skontrolovať." rows="3" disabled={team.state==='stopped'}></textarea><div class="compose-actions"><select aria-label="Príjemca zadania" bind:value={recipient}><option value="">Vedúci tímu</option>{#each team.members as member}<option value={member.id}>{roles[member.role]??member.role} · {runtimes[member.profile.runtime]}</option>{/each}</select><button class="primary" type="submit" disabled={busy||!text.trim()||team.state==='stopped'}>Odoslať</button></div></form>
- <section class="task-list"><h2>Práca a odovzdané výsledky</h2>{#if !visibleTasks.length}<p class="muted">Tím čaká na tvoje zadanie. Čakanie nespotrebúva modelové tokeny.</p>{/if}{#each [...visibleTasks].reverse() as task}<article><div class="section-heading"><strong>{roles[task.role]??task.role} · {status(task.state)}</strong><small>{new Date(task.created_at).toLocaleString('sk')}</small></div><pre>{task.text}</pre>{#if task.workflow_id}<small>Workflow: {task.workflow_id}</small>{/if}{#if task.profile_reason}<details><summary>Prečo tento model?</summary><p>{task.profile?.model||'Model určuje pôvodný chat'}{task.profile?.effort?` / ${task.profile.effort}`:''} · {task.profile_reason}</p></details>{/if}{#if task.result}<details open={task.from==='user'}><summary>Výsledok</summary><pre>{task.result}</pre></details>{/if}{#if task.error}<p class="error">{task.error}</p>{/if}</article>{/each}</section>
+ <section class="task-list"><h2>Práca a odovzdané výsledky</h2>{#if !visibleTasks.length}<p class="muted">Tím čaká na tvoje zadanie. Čakanie nespotrebúva modelové tokeny.</p>{/if}{#each [...visibleTasks].reverse() as task}<article><div class="section-heading"><strong>{roles[task.role]??task.role} · {status(task.state)}</strong><small>{new Date(task.created_at).toLocaleString('sk')}</small></div><pre>{task.text}</pre>{#if task.workflow_id}<button class="link" aria-label={`Otvoriť workflow ${task.workflow_id} v Overview`} onclick={()=>requestWorkflowFocus(task.workflow_id!)}>Workflow: {task.workflow_id} · Otvoriť v Overview</button>{/if}{#if task.profile_reason}<details><summary>Prečo tento model?</summary><p>{task.profile?.model||'Model určuje pôvodný chat'}{task.profile?.effort?` / ${task.profile.effort}`:''} · {task.profile_reason}</p></details>{/if}{#if task.result}<details open={task.from==='user'}><summary>Výsledok</summary><pre>{task.result}</pre></details>{/if}{#if task.error}<p class="error">{task.error}</p>{/if}</article>{/each}</section>
  {/if}
 </div>
 <style>
- .team-page{height:100%;overflow:auto;padding:4px 6px 28px;display:flex;flex-direction:column;gap:18px}.page-heading,.section-heading,.team-toolbar,.compose-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}.page-heading p,.muted,small{color:#8b949e}h1{font-size:24px}h2{font-size:17px}h3{font-size:15px}button,input,select,textarea{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px 10px;font:inherit}button{cursor:pointer;white-space:nowrap}button:hover:not(:disabled){border-color:#58a6ff}button:disabled{opacity:.45;cursor:default}.primary{background:#238636;color:white;border-color:#2ea043}.danger{color:#f85149}.setup,.compose,.member,.task-list article{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}.setup{display:flex;flex-direction:column;gap:14px}.setup>.actions{align-self:flex-start}.runtimes,.limits,.actions{display:flex;gap:12px;flex-wrap:wrap}.runtimes>div{display:flex;flex-direction:column;gap:4px;border-left:3px solid #3fb950;padding:8px 12px;flex:1}.runtimes>.unavailable{border-color:#8b949e}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:8px;border-bottom:1px solid #30363d}th{color:#8b949e;font-weight:500;font-size:12px}td select{width:100%;min-width:90px}td:nth-child(3){min-width:180px}.isolate{display:flex;align-items:center;gap:8px}.isolate input{padding:0}.limits label{display:flex;flex-direction:column;gap:5px;font-size:12px}.limits input{max-width:180px}.team-toolbar{flex-wrap:wrap}.members{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.member p{margin:9px 0}.state{font-size:12px;color:#3fb950}.attention,.warning{color:#d29922}.warning,.error{padding:10px;border-radius:6px;background:#d2992210}.notice{color:#3fb950;padding:10px;border-radius:6px;background:#3fb95010}.error{color:#ff7b72;background:#f8514910;white-space:pre-wrap}.compose{display:flex;flex-direction:column;gap:10px}textarea{resize:vertical;width:100%}.task-list{display:flex;flex-direction:column;gap:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:10px 0}details{margin-top:10px}summary{cursor:pointer;color:#58a6ff}.approval{margin-top:12px;border:1px solid #d29922;padding:12px;border-radius:6px}.approval button{margin-right:8px}.team-picker select{margin-left:8px}@media(max-width:650px){.page-heading{align-items:flex-start}.members{grid-template-columns:1fr}.team-toolbar{align-items:flex-start;flex-direction:column}.limits input{max-width:125px}}
+ .team-page{height:100%;overflow:auto;padding:4px 6px 28px;display:flex;flex-direction:column;gap:18px}.page-heading,.section-heading,.team-toolbar,.compose-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}.page-heading p,.muted,small{color:#8b949e}h1{font-size:24px}h2{font-size:17px}h3{font-size:15px}button,input,select,textarea{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px 10px;font:inherit}button{cursor:pointer;white-space:nowrap}button:hover:not(:disabled){border-color:#58a6ff}button:disabled{opacity:.45;cursor:default}.primary{background:#238636;color:white;border-color:#2ea043}.danger{color:#f85149}.setup,.compose,.member,.task-list article{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}.setup{display:flex;flex-direction:column;gap:14px}.setup>.actions{align-self:flex-start}.runtimes,.limits,.actions{display:flex;gap:12px;flex-wrap:wrap}.runtimes>div{display:flex;flex-direction:column;gap:4px;border-left:3px solid #3fb950;padding:8px 12px;flex:1}.runtimes>.unavailable{border-color:#8b949e}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:8px;border-bottom:1px solid #30363d}th{color:#8b949e;font-weight:500;font-size:12px}td select{width:100%;min-width:90px}td:nth-child(3){min-width:180px}.link{background:none;border:none;padding:0;color:#58a6ff;font-size:13px;text-align:left;white-space:normal}.isolate{display:flex;align-items:center;gap:8px}.isolate input{padding:0}.limits label{display:flex;flex-direction:column;gap:5px;font-size:12px}.limits input{max-width:180px}.team-toolbar{flex-wrap:wrap}.members{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.member p{margin:9px 0}.state{font-size:12px;color:#3fb950}.attention,.warning{color:#d29922}.warning,.error{padding:10px;border-radius:6px;background:#d2992210}.notice{color:#3fb950;padding:10px;border-radius:6px;background:#3fb95010}.error{color:#ff7b72;background:#f8514910;white-space:pre-wrap}.compose{display:flex;flex-direction:column;gap:10px}textarea{resize:vertical;width:100%}.task-list{display:flex;flex-direction:column;gap:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:10px 0}details{margin-top:10px}summary{cursor:pointer;color:#58a6ff}.approval{margin-top:12px;border:1px solid #d29922;padding:12px;border-radius:6px}.approval button{margin-right:8px}.team-picker select{margin-left:8px}@media(max-width:650px){.page-heading{align-items:flex-start}.members{grid-template-columns:1fr}.team-toolbar{align-items:flex-start;flex-direction:column}.limits input{max-width:125px}}
 </style>

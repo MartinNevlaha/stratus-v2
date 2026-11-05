@@ -21,6 +21,7 @@ interface AppState {
   activeTab: TabId
   pendingTerminalInput: string | null
   pendingTeamTask: { text: string } | null
+  pendingTeamSelect: string | null
   language: Language
 }
 
@@ -76,6 +77,7 @@ export const appState: AppState = $state({
   activeTab: loadActiveTab(),
   pendingTerminalInput: null,
   pendingTeamTask: null,
+  pendingTeamSelect: null,
   language: 'en',
 })
 
@@ -95,6 +97,17 @@ export function requestTerminalPrefill(text: string) {
 export function requestTeamTask(task: NonNullable<AppState['pendingTeamTask']>) {
   appState.pendingTeamTask = task
   setActiveTab('team')
+}
+
+export function requestTeamSelect(teamId: string) {
+  appState.pendingTeamSelect = teamId
+  setActiveTab('team')
+}
+
+// Overview reads the `#/workflow/<id>` hash when it mounts, so set it before switching to the tab.
+export function requestWorkflowFocus(workflowId: string) {
+  window.location.hash = `#/workflow/${encodeURIComponent(workflowId)}`
+  setActiveTab('overview')
 }
 
 export async function refreshDashboard() {

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/teams"
 )
 
@@ -244,21 +243,18 @@ func TestTeamCreate_WorkspaceErrorsDoNotLeakPathsAndBadIDsAre400(t *testing.T) {
 	}
 }
 
-func TestRunCodeGates_ProjectWithoutGoModIsNotApplicable(t *testing.T) {
+func TestRunCodeGates_ProjectWithoutGoModAndNoChecksReportsNoneConfigured(t *testing.T) {
 	dir := t.TempDir()
 	rev := missionRevision{Dir: dir, Kind: dirKindIntegration}
-	outcomes := runCodeGates(rev, "")
-	if len(outcomes) < 2 {
+	gates, _ := resolveGateSet(nil, dir)
+	outcomes := runCodeGates(rev, "", gates)
+	if len(outcomes) < 1 {
 		t.Fatalf("outcomes %+v", outcomes)
 	}
-	for i, want := range []string{"go build: not applicable (no go.mod in " + dir + ")", "go vet: not applicable (no go.mod in " + dir + ")"} {
-		o := outcomes[i]
-		if o.verdict != "info" || o.content != want {
-			t.Fatalf("outcome %d: %q %q", i, o.verdict, o.content)
-		}
-		if name := gateName(db.SwarmEvidence{Agent: qualityGateAgent, Content: o.content}); name != []string{"build", "vet"}[i] {
-			t.Fatalf("gate %d classified as %q", i, name)
-		}
+	o := outcomes[0]
+	want := "checks: none configured (no go.mod in " + dir + `); add a "checks" list to .stratus.json`
+	if o.verdict != "info" || o.content != want || o.name != "checks" {
+		t.Fatalf("outcome %q %q %q", o.name, o.verdict, o.content)
 	}
 }
 
@@ -274,10 +270,10 @@ func TestMissionHandoff_ProjectWithoutGoModNeverReadsAsChecksOK(t *testing.T) {
 	if code != http.StatusOK || h.ChecksOK {
 		t.Fatalf("checks_ok=%v (%d)", h.ChecksOK, code)
 	}
-	if v, _, ok := h.gate("build"); !ok || v != "info" {
-		t.Fatalf("build gate %q found=%v", v, ok)
+	if v, _, ok := h.gate("checks"); !ok || v != "info" {
+		t.Fatalf("checks gate %q found=%v", v, ok)
 	}
-	if !hasWarning(h.Warnings, "no applicable automated build/vet checks for this project type; verify manually") {
+	if !hasWarning(h.Warnings, noChecksWarning) {
 		t.Fatalf("warnings %v", h.Warnings)
 	}
 }
@@ -297,14 +293,14 @@ func TestTeamHandoff_ProjectWithoutGoModNeverReadsAsChecksOK(t *testing.T) {
 		gate := g.(map[string]any)
 		gates[gate["name"].(string)] = gate["verdict"].(string)
 	}
-	if gates["build"] != "info" || gates["vet"] != "info" {
+	if gates["checks"] != "info" {
 		t.Fatalf("gates %v", gates)
 	}
 	_, h := wsCall(t, s.handleTeamHandoff, "GET", "/api/teams/"+team.ID+"/handoff", team.ID)
 	if hc := h["checks"].(map[string]any); hc["checks_ok"] != false {
 		t.Fatalf("handoff checks %v", hc)
 	}
-	if !strings.Contains(strings.Join(strs(h["warnings"]), "\n"), "no applicable automated build/vet checks for this project type; verify manually") {
+	if !strings.Contains(strings.Join(strs(h["warnings"]), "\n"), noChecksWarning) {
 		t.Fatalf("warnings %v", h["warnings"])
 	}
 }

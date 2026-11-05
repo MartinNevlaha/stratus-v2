@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/MartinNevlaha/stratus-v2/config"
 	"github.com/MartinNevlaha/stratus-v2/db"
 	"github.com/MartinNevlaha/stratus-v2/orchestration"
 	"github.com/MartinNevlaha/stratus-v2/swarm"
@@ -103,8 +104,16 @@ func sameRevision(recorded, current string) bool {
 }
 
 // gateName maps a gate evidence row written by the quality gates (a worker posting type=gate
-// cannot forge one) to build, vet or placeholder_scan ("" otherwise).
+// cannot forge one) to its gate name: the name in the agent "quality-gate/<name>", or for
+// legacy rows by the agent plain "quality-gate" the build, vet or placeholder_scan its
+// content prefix names ("" otherwise).
 func gateName(e db.SwarmEvidence) string {
+	if name, ok := strings.CutPrefix(e.Agent, qualityGateAgent+"/"); ok {
+		if name == placeholderGate || config.ValidCheckName(name) {
+			return name
+		}
+		return ""
+	}
 	if e.Agent != qualityGateAgent {
 		return ""
 	}
@@ -116,7 +125,7 @@ func gateName(e db.SwarmEvidence) string {
 		return "vet"
 	case strings.HasPrefix(content, "Placeholder scan"),
 		strings.HasPrefix(content, "Found ") && strings.Contains(content, "placeholder markers"):
-		return "placeholder_scan"
+		return placeholderGate
 	}
 	return ""
 }
@@ -182,8 +191,11 @@ func (s *Server) handleMissionHandoff(w http.ResponseWriter, r *http.Request) {
 	} else if rev.Dirty {
 		warnings = append(warnings, "working tree has uncommitted changes")
 	}
-	if rev.Dir != "" && noGoModule(rev.Dir) {
-		warnings = append(warnings, noChecksWarning)
+	var expected []string
+	if rev.Dir != "" {
+		gates, gateWarnings := resolveGateSet(s.cfg, rev.Dir)
+		warnings = append(warnings, gateWarnings...)
+		expected = expectedGateNames(gates)
 	}
 
 	// Latest row per gate (evidence is ordered oldest first) and the latest review.
@@ -202,21 +214,22 @@ func (s *Server) handleMissionHandoff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	gates := []handoffGate{}
-	checksOK := true
-	for _, name := range []string{"build", "vet", "placeholder_scan"} {
+	currentPass := map[string]bool{}
+	for _, name := range expected {
 		e, ok := latest[name]
 		if !ok {
-			checksOK = false
 			continue
 		}
 		current := sameRevision(e.Revision, rev.SHA)
 		gates = append(gates, handoffGate{Name: name, Verdict: e.Verdict, Content: e.Content, Revision: e.Revision, Current: current})
-		if !current || e.Verdict != "pass" {
-			checksOK = false
-		}
+		currentPass[name] = current && e.Verdict == "pass"
 	}
-	if rev.Dirty || rev.SHA == "" {
-		checksOK = false
+	if e, ok := latest[artifactsGate]; ok && rev.Dirty && sameRevision(e.Revision, rev.SHA) {
+		warnings = append(warnings, e.Content)
+	}
+	checksOK := !rev.Dirty && rev.SHA != "" && allGatesPassed(expected, func(name string) bool { return currentPass[name] })
+	if expected == nil {
+		expected = []string{}
 	}
 
 	resp := map[string]any{
@@ -227,6 +240,8 @@ func (s *Server) handleMissionHandoff(w http.ResponseWriter, r *http.Request) {
 		"dir_kind":   rev.Kind,
 		"gates":      gates,
 		"checks_ok":  checksOK,
+		// expected_gates are the gates checks_ok needs, in order: the configured or autodetected checks, then placeholder_scan.
+		"expected_gates": expected,
 	}
 
 	if review != nil {

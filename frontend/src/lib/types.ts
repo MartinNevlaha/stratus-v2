@@ -131,16 +131,6 @@ export interface WorkflowDenial {
   reason?: string
 }
 
-export interface AttentionItem {
-  workflow_id: string
-  title: string
-  phase: string
-  running_agents: number
-  stale_agents: number
-  review_failed: boolean
-  conflicts: string[]
-}
-
 export interface DecisionAction {
   name: 'approve' | 'deny' | 'recover' | 'dismiss'
   method: 'POST' | 'PUT'
@@ -334,6 +324,7 @@ export interface TeamConflict {
 
 export interface TeamChecks {
   gates: MissionHandoffGate[]
+  expected_gates?: string[]
   checks_ok: boolean
   revision: string
   current: boolean
@@ -370,6 +361,7 @@ export interface MissionHandoff {
   dirty: boolean
   dir_kind: 'integration' | 'project_root'
   gates: MissionHandoffGate[]
+  expected_gates?: string[]
   checks_ok: boolean
   review?: { verdict: string; revision: string; current: boolean; valid: boolean; reason?: string }
   diff_stat?: { files_changed: number; lines_added: number; lines_removed: number }

@@ -27,6 +27,7 @@ function handoff(over: Partial<Handoff> = {}): Handoff {
     merged: ['mechanical-6'],
     conflicts: [{ member: 'implementation-2', branch: 'stratus/t1/implementation-2', files: ['api/a.go', 'api/b.go'] }],
     checks: {
+      expected_gates: ['build', 'vet', 'placeholder_scan'],
       gates: [
         { name: 'build', verdict: 'pass', content: 'ok', revision: REV, current: true },
         { name: 'vet', verdict: 'fail', content: 'vet failed', revision: REV, current: true },
@@ -367,6 +368,78 @@ describe('TeamHandoff', () => {
     expect(chips[1].textContent).toContain('nepoužiteľné')
     expect(chips[2].className).toContain('pass')
     expect(text()).toContain('Kontroly neúplné')
+  })
+
+  describe('configured gates', () => {
+    const row = (name: string, verdict: string, content = 'out', current = true) => ({ name, verdict, content, revision: REV, current })
+    const withChecks = (checks: Partial<NonNullable<Handoff['checks']>>) =>
+      handoff({ checks: { gates: [], checks_ok: false, revision: REV, current: true, ...checks } })
+    const chipTexts = () => [...target.querySelectorAll('.gate-chip')].map(c => c.textContent?.replace(/\s+/g, ' ').trim())
+
+    it('should render one chip per expected gate whatever its name', async () => {
+      stub(() => Response.json(withChecks({
+        expected_gates: ['test', 'lint', 'placeholder_scan'],
+        gates: [row('test', 'pass'), row('lint', 'fail', 'lint: 2 issues'), row('placeholder_scan', 'pass')],
+      })))
+      show()
+      await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(3))
+      expect(chipTexts()).toEqual(['test ✓', 'lint ✕', 'placeholder ✓'])
+      expect(text()).not.toContain('build')
+      expect(target.querySelector('details.gate-detail pre')?.textContent).toBe('lint: 2 issues')
+    })
+
+    it('should show a configured gate without a recorded row as chýba and an old row as zastaralé', async () => {
+      stub(() => Response.json(withChecks({
+        expected_gates: ['test', 'lint', 'build'],
+        gates: [row('test', 'pass'), row('build', 'pass', 'ok', false)],
+      })))
+      show()
+      await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(3))
+      expect(chipTexts()).toEqual(['test ✓', 'lint chýba', 'build zastaralé'])
+      expect(target.querySelector('.gate-chip.missing')?.textContent).toContain('lint chýba')
+    })
+
+    it('should render the none-configured checks row as a neutral chip with the hint', async () => {
+      stub(() => Response.json(withChecks({
+        expected_gates: ['checks'],
+        gates: [row('checks', 'info', 'checks: none configured (no go.mod)')],
+      })))
+      show()
+      await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(1))
+      const chip = target.querySelector('.gate-chip')!
+      expect(chip.textContent).toContain('žiadne kontroly')
+      expect(chip.className).toContain('info')
+      expect(chip.className).not.toMatch(/pass|fail|outdated|missing/)
+      expect(text()).toContain('Pridaj "checks" do .stratus.json (pozri docs/usage/managed-teams.md).')
+      expect(text()).toContain('Kontroly neúplné')
+      expect(text()).not.toContain('nepoužiteľné')
+    })
+
+    it('should not show the hint when a project has configured checks', async () => {
+      stub(() => Response.json(withChecks({ expected_gates: ['test'], gates: [row('test', 'pass')] })))
+      show()
+      await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(1))
+      expect(text()).not.toContain('docs/usage/managed-teams.md')
+    })
+
+    it('should keep nepoužiteľné for another not-applicable info gate', async () => {
+      stub(() => Response.json(withChecks({ expected_gates: ['typecheck'], gates: [row('typecheck', 'info', 'not applicable')] })))
+      show()
+      await vi.waitFor(() => expect(chipTexts()).toEqual(['typecheck nepoužiteľné']))
+    })
+
+    it('should fall back to the three fixed chips when an older server sends no expected_gates', async () => {
+      stub(() => Response.json(withChecks({ gates: [row('build', 'pass')] })))
+      show()
+      await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(3))
+      expect(chipTexts()).toEqual(['build ✓', 'vet chýba', 'placeholder chýba'])
+    })
+
+    it('should fall back to the three fixed chips when expected_gates is empty', async () => {
+      stub(() => Response.json(withChecks({ expected_gates: [], gates: [] })))
+      show()
+      await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(3))
+    })
   })
 
   describe('failed gate detail', () => {

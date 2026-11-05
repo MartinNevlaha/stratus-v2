@@ -1,7 +1,8 @@
 <script lang="ts">
   import { appState } from '$lib/store'
   import { getMissionHandoff, missionScreenshotUrl } from '$lib/api'
-  import type { MissionHandoff, MissionHandoffGate, MissionHandoffScreenshot } from '$lib/types'
+  import { expectedGateNames, gateChip, gateLabel, noChecksConfigured, noChecksHint } from '$lib/gates'
+  import type { MissionHandoff, MissionHandoffScreenshot } from '$lib/types'
 
   let { missionId }: { missionId: string } = $props()
 
@@ -25,15 +26,14 @@
     load(missionId)
   })
 
-  const gateLabels: Record<string, string> = { build: 'build', vet: 'vet', placeholder_scan: 'placeholder' }
-
   // The first line carries the absolute path and revision, the rest is the tool output; keep it whole but bounded.
   const clip = (text: string) => (text.length > 4000 ? text.slice(0, 4000) + '…' : text)
 
-  // Always the three expected gates; a gate with no row is shown as missing.
+  // One chip per gate the server expects; a gate with no row is shown as missing.
   let gates = $derived(
-    Object.keys(gateLabels).map(name => ({ name, gate: data?.gates.find(g => g.name === name) })),
+    expectedGateNames(data?.expected_gates).map(name => ({ name, gate: data?.gates.find(g => g.name === name) })),
   )
+  let hasNoChecksRow = $derived((data?.gates ?? []).some(noChecksConfigured))
 
   let failedGates = $derived((data?.gates ?? []).filter(g => g.verdict === 'fail'))
 
@@ -49,12 +49,6 @@
   function shotAlt(shot: MissionHandoffScreenshot): string {
     const detail = [shot.agent, shot.revision ? `@ ${shot.revision.slice(0, 7)}` : ''].filter(Boolean).join(' ')
     return detail ? `Snímka obrazovky, ${detail}` : 'Snímka obrazovky'
-  }
-
-  function gateState(g: MissionHandoffGate): 'pass' | 'fail' | 'info' {
-    if (g.verdict === 'pass') return 'pass'
-    if (g.verdict === 'fail') return 'fail'
-    return 'info'
   }
 </script>
 
@@ -74,22 +68,20 @@
     <div class="row">
       {#each gates as { name, gate: g }}
         {#if g}
-          {@const state = gateState(g)}
-          <span class="gate-chip {state}" class:outdated={!g.current} title={g.content}>
-            {gateLabels[name]}
-            {#if !g.current}zastaralé{:else if g.verdict === 'info' && (name === 'build' || name === 'vet')}nepoužiteľné{:else if state === 'pass'}✓{:else if state === 'fail'}✕{:else}·{/if}
-          </span>
+          {@const chip = gateChip(g)}
+          <span class="gate-chip {chip.cls}" class:outdated={chip.outdated} title={g.content}>{gateLabel(name)} {chip.text}</span>
         {:else}
-          <span class="gate-chip missing">{gateLabels[name]} chýba</span>
+          <span class="gate-chip missing">{gateLabel(name)} chýba</span>
         {/if}
       {/each}
       <span class="checks" class:ok={data.checks_ok}>{data.checks_ok ? 'Kontroly OK' : 'Kontroly neúplné'}</span>
     </div>
+    {#if hasNoChecksRow}<div class="hint">{noChecksHint}</div>{/if}
     {#if failedGates.length}
         <details class="gate-detail" open={failedGates.length === 1}>
           <summary>Detail zlyhaných kontrol</summary>
           {#each failedGates as g (g.name)}
-            <div class="gate-name">{gateLabels[g.name] ?? g.name}</div>
+            <div class="gate-name">{gateLabel(g.name)}</div>
             <pre>{clip(g.content)}</pre>
           {/each}
         </details>
@@ -145,6 +137,7 @@
   .gate-chip.fail { color: #f85149; border-color: #f8514955; }
   .gate-chip.outdated { color: #e3b341; border-color: #e3b34155; }
   .gate-chip.missing { color: #484f58; border-style: dashed; }
+  .hint { font-size: 11px; color: #8b949e; }
   .checks { font-size: 11px; color: #e3b341; }
   .checks.ok { color: #3fb950; }
   .gate-detail { margin: 0; font-size: 12px; }

@@ -11,6 +11,7 @@ function handoff(over: Partial<Handoff> = {}): Handoff {
     revision: 'abcdef1234567890',
     dirty: false,
     dir_kind: 'integration',
+    expected_gates: ['build', 'vet', 'placeholder_scan'],
     gates: [
       { name: 'build', verdict: 'pass', content: 'go build: OK', revision: 'abcdef1234567890', current: true },
       { name: 'vet', verdict: 'fail', content: 'go vet FAILED', revision: 'abcdef1234567890', current: true },
@@ -189,6 +190,79 @@ describe('MissionHandoff', () => {
       try {
         await vi.waitFor(() => expect(target.querySelector('details.gate-detail pre')).not.toBeNull())
         expect(target.querySelector('details.gate-detail pre')!.textContent).toBe('x'.repeat(4000) + '…')
+      } finally {
+        await unmount(app)
+      }
+    })
+  })
+
+  describe('configured gates', () => {
+    const rev = 'abcdef1234567890'
+    const row = (name: string, verdict: string, content = 'out', current = true) => ({ name, verdict, content, revision: rev, current })
+    const chipTexts = (target: HTMLElement) => Array.from(target.querySelectorAll('.gate-chip')).map((c) => c.textContent?.replace(/\s+/g, ' ').trim())
+
+    it('should render one chip per expected gate whatever its name', async () => {
+      const { target, app } = await render(handoff({
+        expected_gates: ['test', 'lint', 'placeholder_scan'],
+        gates: [row('test', 'pass'), row('lint', 'fail', 'lint: 2 issues'), row('placeholder_scan', 'pass')],
+      }))
+      try {
+        await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(3))
+        expect(chipTexts(target)).toEqual(['test ✓', 'lint ✕', 'placeholder ✓'])
+        expect(target.textContent).not.toContain('build')
+        expect(target.querySelector('details.gate-detail pre')?.textContent).toBe('lint: 2 issues')
+      } finally {
+        await unmount(app)
+      }
+    })
+
+    it('should show a configured gate without a recorded row as chýba and an old row as zastaralé', async () => {
+      const { target, app } = await render(handoff({
+        expected_gates: ['test', 'lint', 'build'],
+        gates: [row('test', 'pass'), row('build', 'pass', 'ok', false)],
+      }))
+      try {
+        await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(3))
+        expect(chipTexts(target)).toEqual(['test ✓', 'lint chýba', 'build zastaralé'])
+      } finally {
+        await unmount(app)
+      }
+    })
+
+    it('should render the none-configured checks row as a neutral chip with the hint', async () => {
+      const { target, app } = await render(handoff({
+        expected_gates: ['checks'],
+        gates: [row('checks', 'info', 'checks: none configured (no go.mod)')],
+        checks_ok: false,
+      }))
+      try {
+        await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(1))
+        const chip = target.querySelector('.gate-chip')!
+        expect(chip.textContent).toContain('žiadne kontroly')
+        expect(chip.className).toContain('info')
+        expect(chip.className).not.toMatch(/pass|fail|outdated|missing/)
+        expect(target.textContent).toContain('Pridaj "checks" do .stratus.json (pozri docs/usage/managed-teams.md).')
+        expect(target.querySelector('.checks')?.textContent).toContain('neúplné')
+        expect(target.textContent).not.toContain('nepoužiteľné')
+      } finally {
+        await unmount(app)
+      }
+    })
+
+    it('should keep nepoužiteľné for another not-applicable info gate', async () => {
+      const { target, app } = await render(handoff({ expected_gates: ['typecheck'], gates: [row('typecheck', 'info', 'not applicable')] }))
+      try {
+        await vi.waitFor(() => expect(chipTexts(target)).toEqual(['typecheck nepoužiteľné']))
+      } finally {
+        await unmount(app)
+      }
+    })
+
+    it('should fall back to the three fixed chips when an older server sends no expected_gates', async () => {
+      const { target, app } = await render(handoff({ expected_gates: undefined, gates: [row('build', 'pass')] }))
+      try {
+        await vi.waitFor(() => expect(target.querySelectorAll('.gate-chip')).toHaveLength(3))
+        expect(chipTexts(target)).toEqual(['build ✓', 'vet chýba', 'placeholder chýba'])
       } finally {
         await unmount(app)
       }
