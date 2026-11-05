@@ -30,7 +30,11 @@ func Adapters() map[string]teams.Adapter {
 }
 
 func (a *nativeAdapter) command(root string, args ...string) *exec.Cmd {
-	cmd := exec.Command(a.binary, append(append([]string{}, a.prefix...), args...)...)
+	path := a.binary
+	if resolved, err := resolveBinary(a.runtime, a.binary); err == nil {
+		path = resolved
+	}
+	cmd := exec.Command(path, append(append([]string{}, a.prefix...), args...)...)
 	cmd.Dir = root
 	return cmd
 }
@@ -43,8 +47,8 @@ func (a *nativeAdapter) Preflight(ctx context.Context, root string) teams.Availa
 		out.Reason = "Managed native sessions require owned child-process cleanup; Windows support is not implemented."
 		return out
 	}
-	if _, err := exec.LookPath(a.binary); err != nil {
-		out.Reason = fmt.Sprintf("%s executable is unavailable", a.runtime)
+	if _, err := resolveBinary(a.runtime, a.binary); err != nil {
+		out.Reason = err.Error()
 		return out
 	}
 	if a.runtime == "opencode" {

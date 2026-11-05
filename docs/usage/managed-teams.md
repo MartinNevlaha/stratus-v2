@@ -32,6 +32,23 @@ sa automaticky neopakuje: najprv skontroluj výsledok, pri členovi zvoľ **Obno
 zadaj nový pokyn. Ak je celý tím pozastavený, použi aj **Pokračovať**.
 Natívne požiadavky na oprávnenia sa zobrazia pri členovi na tvoje rozhodnutie.
 
+## Kde Stratus hľadá `codex`, `claude` a `opencode`
+
+Server si spustiteľný súbor runtimu nájde sám v tomto poradí:
+
+1. premenná `STRATUS_CODEX_BIN`, `STRATUS_CLAUDE_CODE_BIN` alebo `STRATUS_OPENCODE_BIN`
+   s **absolútnou** cestou k súboru (neplatná hodnota je chyba, nikdy sa potichu nenahradí),
+2. `PATH` servera,
+3. bežné používateľské inštalácie (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`,
+   `~/.volta/bin`, `~/.cargo/bin`, `~/.nvm/versions/node/*/bin`, pri Claude aj
+   `~/.claude/local`, pri OpenCode `~/.opencode/bin`),
+4. systémové umiestnenia, napríklad `/usr/lib/chatgpt/resources/codex` (Codex nainštalovaný
+   ako desktopová aplikácia nemá `codex` v `PATH`), `/usr/local/bin`, `/opt/homebrew/bin`.
+
+Ak sa runtime nenájde, dashboard ukáže presne, kde sa hľadalo, a ako to opraviť. Server
+spustený z ponuky aplikácií, služby alebo IDE často nemá `PATH` z tvojho terminálu; vtedy
+stačí nastaviť premennú, napríklad `STRATUS_CODEX_BIN=/cesta/k/codex stratus serve`.
+
 ## Pripojenie existujúceho Codex chatu
 
 V pôvodnom Codex desktop chate povedz **„Pripoj tento chat k tímu Stratus.“**
