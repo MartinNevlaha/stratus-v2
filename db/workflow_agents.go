@@ -195,9 +195,14 @@ func (d *DB) ListWorkflowAgents(workflowID string) ([]WorkflowAgent, error) {
 }
 
 // ListStaleWorkflowAgents returns running agents with no activity for longer than threshold.
+// Agents of a completed or aborted workflow are left out: a missed SubagentStop leaves them
+// "running" forever, and nobody can act on them any more.
 func (d *DB) ListStaleWorkflowAgents(threshold time.Duration) ([]WorkflowAgent, error) {
 	cutoff := time.Now().UTC().Add(-threshold).Format("2006-01-02T15:04:05.000Z")
-	rows, err := d.sql.Query(`SELECT `+wfAgentCols+` FROM workflow_agents WHERE status = 'running' AND last_activity < ?`, cutoff)
+	rows, err := d.sql.Query(`SELECT `+wfAgentCols+` FROM workflow_agents
+		WHERE status = 'running' AND last_activity < ?
+		  AND workflow_id NOT IN (
+		    SELECT id FROM workflows WHERE phase = 'complete' OR JSON_EXTRACT(state_json, '$.aborted') IS 1)`, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("list stale workflow agents: %w", err)
 	}

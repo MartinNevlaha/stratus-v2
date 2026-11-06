@@ -61,3 +61,48 @@ func TestCheckTokenBudget_AlertsAtEightyPercentOnlyWhenEnabled(t *testing.T) {
 		t.Fatalf("under 80%% should not alert, got %+v", got)
 	}
 }
+
+func TestCheckStaleWorkflowAgents_SkipsAgentsOfFinishedWorkflows(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer database.Close()
+	orchestrationFor(t, database, "wf-done")
+	orchestrationFor(t, database, "wf-live")
+	_ = database.StartWorkflowAgent(db.WorkflowAgent{ID: "orphan", WorkflowID: "wf-done", AgentType: "delivery-backend-engineer"})
+	_ = database.StartWorkflowAgent(db.WorkflowAgent{ID: "stuck", WorkflowID: "wf-live", AgentType: "delivery-backend-engineer"})
+	old := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
+	if _, err := database.SQL().Exec(`UPDATE workflow_agents SET last_activity = ?`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.SQL().Exec(`UPDATE workflows SET phase = 'complete' WHERE id = 'wf-done'`); err != nil {
+		t.Fatal(err)
+	}
+
+	alerts := checkStaleWorkflowAgents(database, config.GuardianConfig{}, "en")
+	if len(alerts) != 1 || alerts[0].Metadata["agent_id"] != "stuck" {
+		t.Fatalf("alerts = %+v, want only the agent of the live workflow", alerts)
+	}
+}
+
+func TestCheckStaleWorkflowAgents_SkipsAgentsOfAbortedWorkflows(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer database.Close()
+	orchestrationFor(t, database, "wf-aborted")
+	_ = database.StartWorkflowAgent(db.WorkflowAgent{ID: "orphan", WorkflowID: "wf-aborted", AgentType: "delivery-backend-engineer"})
+	old := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
+	if _, err := database.SQL().Exec(`UPDATE workflow_agents SET last_activity = ?`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.SQL().Exec(`UPDATE workflows SET state_json = json_set(state_json, '$.aborted', 1) WHERE id = 'wf-aborted'`); err != nil {
+		t.Fatal(err)
+	}
+
+	if alerts := checkStaleWorkflowAgents(database, config.GuardianConfig{}, "en"); len(alerts) != 0 {
+		t.Fatalf("alerts = %+v, want none for an aborted workflow", alerts)
+	}
+}
