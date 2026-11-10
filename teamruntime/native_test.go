@@ -54,6 +54,28 @@ func TestNativeSessions_UseCurrentMCPAndInheritCapability(t *testing.T) {
 	}
 }
 
+// A forced Claude --permission-mode or Codex approvalsReviewer overrides the
+// user's native choice (Claude permissions.defaultMode "auto", Codex
+// approvals_reviewer "auto_review"), so every escalation became a dashboard
+// approval. Codex keeps its workspace-write sandbox and on-request policy.
+func TestNativeSessions_InheritUserApprovalMode(t *testing.T) {
+	for _, runtime := range []string{"claude-code", "codex"} {
+		t.Run(runtime, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			t.Setenv("STRATUS_FIXTURE_PERMISSION_MODE", "1")
+			s, err := fixtureAdapter(runtime).Open(ctx, fixtureSpec(t, runtime), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if _, err = s.Submit(ctx, teams.Input{ID: "first", Text: "first"}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestNativeSessions_TwoTurnsAndExplicitApproval(t *testing.T) {
 	for _, runtime := range []string{"codex", "claude-code", "opencode"} {
 		for _, allow := range []bool{false, true} {
@@ -291,6 +313,13 @@ func TestNativeProcessFixture(t *testing.T) {
 	if os.Getenv("STRATUS_FIXTURE_MCP") == "1" && os.Getenv("STRATUS_TEAM_TOKEN") != "fixture-secret" {
 		os.Exit(12)
 	}
+	if os.Getenv("STRATUS_FIXTURE_PERMISSION_MODE") == "1" && runtime == "claude-code" {
+		for _, a := range os.Args {
+			if a == "--permission-mode" || strings.HasPrefix(a, "--permission-mode=") {
+				os.Exit(36)
+			}
+		}
+	}
 	if os.Getenv("STRATUS_FIXTURE_MCP") == "1" && runtime == "claude-code" {
 		var config map[string]any
 		for i, a := range os.Args {
@@ -346,6 +375,11 @@ func TestNativeProcessFixture(t *testing.T) {
 			case "model/list":
 				reply(map[string]any{"data": []any{map[string]any{"id": "gpt-test", "model": "gpt-test", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}}}}})
 			case "thread/start", "thread/resume":
+				if os.Getenv("STRATUS_FIXTURE_PERMISSION_MODE") == "1" {
+					if _, set := p["approvalsReviewer"]; set || p["approvalPolicy"] != "on-request" || p["sandbox"] != "workspace-write" {
+						os.Exit(37)
+					}
+				}
 				if os.Getenv("STRATUS_FIXTURE_MCP") == "1" {
 					config := obj(p, "config")
 					if config["mcp_servers.stratus.command"] != "/tmp/current-stratus" || os.Getenv("STRATUS_TEAM_API_BASE") != "http://127.0.0.1:31415" {

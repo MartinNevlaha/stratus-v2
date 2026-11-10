@@ -42,7 +42,7 @@ func (a *nativeAdapter) openStream(ctx context.Context, spec teams.SessionSpec, 
 		if err := a.claudeAuthenticated(ctx, spec); err != nil {
 			return nil, err
 		}
-		args = []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio", "--permission-mode", "manual", "--setting-sources", "user,project,local"}
+		args = []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "stdio", "--setting-sources", "user,project,local"}
 		if spec.Profile.Model != "" {
 			args = append(args, "--model", spec.Profile.Model)
 		}
@@ -128,7 +128,7 @@ func (a *nativeAdapter) openStream(ctx context.Context, spec teams.SessionSpec, 
 			if err = validateModel(s.models, spec.Profile); err != nil {
 				return nil, err
 			}
-			params := object{"cwd": spec.ProjectRoot, "model": spec.Profile.Model, "developerInstructions": spec.Instructions, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "workspace-write", "config": object{"model_reasoning_effort": spec.Profile.Effort}}
+			params := object{"cwd": spec.ProjectRoot, "model": spec.Profile.Model, "developerInstructions": spec.Instructions, "approvalPolicy": "on-request", "sandbox": "workspace-write", "config": object{"model_reasoning_effort": spec.Profile.Effort}}
 			if spec.MCPBinary != "" {
 				config := obj(params, "config")
 				config["mcp_servers.stratus.command"] = spec.MCPBinary

@@ -75,7 +75,10 @@ MCP entries remain enabled. `STRATUS_TEAM_TOKEN` and `STRATUS_TEAM_API_BASE`
 reach the child MCP process through its environment, never through prompts.
 Claude's inherited `CLAUDECODE` nesting marker is removed for the owned SDK-style
 process. Native permission checks remain enabled; approvals are single-use and
-never persisted as permission rules.
+never persisted as permission rules. Stratus does not force an approval mode:
+Claude starts in the user's `permissions.defaultMode` (for example `auto`), and
+Codex keeps the `workspace-write` sandbox with `on-request` approvals while its
+reviewer comes from `approvals_reviewer` (for example `auto_review`).
 
 The current approval form supports allow/deny. Native structured questions or
 other unsupported input requests stop with an actionable error. There is no
